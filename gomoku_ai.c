@@ -15,8 +15,7 @@
 #include <stdbool.h>
 #include "gomoku.h"
 
-int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y)
-{
+int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     static int pre[2] = {
         // 直前の石の場所を覚えておくための変数 適当に初期化
         BOARD_SIZE / 2,
