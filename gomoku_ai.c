@@ -14,6 +14,10 @@
 #include <time.h>
 #include <stdbool.h>
 #include "gomoku.h"
+#include "logics/Alpha_Beta.h"
+#include "evaluation_function.h"
+#include "logics/Iterative_Deepening.h"
+#include "logics/Threat_Space_Search.h"
 
 
 int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y)

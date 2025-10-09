@@ -1,0 +1,4 @@
+#ifdef EVALUATUION_FANCTION_H
+#define EVALUATUION_FANCTION_H
+//ここに関数を書く
+#endif
