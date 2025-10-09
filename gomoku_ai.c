@@ -15,6 +15,7 @@
 #include <stdbool.h>
 #include "gomoku.h"
 
+
 int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y)
 {
     static int pre[2] = {
