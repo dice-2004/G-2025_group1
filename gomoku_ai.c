@@ -19,6 +19,45 @@
 #include "logics/main_engine.h"
 #include "logics/TSS.h"
 
+// ビットマップのサイズ定義
+#define N BOARD_SIZE
+// 最大ビットマップインデント
+#define TOTAL (N * N)
+// 64bit*要素数
+#define WORDS ((TOTAL + 63) / 64)
+
+// ビットマップ構造体
+typedef struct {
+    uint64_t black[WORDS];
+    uint64_t white[WORDS];
+    uint64_t fill[WORDS];
+} Orientation;
+
+// 四方向ビットマップ
+typedef struct {
+    Orientation row;
+    Orientation col;
+    Orientation diag_dr;
+    Orientation diag_dl;
+} AllMaps;
+
+// 斜めビットテーブルとインデックスの変換表
+static int pos_dr[N][N];
+static int pos_dl[N][N];
+
+// 斜めビットテーブル初期化フラグ　実初期化:0, 初期化済:1
+static int pos_dr_table_is_init = 0;
+static int pos_dl_table_is_init = 0;
+
+// プロトタイプ宣言
+static inline void setbit(uint64_t arr[], int pos);
+static inline int getbit(const uint64_t arr[], int pos);
+static inline int pos_row(int x, int y);
+static inline int pos_col(int x, int y);
+static void init_pos_tables(void);
+static inline void build_maps(const int board[][BOARD_SIZE], AllMaps *maps);
+
+
 int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     static int pre[2] = {
         // 直前の石の場所を覚えておくための変数 適当に初期化
@@ -29,134 +68,49 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     int count = 0;
 
      /* 配列構成:
-         - board を直列化して pos=0..TOTAL-1 に割り当て
-         - pos=0 が最初の uint64_t の MSB (bit 63) に対応
-         - 各向き(row/col/diag_dr/diag_dl) は Orientation 構造体で保持
-         - Orientation は uint64_t black[WORDS], white[WORDS], occ[WORDS]
+         - board を直列化したビットマップを4方向分保持
+         - 各ビットマップは uint64_t 配列で保持
+         - 配列の要素数は (TOTAL+63)/64 個
+         - ビットマップ変換表（保存版は pos.txt 参照）
      */
+    // 変数スコープ限定
     {
-        enum { N = BOARD_SIZE };
-        enum { TOTAL = N * N };
-        enum { WORDS = (TOTAL + 63) / 64 };
+        AllMaps maps_local;
+        build_maps(board, &maps_local);
 
-        typedef struct {
-            uint64_t black[WORDS];
-            uint64_t white[WORDS];
-            uint64_t occ[WORDS];
-        } Orientation;
-
-        static struct {
-            Orientation row;
-            Orientation col;
-            Orientation diag_dr;
-            Orientation diag_dl;
-        } maps;
-
-        /* 0 クリア */
-        memset(&maps, 0, sizeof(maps));
-
-        /* ビットをセットするマクロ: pos は 0..TOTAL-1 の直列位置。pos=0 が最初の単語の MSB に対応 */
-        #define SETBIT(arr, pos) do { size_t __wi = (pos) / 64; size_t __bi = (pos) % 64; arr[__wi] |= (uint64_t)1ULL << (63 - __bi); } while(0)
-
-        int p = 0;
-        /* row-major: board[y][x] の順に直列化（y=0,x=0 が pos=0） */
-        p = 0;
-        for (int y = 0; y < N; ++y) {
-            for (int x = 0; x < N; ++x) {
-                int v = board[y][x];
-                if (v == STONE_BLACK) SETBIT(maps.row.black, p);
-                if (v == STONE_WHITE) SETBIT(maps.row.white, p);
-                if (v != STONE_SPACE) SETBIT(maps.row.occ, p);
-                ++p;
-            }
-        }
-
-        /* column-major: x major */
-        p = 0;
-        for (int x = 0; x < N; ++x) {
-            for (int y = 0; y < N; ++y) {
-                int v = board[y][x];
-                if (v == STONE_BLACK) SETBIT(maps.col.black, p);
-                if (v == STONE_WHITE) SETBIT(maps.col.white, p);
-                if (v != STONE_SPACE) SETBIT(maps.col.occ, p);
-                ++p;
-            }
-        }
-
-        /* diag down-right: x - y = k, k=-(N-1)..(N-1) */
-        p = 0;
-        for (int k = -(N - 1); k <= (N - 1); ++k) {
-            for (int y = 0; y < N; ++y) {
-                int x = y + k;
-                if (x >= 0 && x < N) {
-                    int v = board[y][x];
-                    if (v == STONE_BLACK) SETBIT(maps.diag_dr.black, p);
-                    if (v == STONE_WHITE) SETBIT(maps.diag_dr.white, p);
-                    if (v != STONE_SPACE) SETBIT(maps.diag_dr.occ, p);
-                    ++p;
-                }
-            }
-        }
-
-        /* diag down-left: x + y = k, k=0..2*(N-1) */
-        p = 0;
-        for (int k = 0; k <= 2 * (N - 1); ++k) {
-            int y0 = (k - (N - 1) > 0) ? (k - (N - 1)) : 0;
-            int y1 = (k < (N - 1)) ? k : (N - 1);
-            for (int y = y0; y <= y1; ++y) {
-                int x = k - y;
-                if (x >= 0 && x < N) {
-                    int v = board[y][x];
-                    if (v == STONE_BLACK) SETBIT(maps.diag_dl.black, p);
-                    if (v == STONE_WHITE) SETBIT(maps.diag_dl.white, p);
-                    if (v != STONE_SPACE) SETBIT(maps.diag_dl.occ, p);
-                    ++p;
-                }
-            }
-        }
-
-        /* 出力用バッファ（static） */
+        // ビットマップ表示（全方向）
+#define DEBUG_BITMAPS 1
         static char outbuf[TOTAL + 1];
         outbuf[TOTAL] = '\0';
-
-        /* ヘルパー: uint64_t 配列から pos を取り出す */
-        #define GETBIT(arr, pos) ( ( (arr)[(pos) / 64] >> (63 - ((pos) % 64)) ) & 1ULL )
-
-        /* row */
-        for (int i = 0; i < TOTAL; ++i) outbuf[i] = GETBIT(maps.row.black, i) ? '1' : '0';
+        // row-major
+        for (int i = 0; i < TOTAL; ++i) outbuf[i] = getbit(maps_local.row.black, i) ? '1' : '0';
         printf("[Bitmap row-major] black=%s\n", outbuf);
-        for (int i = 0; i < TOTAL; ++i) outbuf[i] = GETBIT(maps.row.white, i) ? '1' : '0';
+        for (int i = 0; i < TOTAL; ++i) outbuf[i] = getbit(maps_local.row.white, i) ? '1' : '0';
         printf("[Bitmap row-major] white=%s\n", outbuf);
-        for (int i = 0; i < TOTAL; ++i) outbuf[i] = GETBIT(maps.row.occ, i) ? '1' : '0';
-        printf("[Bitmap row-major] occ  =%s\n", outbuf);
-
-        /* col */
-        for (int i = 0; i < TOTAL; ++i) outbuf[i] = GETBIT(maps.col.black, i) ? '1' : '0';
+        for (int i = 0; i < TOTAL; ++i) outbuf[i] = getbit(maps_local.row.fill, i) ? '1' : '0';
+        printf("[Bitmap row-major] fill =%s\n", outbuf);
+        // col-major
+        for (int i = 0; i < TOTAL; ++i) outbuf[i] = getbit(maps_local.col.black, i) ? '1' : '0';
         printf("[Bitmap col-major] black=%s\n", outbuf);
-        for (int i = 0; i < TOTAL; ++i) outbuf[i] = GETBIT(maps.col.white, i) ? '1' : '0';
+        for (int i = 0; i < TOTAL; ++i) outbuf[i] = getbit(maps_local.col.white, i) ? '1' : '0';
         printf("[Bitmap col-major] white=%s\n", outbuf);
-        for (int i = 0; i < TOTAL; ++i) outbuf[i] = GETBIT(maps.col.occ, i) ? '1' : '0';
-        printf("[Bitmap col-major] occ  =%s\n", outbuf);
-
-        /* diag DR */
-        for (int i = 0; i < TOTAL; ++i) outbuf[i] = GETBIT(maps.diag_dr.black, i) ? '1' : '0';
-        printf("[Bitmap diag-DR   ] black=%s\n", outbuf);
-        for (int i = 0; i < TOTAL; ++i) outbuf[i] = GETBIT(maps.diag_dr.white, i) ? '1' : '0';
-        printf("[Bitmap diag-DR   ] white=%s\n", outbuf);
-        for (int i = 0; i < TOTAL; ++i) outbuf[i] = GETBIT(maps.diag_dr.occ, i) ? '1' : '0';
-        printf("[Bitmap diag-DR   ] occ  =%s\n", outbuf);
-
-        /* diag DL */
-        for (int i = 0; i < TOTAL; ++i) outbuf[i] = GETBIT(maps.diag_dl.black, i) ? '1' : '0';
-        printf("[Bitmap diag-DL   ] black=%s\n", outbuf);
-        for (int i = 0; i < TOTAL; ++i) outbuf[i] = GETBIT(maps.diag_dl.white, i) ? '1' : '0';
-        printf("[Bitmap diag-DL   ] white=%s\n", outbuf);
-        for (int i = 0; i < TOTAL; ++i) outbuf[i] = GETBIT(maps.diag_dl.occ, i) ? '1' : '0';
-        printf("[Bitmap diag-DL   ] occ  =%s\n", outbuf);
-
-        /* マクロの後始末 */
-        #undef SETBIT
-        #undef GETBIT
+        for (int i = 0; i < TOTAL; ++i) outbuf[i] = getbit(maps_local.col.fill, i) ? '1' : '0';
+        printf("[Bitmap col-major] fill =%s\n", outbuf);
+        // diag down-right
+        for (int i = 0; i < TOTAL; ++i) outbuf[i] = getbit(maps_local.diag_dr.black, i) ? '1' : '0';
+        printf("[Bitmap diag-DR  ] black=%s\n", outbuf);
+        for (int i = 0; i < TOTAL; ++i) outbuf[i] = getbit(maps_local.diag_dr.white, i) ? '1' : '0';
+        printf("[Bitmap diag-DR  ] white=%s\n", outbuf);
+        for (int i = 0; i < TOTAL; ++i) outbuf[i] = getbit(maps_local.diag_dr.fill, i) ? '1' : '0';
+        printf("[Bitmap diag-DR  ] fill =%s\n", outbuf);
+        // diag down-left
+        for (int i = 0; i < TOTAL; ++i) outbuf[i] = getbit(maps_local.diag_dl.black, i) ? '1' : '0';
+        printf("[Bitmap diag-DL  ] black=%s\n", outbuf);
+        for (int i = 0; i < TOTAL; ++i) outbuf[i] = getbit(maps_local.diag_dl.white, i) ? '1' : '0';
+        printf("[Bitmap diag-DL  ] white=%s\n", outbuf);
+        for (int i = 0; i < TOTAL; ++i) outbuf[i] = getbit(maps_local.diag_dl.fill, i) ? '1' : '0';
+        printf("[Bitmap diag-DL  ] fill =%s\n", outbuf);
+        /* build_maps を呼べば各テンプレートマッチや評価ルーチンで maps_local を参照してください */
     }
 
     // コンピュータが最初の1手の場合は，(7, 7)に石を置く
@@ -203,4 +157,114 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     pre[1] = *pos_x;
 
     return 0;
+}
+
+// ビットマップにビットセット
+static inline void setbit(uint64_t arr[], int pos) {
+    size_t wi = pos / 64;
+    size_t bi = pos % 64;
+    arr[wi] |= (uint64_t)1ULL << (63 - bi);
+}
+
+// ビットマップからビット取得
+static inline int getbit(const uint64_t arr[], int pos) {
+    return (int)((arr[pos / 64] >> (63 - (pos % 64))) & 1ULL);
+}
+
+// 縦横のインデックス変換ヘルパー関数
+static inline int pos_row(int x, int y) { return y * N + x; }
+static inline int pos_col(int x, int y) { return x * N + y; }
+
+// 斜めビットテーブルto インデックス変換表初期化ルーチン
+static void init_pos_tables(void) {
+    if (pos_dr_table_is_init && pos_dl_table_is_init) return;
+    int p = 0;
+    for (int k = -(N - 1); k <= (N - 1); ++k) {
+        for (int y = 0; y < N; ++y) {
+            int x = y + k;
+            if (x >= 0 && x < N) {
+                pos_dr[x][y] = p;
+                ++p;
+            }
+        }
+    }
+    pos_dr_table_is_init = 1;
+
+    p = 0;
+    for (int k = 0; k <= 2 * (N - 1); ++k) {
+        // 参考三項演算子
+        int y0 = (k - (N - 1) > 0) ? (k - (N - 1)) : 0;
+        int y1 = (k < (N - 1)) ? k : (N - 1);
+        for (int y = y0; y <= y1; ++y) {
+            int x = k - y;
+            if (x >= 0 && x < N) {
+                pos_dl[x][y] = p;
+                ++p;
+            }
+        }
+    }
+    pos_dl_table_is_init = 1;
+}
+// ファイル内のみ呼び出し可能なビットマップ生成ルーチン
+static inline void build_maps(const int board[][BOARD_SIZE], AllMaps *maps) {
+
+    memset(maps, 0, sizeof(AllMaps));
+    init_pos_tables();
+
+    // 横
+    int p;
+    p = 0;
+    for (int y = 0; y < N; ++y) {
+        for (int x = 0; x < N; ++x) {
+            int v = board[y][x];
+            if (v == STONE_BLACK) setbit(maps->row.black, p);
+            if (v == STONE_WHITE) setbit(maps->row.white, p);
+            if (v != STONE_SPACE) setbit(maps->row.fill, p);
+            ++p;
+        }
+    }
+
+    // 縦
+    p = 0;
+    for (int x = 0; x < N; ++x) {
+        for (int y = 0; y < N; ++y) {
+            int v = board[y][x];
+            if (v == STONE_BLACK) setbit(maps->col.black, p);
+            if (v == STONE_WHITE) setbit(maps->col.white, p);
+            if (v != STONE_SPACE) setbit(maps->col.fill, p);
+            ++p;
+        }
+    }
+
+    // 右斜め
+    p = 0;
+    for (int k = -(N - 1); k <= (N - 1); ++k) {
+        for (int y = 0; y < N; ++y) {
+            int x = y + k;
+            if (x >= 0 && x < N) {
+                int v = board[y][x];
+                if (v == STONE_BLACK) setbit(maps->diag_dr.black, p);
+                if (v == STONE_WHITE) setbit(maps->diag_dr.white, p);
+                if (v != STONE_SPACE) setbit(maps->diag_dr.fill, p);
+                ++p;
+            }
+        }
+    }
+
+    // 左斜め
+    p = 0;
+    for (int k = 0; k <= 2 * (N - 1); ++k) {
+        int y0 = (k - (N - 1) > 0) ? (k - (N - 1)) : 0;
+        int y1 = (k < (N - 1)) ? k : (N - 1);
+        for (int y = y0; y <= y1; ++y) {
+            int x = k - y;
+            if (x >= 0 && x < N) {
+                int v = board[y][x];
+                if (v == STONE_BLACK) setbit(maps->diag_dl.black, p);
+                if (v == STONE_WHITE) setbit(maps->diag_dl.white, p);
+                if (v != STONE_SPACE) setbit(maps->diag_dl.fill, p);
+                ++p;
+            }
+        }
+    }
 }
