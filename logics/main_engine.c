@@ -9,3 +9,6 @@
 #define WIN_SCORE 1000000000
 #define LOSE_SCORE -100000
 
+/*評価関数*/
+/*αβ探索*/
+/*反復深化*/
