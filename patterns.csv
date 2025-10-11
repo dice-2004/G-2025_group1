@@ -1,0 +1,13 @@
+# Gomoku AI Pattern Definition File
+# Format: pattern_name,score,description
+# Pattern codes: 0=space, 1=my_stone, 2=opponent, -=any, X=edge
+#
+# パターン名,スコア,説明
+FIVE,100000,五連（勝利確定）
+OPEN_FOUR,50000,開いた四（次で勝ち確定）
+FOUR,10000,四連（片側ブロック）
+OPEN_THREE,5000,開いた三（攻撃的）
+THREE,1000,三連（片側ブロック）
+OPEN_TWO,500,開いた二
+TWO,100,二連
+ONE,10,一つ

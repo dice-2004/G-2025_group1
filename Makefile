@@ -1,17 +1,107 @@
-# Makefile
+# Makefile for Gomoku AI Project v3.3
 
-# プログラム名とオブジェクトファイル名
+# プログラム名
 PROGRAM = gomoku
-OBJS = gomoku.o gomoku_ai.o .libgomoku.o
 
+# オブジェクトファイル（v3.3 完全版）
+OBJS = .libgomoku.o gomoku.o gomoku_ai.o config.o \
+       logics/evaluation.o logics/transposition.o logics/opening_book.o \
+       logics/learning.o logics/main_engine.o logics/TSS.o logics/debug_utils.o
+
+# コンパイラ設定
 CC = gcc
-CFLAGS = -Wall -O3 
+CFLAGS = -Wall -O2 -std=c99
+LDFLAGS = -lm
 
-all:	$(PROGRAM)
+# デフォルトターゲット
+all: $(PROGRAM)
 
-$(PROGRAM):	$(OBJS)
+# 実行ファイル生成
+$(PROGRAM): $(OBJS)
+	@echo "Linking $(PROGRAM)..."
 	$(CC) $(OBJS) $(LDFLAGS) -o $(PROGRAM)
+	@echo "Build completed successfully!"
+	@echo "Executable: $(PROGRAM)"
 
+# 個別コンパイルルール
+.libgomoku.o: .libgomoku.c gomoku.h
+	@echo "Compiling .libgomoku.c..."
+	$(CC) $(CFLAGS) -c .libgomoku.c -o .libgomoku.o
+
+gomoku.o: gomoku.c gomoku.h
+	@echo "Compiling gomoku.c..."
+	$(CC) $(CFLAGS) -c gomoku.c -o gomoku.o
+
+gomoku_ai.o: gomoku_ai.c gomoku_ai.h gomoku.h config.h
+	@echo "Compiling gomoku_ai.c..."
+	$(CC) $(CFLAGS) -c gomoku_ai.c -o gomoku_ai.o
+
+config.o: config.c config.h logics/learning.h
+	@echo "Compiling config.c..."
+	$(CC) $(CFLAGS) -c config.c -o config.o
+
+logics/evaluation.o: logics/evaluation.c logics/evaluation.h gomoku.h gomoku_ai.h
+	@echo "Compiling logics/evaluation.c..."
+	$(CC) $(CFLAGS) -c logics/evaluation.c -o logics/evaluation.o
+
+logics/transposition.o: logics/transposition.c logics/transposition.h gomoku.h gomoku_ai.h
+	@echo "Compiling logics/transposition.c..."
+	$(CC) $(CFLAGS) -c logics/transposition.c -o logics/transposition.o
+
+logics/opening_book.o: logics/opening_book.c logics/opening_book.h gomoku.h gomoku_ai.h
+	@echo "Compiling logics/opening_book.c..."
+	$(CC) $(CFLAGS) -c logics/opening_book.c -o logics/opening_book.o
+
+logics/learning.o: logics/learning.c logics/learning.h gomoku.h gomoku_ai.h
+	@echo "Compiling logics/learning.c..."
+	$(CC) $(CFLAGS) -c logics/learning.c -o logics/learning.o
+
+logics/main_engine.o: logics/main_engine.c logics/main_engine.h gomoku.h gomoku_ai.h config.h
+	@echo "Compiling logics/main_engine.c..."
+	$(CC) $(CFLAGS) -c logics/main_engine.c -o logics/main_engine.o
+
+logics/TSS.o: logics/TSS.c logics/TSS.h gomoku.h gomoku_ai.h
+	@echo "Compiling logics/TSS.c..."
+	$(CC) $(CFLAGS) -c logics/TSS.c -o logics/TSS.o
+
+logics/debug_utils.o: logics/debug_utils.c logics/debug_utils.h gomoku.h gomoku_ai.h config.h
+	@echo "Compiling logics/debug_utils.c..."
+	$(CC) $(CFLAGS) -c logics/debug_utils.c -o logics/debug_utils.o
+
+# クリーンアップ
 .PHONY: clean
 clean:
+	@echo "Cleaning up..."
 	$(RM) $(PROGRAM) $(OBJS)
+	$(RM) gomoku.exe *.o
+	$(RM) logics/*.o
+	@echo "Clean completed."
+
+# 完全クリーン（学習データも削除）
+.PHONY: distclean
+distclean: clean
+	@echo "Removing learning data..."
+	$(RM) learning_data.dat
+	@echo "Full clean completed."
+
+# リビルド
+.PHONY: rebuild
+rebuild: clean all
+
+# ヘルプ
+.PHONY: help
+help:
+	@echo "Gomoku AI Build System v3.3"
+	@echo "============================"
+	@echo "Usage:"
+	@echo "  make all       - Build the program"
+	@echo "  make clean     - Remove all build artifacts"
+	@echo "  make distclean - Remove build artifacts and learning data"
+	@echo "  make rebuild   - Clean and rebuild"
+	@echo "  make help      - Show this help message"
+	@echo ""
+	@echo "Features:"
+	@echo "  - Learning system (PRACTICE/PRODUCTION mode)"
+	@echo "  - Iterative Deepening with time management"
+	@echo "  - Debug utilities (DEBUG_LEVEL 0-3)"
+	@echo "  - Configurable via config.txt"

@@ -1,0 +1,346 @@
+================================================================================
+五目並べAI - 学習モード実行例
+================================================================================
+
+このファイルは、学習モード（PRACTICE）でAIを実行した際の
+典型的な出力例を示します。
+
+================================================================================
+【1】初回起動時の出力
+================================================================================
+
+[Config] Loaded from config.txt
+  SEARCH_DEPTH = 4
+  TT_SIZE = 262144 entries
+  DEBUG_MODE = 0
+  TIMEOUT_MS = 10000
+  LEARNING_MODE = PRACTICE (練習モード)
+  ITERATIVE_DEEPENING = ON
+  DEBUG_LEVEL = 1 (基本情報)
+  ID_TIME_THRESHOLD = 0.80 (80%)
+
+[Patterns] Loaded 20 patterns from patterns_extended.csv
+  FIVE = 100000
+  OPEN_FOUR = 50000
+  FOUR_FOUR = 45000
+  FOUR_THREE = 40000
+  FOUR = 10000
+  BROKEN_FOUR = 9500
+  OPEN_THREE_THREE = 9000
+  OPEN_THREE = 5000
+  BROKEN_THREE = 4500
+  THREE_THREE = 3500
+  THREE = 1000
+  OPEN_TWO_TWO = 800
+  OPEN_TWO = 500
+  BROKEN_TWO = 400
+  TWO_TWO = 200
+  TWO = 100
+  ONE = 10
+  CENTER = 50
+  NEAR_ENEMY = 30
+  CONNECTION = 20
+
+[OpeningBook] Loaded 15 moves from opening_book.csv
+
+[Learning] Loading learning data...
+[Learning] No previous data found. Starting fresh.
+[Learning] Stats: 0 games (W:0 L:0 D:0) - Win rate: 0.00%
+[Learning] Mode: PRACTICE (練習モード - 学習する)
+
+========================================
+AI初期化完了 - 対戦準備OK
+========================================
+
+
+================================================================================
+【2】対戦中の出力（1試合目 - 勝利）
+================================================================================
+
+対戦開始...
+
+--- あなたの番 ---
+座標を入力してください (x y): 7 7
+[Game] 黒石を (7, 7) に配置
+
+[AI] Starting search...
+[OpeningBook] Using opening move: (7, 8)
+[AI] Opening book move selected
+[AI] 白石を (7, 8) に配置
+
+--- あなたの番 ---
+座標を入力してください (x y): 8 8
+
+[AI] Starting search...
+[AI] Mode: Iterative Deepening
+
+========================================
+[Iterative Deepening] Starting search
+  Max depth: 4
+  Time limit: 10000 ms
+  Time threshold: 80%
+========================================
+
+[ID] Depth 1 completed: (6, 7) score=520 time=0.008s (elapsed: 8ms / 10000ms = 0.1%)
+[ID] Depth 2 completed: (6, 7) score=1150 time=0.038s (elapsed: 46ms / 10000ms = 0.5%)
+[ID] Depth 3 completed: (6, 7) score=1680 time=0.195s (elapsed: 241ms / 10000ms = 2.4%)
+[ID] Depth 4 completed: (6, 7) score=2240 time=1.120s (elapsed: 1361ms / 10000ms = 13.6%)
+
+========================================
+[ID] Search completed
+  Completed depth: 4
+  Best move: (6, 7)
+  Best score: 2240
+  Total time: 1.361 sec
+========================================
+
+[AI] Best move: (6, 7) with score 2240
+[AI] 白石を (6, 7) に配置
+
+... (対戦続行) ...
+
+[Game] 黒の勝利！
+
+========================================
+[Learning] Game finished! Result: WIN
+========================================
+[Learning] Analyzing game... 25 moves recorded
+[Learning] Updating pattern scores based on victory...
+
+Pattern score changes:
+  FIVE: 100000 → 100000 (変化なし - 最大値)
+  OPEN_FOUR: 50000 → 50500 (+1.00%)
+  FOUR: 10000 → 10100 (+1.00%)
+  BROKEN_FOUR: 9500 → 9595 (+1.00%)
+  OPEN_THREE: 5000 → 5050 (+1.00%)
+  THREE: 1000 → 1010 (+1.00%)
+  OPEN_TWO: 500 → 505 (+1.00%)
+  TWO: 100 → 101 (+1.00%)
+
+[Learning] Total games: 1 (W:1 L:0 D:0)
+[Learning] Win rate: 100.00%
+[Learning] Learning data saved to learning_data.dat
+========================================
+
+
+================================================================================
+【3】対戦中の出力（2試合目 - 敗北）
+================================================================================
+
+対戦開始...
+
+... (対戦進行) ...
+
+[Game] 白の勝利！
+
+========================================
+[Learning] Game finished! Result: LOSS
+========================================
+[Learning] Analyzing game... 31 moves recorded
+[Learning] Updating pattern scores based on defeat...
+
+Pattern score changes:
+  OPEN_FOUR: 50500 → 49490 (-2.00%)
+  FOUR: 10100 → 9898 (-2.00%)
+  BROKEN_FOUR: 9595 → 9403 (-2.00%)
+  OPEN_THREE: 5050 → 4949 (-2.00%)
+  THREE: 1010 → 990 (-2.00%)
+  OPEN_TWO: 505 → 495 (-2.00%)
+  TWO: 101 → 99 (-2.00%)
+
+[Learning] Total games: 2 (W:1 L:1 D:0)
+[Learning] Win rate: 50.00%
+[Learning] Learning data saved to learning_data.dat
+========================================
+
+
+================================================================================
+【4】10試合後の統計情報
+================================================================================
+
+========================================
+[Learning] Current Statistics
+========================================
+Total Games: 10
+  Wins: 6 (60.0%)
+  Losses: 4 (40.0%)
+  Draws: 0 (0.0%)
+Win Rate: 60.00%
+
+Pattern Score Evolution:
+  Initial → Current (Change)
+  --------------------------------
+  FIVE:           100000 → 100000 (+0.00%)
+  OPEN_FOUR:      50000 → 51200 (+2.40%)
+  FOUR_FOUR:      45000 → 46080 (+2.40%)
+  FOUR:           10000 → 10240 (+2.40%)
+  BROKEN_FOUR:    9500 → 9728 (+2.40%)
+  OPEN_THREE:     5000 → 5120 (+2.40%)
+  BROKEN_THREE:   4500 → 4608 (+2.40%)
+  THREE:          1000 → 1024 (+2.40%)
+  OPEN_TWO:       500 → 512 (+2.40%)
+  TWO:            100 → 102 (+2.40%)
+
+  (その他のパターンも同様に調整される)
+========================================
+
+
+================================================================================
+【5】100試合後の統計情報（学習が進んだ状態）
+================================================================================
+
+========================================
+[Learning] Current Statistics
+========================================
+Total Games: 100
+  Wins: 72 (72.0%)
+  Losses: 25 (25.0%)
+  Draws: 3 (3.0%)
+Win Rate: 72.00%
+
+Pattern Score Evolution:
+  Initial → Current (Change)
+  --------------------------------
+  FIVE:           100000 → 100000 (+0.00%)
+  OPEN_FOUR:      50000 → 58500 (+17.00%)
+  FOUR_FOUR:      45000 → 52650 (+17.00%)
+  FOUR:           10000 → 11700 (+17.00%)
+  BROKEN_FOUR:    9500 → 11115 (+17.00%)
+  OPEN_THREE:     5000 → 5850 (+17.00%)
+  BROKEN_THREE:   4500 → 5265 (+17.00%)
+  THREE:          1000 → 1170 (+17.00%)
+  OPEN_TWO:       500 → 585 (+17.00%)
+  TWO:            100 → 117 (+17.00%)
+
+[Analysis] AI has learned:
+  - More aggressive use of OPEN_FOUR patterns
+  - Better evaluation of complex patterns (FOUR_FOUR, FOUR_THREE)
+  - Improved positional judgment
+  - Win rate improved: 0% → 72%
+========================================
+
+
+================================================================================
+【6】本番モード（PRODUCTION）での出力
+================================================================================
+
+[Config] Loaded from config.txt
+  ...
+  LEARNING_MODE = PRODUCTION (本番モード)
+  ...
+
+[Learning] Loading learning data...
+[Learning] Data loaded successfully.
+[Learning] Stats: 100 games (W:72 L:25 D:3) - Win rate: 72.00%
+[Learning] Mode: PRODUCTION (本番モード - 学習しない)
+
+... (対戦進行) ...
+
+[Game] 黒の勝利！
+
+========================================
+[Learning] Game finished! Result: WIN
+========================================
+[Learning] Mode: PRODUCTION - No learning performed
+[Learning] Pattern scores remain unchanged
+[Learning] Total games: 101 (W:73 L:25 D:3)
+[Learning] Win rate: 72.28%
+========================================
+
+
+================================================================================
+【7】DEBUG_LEVEL=2 での詳細出力
+================================================================================
+
+[AI] Starting search...
+[AI] Mode: Iterative Deepening
+
+[Debug] Current Board State:
+  A B C D E F G H I J K L M N O
+1 · · · · · · · · · · · · · · ·
+2 · · · · · · · · · · · · · · ·
+3 · · · · · · · · · · · · · · ·
+4 · · · · · · · · · · · · · · ·
+5 · · · · · · · · · · · · · · ·
+6 · · · · · · ○ · · · · · · · ·
+7 · · · · · · ● ○ · · · · · · ·
+8 · · · · · · · · ● · · · · · ·
+9 · · · · · · · · · · · · · · ·
+...
+
+[Debug] Evaluation Details:
+  Black Score: +2240
+    OPEN_THREE: +5050 (x2)
+    THREE: +1010 (x1)
+    OPEN_TWO: +512 (x3)
+    CENTER: +50 (x1)
+    CONNECTION: +20 (x5)
+
+  White Score: -1850
+    FOUR: -10100 (x1)
+    OPEN_TWO: -512 (x2)
+    TWO: -102 (x3)
+    NEAR_ENEMY: -30 (x4)
+
+  Final Score: +2240 - 1850 = +390 (Black advantage)
+
+========================================
+[ID] Depth 3 completed
+========================================
+  Nodes searched: 8,452
+  TT hits: 2,187 (25.9%)
+  Alpha-Beta cutoffs: 6,012 (71.1%)
+  Evaluation calls: 8,452
+  Time: 0.195 sec
+  Nodes/sec: 43,344
+========================================
+
+[AI] Best move: (6, 7) with score 2240
+
+
+================================================================================
+【8】エラー発生時の出力
+================================================================================
+
+[Error] Failed to load config.txt - Using default settings
+[Warning] patterns.csv not found - Using default pattern scores
+[Error] learning_data.dat is corrupted - Starting with fresh data
+[Warning] opening_book.csv not found - No opening book available
+
+[AI] Initialization completed with warnings
+
+
+================================================================================
+【まとめ】
+================================================================================
+
+このシステムの出力は以下の情報を提供します：
+
+1. **起動時**:
+   - 設定の読み込み状況
+   - パターン・定石・学習データの読み込み
+   - 学習モードの確認
+
+2. **対戦中**:
+   - AI思考の進捗（Iterative Deepening）
+   - 探索深度と評価値
+   - 最善手の決定
+
+3. **対戦終了時**:
+   - 勝敗結果
+   - パターンスコアの変化（PRACTICEモード）
+   - 統計情報の更新
+
+4. **デバッグ時**（DEBUG_LEVEL=2以上）:
+   - 盤面状態
+   - 詳細な評価内訳
+   - 探索統計（ノード数、カットオフ率など）
+
+5. **学習の進捗**:
+   - 対戦数と勝率の変化
+   - パターンスコアの進化
+   - 学習効果の可視化
+
+すべての出力はコンソールに表示され、学習データは
+learning_data.dat に自動保存されます。
+================================================================================

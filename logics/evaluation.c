@@ -1,0 +1,341 @@
+#include <string.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include "evaluation.h"
+#include "../gomoku.h"
+
+// グローバルなパターンスコア（CSVから読み込み可能、学習モジュールから変更可能）
+int g_score_five = SCORE_FIVE;
+int g_score_open_four = SCORE_OPEN_FOUR;
+int g_score_four_four = SCORE_FOUR_FOUR;
+int g_score_four_three = SCORE_FOUR_THREE;
+int g_score_four = SCORE_FOUR;
+int g_score_broken_four = SCORE_BROKEN_FOUR;
+int g_score_open_three_three = SCORE_OPEN_THREE_THREE;
+int g_score_open_three = SCORE_OPEN_THREE;
+int g_score_broken_three = SCORE_BROKEN_THREE;
+int g_score_three_three = SCORE_THREE_THREE;
+int g_score_three = SCORE_THREE;
+int g_score_open_two_two = SCORE_OPEN_TWO_TWO;
+int g_score_open_two = SCORE_OPEN_TWO;
+int g_score_broken_two = SCORE_BROKEN_TWO;
+int g_score_two_two = SCORE_TWO_TWO;
+int g_score_two = SCORE_TWO;
+int g_score_one = SCORE_ONE;
+int g_score_center = SCORE_CENTER;
+int g_score_near_enemy = SCORE_NEAR_ENEMY;
+int g_score_connection = SCORE_CONNECTION;
+
+// デフォルトスコアを使用
+void use_default_pattern_scores(void) {
+    g_score_five = SCORE_FIVE;
+    g_score_open_four = SCORE_OPEN_FOUR;
+    g_score_four_four = SCORE_FOUR_FOUR;
+    g_score_four_three = SCORE_FOUR_THREE;
+    g_score_four = SCORE_FOUR;
+    g_score_broken_four = SCORE_BROKEN_FOUR;
+    g_score_open_three_three = SCORE_OPEN_THREE_THREE;
+    g_score_open_three = SCORE_OPEN_THREE;
+    g_score_broken_three = SCORE_BROKEN_THREE;
+    g_score_three_three = SCORE_THREE_THREE;
+    g_score_three = SCORE_THREE;
+    g_score_open_two_two = SCORE_OPEN_TWO_TWO;
+    g_score_open_two = SCORE_OPEN_TWO;
+    g_score_broken_two = SCORE_BROKEN_TWO;
+    g_score_two_two = SCORE_TWO_TWO;
+    g_score_two = SCORE_TWO;
+    g_score_one = SCORE_ONE;
+    g_score_center = SCORE_CENTER;
+    g_score_near_enemy = SCORE_NEAR_ENEMY;
+    g_score_connection = SCORE_CONNECTION;
+}
+
+// パターンスコアをCSVから読み込み
+int load_pattern_scores(const char *filename) {
+    FILE *fp = fopen(filename, "r");
+    if (!fp) {
+        printf("[Patterns] Cannot open %s, using defaults\n", filename);
+        use_default_pattern_scores();
+        return 0;
+    }
+
+    char line[256];
+    int loaded = 0;
+
+    while (fgets(line, sizeof(line), fp)) {
+        // コメント行と空行をスキップ
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') {
+            continue;
+        }
+
+        char name[64];
+        int score;
+        char desc[128];
+
+        if (sscanf(line, "%[^,],%d,%[^\n]", name, &score, desc) >= 2) {
+            if (strcmp(name, "FIVE") == 0) {
+                g_score_five = score;
+                loaded++;
+            } else if (strcmp(name, "OPEN_FOUR") == 0) {
+                g_score_open_four = score;
+                loaded++;
+            } else if (strcmp(name, "FOUR_FOUR") == 0) {
+                g_score_four_four = score;
+                loaded++;
+            } else if (strcmp(name, "FOUR_THREE") == 0) {
+                g_score_four_three = score;
+                loaded++;
+            } else if (strcmp(name, "FOUR") == 0) {
+                g_score_four = score;
+                loaded++;
+            } else if (strcmp(name, "BROKEN_FOUR") == 0) {
+                g_score_broken_four = score;
+                loaded++;
+            } else if (strcmp(name, "OPEN_THREE_THREE") == 0) {
+                g_score_open_three_three = score;
+                loaded++;
+            } else if (strcmp(name, "OPEN_THREE") == 0) {
+                g_score_open_three = score;
+                loaded++;
+            } else if (strcmp(name, "BROKEN_THREE") == 0) {
+                g_score_broken_three = score;
+                loaded++;
+            } else if (strcmp(name, "THREE_THREE") == 0) {
+                g_score_three_three = score;
+                loaded++;
+            } else if (strcmp(name, "THREE") == 0) {
+                g_score_three = score;
+                loaded++;
+            } else if (strcmp(name, "OPEN_TWO_TWO") == 0) {
+                g_score_open_two_two = score;
+                loaded++;
+            } else if (strcmp(name, "OPEN_TWO") == 0) {
+                g_score_open_two = score;
+                loaded++;
+            } else if (strcmp(name, "BROKEN_TWO") == 0) {
+                g_score_broken_two = score;
+                loaded++;
+            } else if (strcmp(name, "TWO_TWO") == 0) {
+                g_score_two_two = score;
+                loaded++;
+            } else if (strcmp(name, "TWO") == 0) {
+                g_score_two = score;
+                loaded++;
+            } else if (strcmp(name, "ONE") == 0) {
+                g_score_one = score;
+                loaded++;
+            } else if (strcmp(name, "CENTER") == 0) {
+                g_score_center = score;
+                loaded++;
+            } else if (strcmp(name, "NEAR_ENEMY") == 0) {
+                g_score_near_enemy = score;
+                loaded++;
+            } else if (strcmp(name, "CONNECTION") == 0) {
+                g_score_connection = score;
+                loaded++;
+            }
+        }
+    }
+
+    fclose(fp);
+
+    printf("[Patterns] Loaded %d patterns from %s\n", loaded, filename);
+    printf("  FIVE=%d, OPEN_FOUR=%d, FOUR=%d, OPEN_THREE=%d\n",
+           g_score_five, g_score_open_four, g_score_four, g_score_open_three);
+
+    return loaded;
+}
+
+// ========================================
+// パターン評価ヘルパー関数
+// ========================================
+
+// 特定方向のラインを抽出（最大9マス分）
+static void extract_line(const int board[][BOARD_SIZE], int x, int y, int dx, int dy,
+                         int line[], int *length, int max_len) {
+    int idx = 0;
+    int nx = x - dx * 4;  // 4マス戻る
+    int ny = y - dy * 4;
+
+    for (int i = 0; i < max_len && idx < max_len; i++) {
+        if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+            line[idx++] = board[ny][nx];
+        } else {
+            line[idx++] = -1;  // 盤外
+        }
+        nx += dx;
+        ny += dy;
+    }
+    *length = idx;
+}
+
+// ラインのパターンを評価
+int evaluate_line(const int line[], int length, int my_color) {
+    int score = 0;
+    int opponent = (my_color == STONE_BLACK) ? STONE_WHITE : STONE_BLACK;
+
+    // パターンマッチング
+    for (int i = 0; i <= length - 5; i++) {
+        int my_count = 0;
+        int opp_count = 0;
+        int space_count = 0;
+
+        // 5マス分をチェック
+        for (int j = 0; j < 5; j++) {
+            if (line[i + j] == my_color) my_count++;
+            else if (line[i + j] == opponent) opp_count++;
+            else if (line[i + j] == STONE_SPACE) space_count++;
+        }
+
+        // 両側に相手の石がないかチェック
+        bool left_open = (i == 0 || line[i - 1] != opponent);
+        bool right_open = (i + 5 >= length || line[i + 5] != opponent);
+
+        // 自分のパターン評価
+        if (opp_count == 0) {
+            if (my_count == 5) {
+                score += g_score_five;
+            } else if (my_count == 4 && space_count == 1) {
+                if (left_open && right_open) {
+                    score += g_score_open_four;
+                } else {
+                    score += g_score_four;
+                }
+            } else if (my_count == 3 && space_count == 2) {
+                if (left_open && right_open) {
+                    score += g_score_open_three;
+                } else {
+                    score += g_score_three;
+                }
+            } else if (my_count == 2 && space_count == 3) {
+                if (left_open && right_open) {
+                    score += g_score_open_two;
+                } else {
+                    score += g_score_two;
+                }
+            } else if (my_count == 1 && space_count == 4) {
+                score += g_score_one;
+            }
+        }
+
+        // 相手のパターンを防ぐ評価（少し低めに）
+        if (my_count == 0) {
+            if (opp_count == 5) {
+                score -= g_score_five;
+            } else if (opp_count == 4 && space_count == 1) {
+                if (left_open && right_open) {
+                    score -= g_score_open_four * 0.9;
+                } else {
+                    score -= g_score_four * 0.9;
+                }
+            } else if (opp_count == 3 && space_count == 2) {
+                if (left_open && right_open) {
+                    score -= g_score_open_three * 0.8;
+                } else {
+                    score -= g_score_three * 0.8;
+                }
+            } else if (opp_count == 2 && space_count == 3) {
+                if (left_open && right_open) {
+                    score -= g_score_open_two * 0.7;
+                } else {
+                    score -= g_score_two * 0.7;
+                }
+            }
+        }
+    }
+
+    return score;
+}
+
+// ========================================
+// 盤面評価関数
+// ========================================
+
+// 盤面全体を評価
+int evaluate_board(const int board[][BOARD_SIZE], int my_color) {
+    int total_score = 0;
+
+    // 全マスについて評価
+    for (int y = 0; y < BOARD_SIZE; y++) {
+        for (int x = 0; x < BOARD_SIZE; x++) {
+            if (board[y][x] == my_color) {
+                // 自分の石の周辺を評価
+                total_score += evaluate_position(board, x, y, my_color);
+            }
+        }
+    }
+
+    return total_score;
+}
+
+// 特定位置の評価（その位置に石を置いた場合のスコア）
+int evaluate_position(const int board[][BOARD_SIZE], int x, int y, int color) {
+    int score = 0;
+    int line[9];
+    int length;
+
+    // 4方向を評価
+    int directions[4][2] = {
+        {1, 0},   // 横
+        {0, 1},   // 縦
+        {1, 1},   // 右下斜め
+        {1, -1}   // 右上斜め
+    };
+
+    for (int i = 0; i < 4; i++) {
+        extract_line(board, x, y, directions[i][0], directions[i][1], line, &length, 9);
+        score += evaluate_line(line, length, color);
+    }
+
+    // 中央に近いほど少しボーナス（序盤の安定性）
+    int center_x = BOARD_SIZE / 2;
+    int center_y = BOARD_SIZE / 2;
+    int dist = abs(x - center_x) + abs(y - center_y);
+    score += (BOARD_SIZE - dist) * 2;
+
+    return score;
+}
+
+// ========================================
+// 深さ1の思考（全ての合法手を評価して最善手を選択）
+// ========================================
+
+int find_best_move_simple(const int board[][BOARD_SIZE], int color, int *best_x, int *best_y) {
+    Move moves[BOARD_SIZE * BOARD_SIZE];
+    int move_count = generate_legal_moves(board, color, moves, BOARD_SIZE * BOARD_SIZE);
+
+    if (move_count == 0) {
+        // 合法手がない場合は中央
+        *best_x = BOARD_SIZE / 2;
+        *best_y = BOARD_SIZE / 2;
+        return 0;
+    }
+
+    int best_score = -999999;
+    int best_idx = 0;
+
+    // 各手を評価
+    for (int i = 0; i < move_count; i++) {
+        int x = moves[i].x;
+        int y = moves[i].y;
+
+        // 仮に石を置いてみる
+        int temp_board[BOARD_SIZE][BOARD_SIZE];
+        memcpy(temp_board, board, sizeof(temp_board));
+        temp_board[y][x] = color;
+
+        // 評価
+        int score = evaluate_position(temp_board, x, y, color);
+
+        if (score > best_score) {
+            best_score = score;
+            best_idx = i;
+        }
+    }
+
+    *best_x = moves[best_idx].x;
+    *best_y = moves[best_idx].y;
+
+    return best_score;
+}
