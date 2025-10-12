@@ -151,12 +151,12 @@ int load_pattern_scores(const char *filename) {
 // パターン評価ヘルパー関数
 // ========================================
 
-// 特定方向のラインを抽出（最大9マス分）
+// 特定方向のラインを抽出（最大11マス分）
 static void extract_line(const int board[][BOARD_SIZE], int x, int y, int dx, int dy,
                          int line[], int *length, int max_len) {
     int idx = 0;
-    int nx = x - dx * 4;  // 4マス戻る
-    int ny = y - dy * 4;
+    int nx = x - dx * 5;  // 5マス戻る（11マス抽出の中心）
+    int ny = y - dy * 5;
 
     for (int i = 0; i < max_len && idx < max_len; i++) {
         if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
@@ -170,51 +170,67 @@ static void extract_line(const int board[][BOARD_SIZE], int x, int y, int dx, in
     *length = idx;
 }
 
-// ラインのパターンを評価
+// ラインのパターンを評価（9マス窓）
 int evaluate_line(const int line[], int length, int my_color) {
     int score = 0;
     int opponent = (my_color == STONE_BLACK) ? STONE_WHITE : STONE_BLACK;
 
-    // パターンマッチング
-    for (int i = 0; i <= length - 5; i++) {
+    // 11マス抽出できない場合はスキップ
+    if (length < 11) {
+        return 0;
+    }
+
+    // 【6マス窓でスライディング評価】
+    // 11マス抽出（中心から±5マス）、6マス窓をスライド（i = 0～5）
+    for (int i = 0; i <= length - 6; i++) {
         int my_count = 0;
         int opp_count = 0;
         int space_count = 0;
 
-        // 5マス分をチェック
-        for (int j = 0; j < 5; j++) {
+        // 6マス窓の内容をカウント
+        for (int j = 0; j < 6; j++) {
             if (line[i + j] == my_color) my_count++;
             else if (line[i + j] == opponent) opp_count++;
             else if (line[i + j] == STONE_SPACE) space_count++;
         }
 
-        // 両側に相手の石がないかチェック
+        // 両側の状況をチェック（11マス抽出なので左右の情報あり）
         bool left_open = (i == 0 || line[i - 1] != opponent);
-        bool right_open = (i + 5 >= length || line[i + 5] != opponent);
+        bool right_open = (i + 6 >= length || line[i + 6] != opponent);
 
-        // 自分のパターン評価
+        // 自分のパターン評価（6マス窓）
         if (opp_count == 0) {
             if (my_count == 5) {
+                // 5連達成
                 score += g_score_five;
-            } else if (my_count == 4 && space_count == 1) {
-                if (left_open && right_open) {
+            } else if (my_count == 4) {
+                // 4連パターン（6マス窓なので開いた四を正確に検出可能）
+                if (space_count == 2 && line[i] == STONE_SPACE && line[i + 5] == STONE_SPACE) {
+                    // [_][●][●][●][●][_] - 完全な開いた四
                     score += g_score_open_four;
+                } else if (left_open && right_open) {
+                    // その他の開いた四
+                    score += g_score_open_four * 0.9;
                 } else {
+                    // 片側閉じた四
                     score += g_score_four;
                 }
-            } else if (my_count == 3 && space_count == 2) {
+            } else if (my_count == 3 && space_count >= 2) {
+                // 3連パターン
                 if (left_open && right_open) {
                     score += g_score_open_three;
                 } else {
                     score += g_score_three;
                 }
-            } else if (my_count == 2 && space_count == 3) {
+            } else if (my_count == 2 && space_count >= 3) {
+                // 2連パターン
                 if (left_open && right_open) {
                     score += g_score_open_two;
                 } else {
                     score += g_score_two;
                 }
-            } else if (my_count == 1 && space_count == 4) {
+            } else if (my_count == 1 && space_count >= 4) {
+                // 1個のみ
                 score += g_score_one;
             }
         }
@@ -284,7 +300,7 @@ int evaluate_position(const int board[][BOARD_SIZE], int x, int y, int color) {
     };
 
     for (int i = 0; i < 4; i++) {
-        extract_line(board, x, y, directions[i][0], directions[i][1], line, &length, 9);
+        extract_line(board, x, y, directions[i][0], directions[i][1], line, &length, 11);
         score += evaluate_line(line, length, color);
     }
 
