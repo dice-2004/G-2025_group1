@@ -4,6 +4,15 @@
 
 ## 📚 ドキュメント一覧
 
+### プロジェクト概要ガイド（🆕）
+
+| ファイル | 説明 | 対象者 |
+|---------|------|--------|
+| [**PROJECT_OVERVIEW.md**](./PROJECT_OVERVIEW.md) | 🎯 **プロジェクト概要** - 全体像、主要機能、技術的特徴、バージョン履歴 | 全員 |
+| [**USAGE_GUIDE.md**](./USAGE_GUIDE.md) | 🚀 **使い方ガイド** - ビルド、実行、設定方法、トラブルシューティング | 全員 |
+| [**FEATURES.md**](./FEATURES.md) | ✨ **機能詳細** - すべての機能の詳細説明 | 中級～上級 |
+| [**PROJECT_STRUCTURE.md**](./PROJECT_STRUCTURE.md) | 📁 **プロジェクト構成ガイド** - ディレクトリ構造、ファイル配置、依存関係 | 開発者 |
+
 ### システム動作ガイド
 
 | ファイル | 説明 | 対象者 |
@@ -27,20 +36,29 @@
 ## 🎯 読む順番（推奨）
 
 ### 初めての方
-1. **SYSTEM_BEHAVIOR_GUIDE.md** - システム全体の理解
-2. **LEARNING_MODE_GUIDE.md** - 学習モードの使い方
-3. 必要に応じて他のガイドを参照
+1. **PROJECT_OVERVIEW.md** - プロジェクト概要
+2. **USAGE_GUIDE.md** - 使い方（ビルド、実行、設定）
+3. **SYSTEM_BEHAVIOR_GUIDE.md** - システム動作の詳細
+4. **LEARNING_MODE_GUIDE.md** - 学習モードの使い方
 
 ### 開発者の方
-1. **SYSTEM_BEHAVIOR_GUIDE.md** - システム全体の理解
-2. **DEBUG_AND_ID_GUIDE.md** - デバッグ方法と反復深化探索
-3. **ID_TIME_MANAGEMENT.md** - 時間管理の詳細
-4. **MAKEFILE_GUIDE.md** - ビルド方法
+1. **PROJECT_OVERVIEW.md** - プロジェクト概要
+2. **PROJECT_STRUCTURE.md** - プロジェクト構成
+3. **USAGE_GUIDE.md** - ビルド・実行方法
+4. **DEBUG_AND_ID_GUIDE.md** - デバッグ方法と反復深化探索
+5. **ID_TIME_MANAGEMENT.md** - 時間管理の詳細
+6. **MAKEFILE_GUIDE.md** - ビルド方法
+
+### 機能を詳しく知りたい方
+1. **FEATURES.md** - すべての機能の詳細
+2. **SYSTEM_BEHAVIOR_GUIDE.md** - システム動作の詳細
+3. [評価パターンガイド](../technical/EVALUATION_PATTERNS.md) - 20種類のパターン
 
 ### 設定をカスタマイズしたい方
-1. **LEARNING_MODE_GUIDE.md** - 学習モードの設定
-2. **ID_TIME_MANAGEMENT.md** - 時間閾値の調整
-3. **DEBUG_AND_ID_GUIDE.md** - デバッグレベルの設定
+1. **USAGE_GUIDE.md** - 設定方法
+2. **LEARNING_MODE_GUIDE.md** - 学習モードの設定
+3. **ID_TIME_MANAGEMENT.md** - 時間閾値の調整
+4. **DEBUG_AND_ID_GUIDE.md** - デバッグレベルの設定
 
 ## 📌 関連リンク
 

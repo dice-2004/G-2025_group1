@@ -16,6 +16,12 @@
 |---------|------|--------|
 | [**AI_IMPLEMENTATION.md**](./AI_IMPLEMENTATION.md) | 🤖 **AI実装の技術詳細** - Alpha-Beta、置換表、評価関数 | 開発者 |
 
+### 評価関数の詳細（🆕）
+
+| ファイル | 説明 | 対象者 |
+|---------|------|--------|
+| [**EVALUATION_PATTERNS.md**](./EVALUATION_PATTERNS.md) | 🎯 **評価パターンガイド** - 20種類のパターン詳細、カスタマイズ方法 | 開発者・研究者 |
+
 ### 学習システムの詳細
 
 | ファイル | 説明 | 対象者 |
@@ -27,8 +33,13 @@
 
 ### AI実装を理解したい方
 1. **AI_IMPLEMENTATION.md** - AI実装の概要
-2. **TECHNICAL_DOCUMENT.md** - 詳細な技術資料
-3. 必要に応じて特定のセクションを深掘り
+2. **EVALUATION_PATTERNS.md** - 評価パターンの詳細
+3. **TECHNICAL_DOCUMENT.md** - 詳細な技術資料
+
+### 評価関数を理解したい方
+1. **EVALUATION_PATTERNS.md** - 20種類のパターン詳細
+2. [窓サイズ詳細分析](../verification/WINDOW_SIZE_ANALYSIS.md) - 11マス抽出+6マス窓の分析
+3. **AI_IMPLEMENTATION.md** - 評価関数の実装
 
 ### 学習システムを理解したい方
 1. **LEARNING_GUIDE.md** - 学習機能の概要
@@ -39,6 +50,7 @@
 1. **TECHNICAL_DOCUMENT.md** - 全体像の把握
 2. **AI_IMPLEMENTATION.md** - 探索アルゴリズムの詳細
 3. **LEARNING_GUIDE.md** - 学習アルゴリズムの詳細
+4. **EVALUATION_PATTERNS.md** - 評価パターンの詳細
 
 ## 📖 カバーされる技術
 
