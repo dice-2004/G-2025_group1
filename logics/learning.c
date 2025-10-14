@@ -6,6 +6,12 @@
 #include <string.h>
 #include <time.h>
 #include <math.h>
+#ifdef _WIN32
+#include <direct.h>  // _getcwd
+#define getcwd _getcwd
+#else
+#include <unistd.h>  // getcwd
+#endif
 #include "learning.h"
 #include "evaluation.h"
 #include "../config.h"
@@ -51,18 +57,29 @@ void start_game_record(void) {
     if (!g_learning_initialized) init_learning();
 
     memset(&g_current_game, 0, sizeof(GameRecord));
-    printf("[Learning] Game recording started.\n");
+    printf("[Learning] Game recording started (move_count reset to 0).\n");
 }
 
 void record_move(int x, int y, int color) {
-    if (!g_learning_initialized) return;
-    if (g_current_game.move_count >= BOARD_SIZE * BOARD_SIZE) return;
+    if (!g_learning_initialized) {
+        printf("[Learning] WARNING: record_move called but learning not initialized!\n");
+        return;
+    }
+    if (g_current_game.move_count >= BOARD_SIZE * BOARD_SIZE) {
+        printf("[Learning] WARNING: Too many moves recorded!\n");
+        return;
+    }
 
     int idx = g_current_game.move_count;
     g_current_game.move_x[idx] = x;
     g_current_game.move_y[idx] = y;
     g_current_game.move_color[idx] = color;
     g_current_game.move_count++;
+
+    if (g_current_game.move_count <= 10 || g_current_game.move_count % 10 == 0) {
+        printf("[Learning] Recorded move #%d: (%d,%d) color=%d\n",
+               g_current_game.move_count, x, y, color);
+    }
 }
 
 // ========================================
@@ -156,40 +173,89 @@ static void apply_pattern_learning(void) {
 // 序盤定石の学習
 // ========================================
 static void learn_opening_moves(int result) {
-    if (result != 1) return;  // 勝った試合のみ学習
-    if (g_current_game.move_count < 5) return;
+    printf("[Learning] learn_opening_moves called: result=%d, move_count=%d\n",
+           result, g_current_game.move_count);
+
+    if (result != 1) {
+        printf("[Learning] Skipping opening book update (not a win)\n");
+        return;  // 勝った試合のみ学習
+    }
+
+    if (g_current_game.move_count < 5) {
+        printf("[Learning] Skipping opening book update (too few moves: %d)\n",
+               g_current_game.move_count);
+        return;
+    }
+
+    // カレントディレクトリを表示
+    char cwd[256];
+    #ifdef _WIN32
+    _getcwd(cwd, sizeof(cwd));
+    #else
+    getcwd(cwd, sizeof(cwd));
+    #endif
+    printf("[Learning] Current directory: %s\n", cwd);
 
     // 勝った試合の序盤5手を opening_book.csv に追加
-    FILE *fp = fopen("opening_book.csv", "a");
-    if (!fp) return;
+    const char *filename = "opening_book.csv";
+    printf("[Learning] Opening file %s for writing...\n", filename);
 
-    // ヘッダー行が存在するかチェック
-    fseek(fp, 0, SEEK_END);
-    long file_size = ftell(fp);
+    // まずファイルが存在するかチェック
+    FILE *fp_check = fopen(filename, "r");
+    int file_exists = (fp_check != NULL);
+    if (fp_check) {
+        printf("[Learning] File exists, will append\n");
+        fclose(fp_check);
+    } else {
+        printf("[Learning] File does not exist, will create new\n");
+    }
 
-    if (file_size == 0) {
-        // ファイルが空の場合はヘッダーを書く
+    // 追記モードで開く
+    FILE *fp = fopen(filename, "a");
+    if (!fp) {
+        printf("[Learning] ERROR: Could not open %s for writing!\n", filename);
+        perror("[Learning] Error details");
+        printf("[Learning] Trying to create directory if needed...\n");
+        return;
+    }
+
+    printf("[Learning] File opened successfully (handle=%p)\n", (void*)fp);
+
+    // ファイルが新規作成の場合はヘッダーを書く
+    if (!file_exists) {
+        printf("[Learning] Writing header to new file...\n");
         fprintf(fp, "move_number,x,y,comment\n");
     }
 
     // 勝利した試合の序盤手を追加
+    printf("[Learning] Writing %d opening moves...\n",
+           (g_current_game.move_count < 5) ? g_current_game.move_count : 5);
+
     for (int i = 0; i < 5 && i < g_current_game.move_count; i++) {
-        fprintf(fp, "%d,%d,%d,Learned from win (game %d)\n",
+        int written = fprintf(fp, "%d,%d,%d,Learned from win (game %d)\n",
                 i + 1,
                 g_current_game.move_x[i],
                 g_current_game.move_y[i],
                 g_stats.total_games);
+        printf("[Learning]   Move %d: (%d,%d) - wrote %d bytes\n",
+               i+1, g_current_game.move_x[i], g_current_game.move_y[i], written);
     }
 
+    fflush(fp);  // バッファをフラッシュ
     fclose(fp);
-    printf("[Learning] Added winning opening moves to book.\n");
+    printf("[Learning] Added winning opening moves to book (file closed).\n");
 }
 
 // ========================================
 // 対戦終了と学習
 // ========================================
 void finish_game_record(int result) {
-    if (!g_learning_initialized) return;
+    printf("[Learning] finish_game_record called with result=%d\n", result);
+
+    if (!g_learning_initialized) {
+        printf("[Learning] ERROR: Learning not initialized!\n");
+        return;
+    }
 
     g_current_game.result = result;
 
@@ -197,6 +263,7 @@ void finish_game_record(int result) {
     printf("[Learning] Game finished! Result: %s\n",
            result == 1 ? "WIN" : (result == -1 ? "LOSS" : "DRAW"));
     printf("[Learning] Mode: %s\n", get_learning_mode_name());
+    printf("[Learning] Move count in this game: %d\n", g_current_game.move_count);
 
     // 本番モードの場合は統計のみ表示して終了（学習しない）
     if (g_learning_mode == LEARNING_MODE_PRODUCTION) {
@@ -209,6 +276,7 @@ void finish_game_record(int result) {
     }
 
     // 練習モードの場合は学習を実行
+    printf("[Learning] Practice mode: Learning will be performed\n");
     g_stats.total_games++;
 
     if (result == 1) {
@@ -254,20 +322,45 @@ LearningStats get_learning_stats(void) {
 // 学習データの保存・読み込み
 // ========================================
 void save_learning_data(void) {
-    FILE *fp = fopen("learning_data.dat", "wb");
+    printf("[Learning] Attempting to save learning data...\n");
+    printf("[Learning]   Stats: total=%d, wins=%d, losses=%d, draws=%d\n",
+           g_stats.total_games, g_stats.wins, g_stats.losses, g_stats.draws);
+
+    // カレントディレクトリを表示
+    char cwd[256];
+    #ifdef _WIN32
+    _getcwd(cwd, sizeof(cwd));
+    #else
+    getcwd(cwd, sizeof(cwd));
+    #endif
+    printf("[Learning] Current directory: %s\n", cwd);
+
+    const char *filename = "learning_data.dat";
+    printf("[Learning] Attempting to open %s for writing...\n", filename);
+
+    FILE *fp = fopen(filename, "wb");
     if (!fp) {
-        printf("[Learning] Warning: Could not save learning data.\n");
+        printf("[Learning] ERROR: Could not open %s for writing!\n", filename);
+        perror("[Learning] Error details");
+        printf("[Learning] Please check file permissions in current directory\n");
         return;
     }
 
+    printf("[Learning] File opened successfully (handle=%p)\n", (void*)fp);
+
     // 統計データ保存
-    fwrite(&g_stats, sizeof(LearningStats), 1, fp);
+    size_t written1 = fwrite(&g_stats, sizeof(LearningStats), 1, fp);
+    printf("[Learning] Wrote stats: %lu records (%lu bytes)\n",
+           (unsigned long)written1, (unsigned long)sizeof(LearningStats));
 
     // パターン学習データ保存
-    fwrite(&g_pattern_learning, sizeof(PatternLearningData), 1, fp);
+    size_t written2 = fwrite(&g_pattern_learning, sizeof(PatternLearningData), 1, fp);
+    printf("[Learning] Wrote pattern data: %lu records (%lu bytes)\n",
+           (unsigned long)written2, (unsigned long)sizeof(PatternLearningData));
 
+    fflush(fp);  // バッファをフラッシュ
     fclose(fp);
-    printf("[Learning] Learning data saved successfully.\n");
+    printf("[Learning] Learning data saved successfully (file closed).\n");
 }
 
 void load_learning_data(void) {
@@ -326,4 +419,14 @@ LearningMode get_learning_mode(void) {
 
 const char* get_learning_mode_name(void) {
     return (g_learning_mode == LEARNING_MODE_PRODUCTION) ? "PRODUCTION" : "PRACTICE";
+}
+
+// ========================================
+// 現在のゲームの手数を取得
+// ========================================
+int get_current_move_count(void) {
+    if (!g_learning_initialized) {
+        return 0;
+    }
+    return g_current_game.move_count;
 }

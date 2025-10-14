@@ -53,6 +53,11 @@ static int g_previous_board[BOARD_SIZE][BOARD_SIZE];
 static int g_previous_move_count = 0;
 static int g_ai_color = STONE_SPACE;
 
+// AIの色を取得（外部から呼び出し可能）
+int get_ai_color(void) {
+    return g_ai_color;
+}
+
 // 盤面から勝者を判定
 static int detect_winner(const int board[][BOARD_SIZE]) {
     // 5連を探す
@@ -160,16 +165,24 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     if (move_count == 0 && g_previous_move_count > 0) {
         // 新しい対戦が始まった（盤面がリセットされた）
         // 前回の勝者を判定して学習
+        printf("[AI] New game detected (move_count=0, previous=%d)\n", g_previous_move_count);
         int winner = detect_winner(g_previous_board);
+        printf("[AI] Previous game winner: %d (AI color: %d)\n", winner, g_ai_color);
+
         if (winner != STONE_SPACE) {
             int result = (winner == g_ai_color) ? 1 : -1;
+            printf("[AI] Calling finish_game_record with result=%d\n", result);
             finish_game_record(result);
+        } else {
+            printf("[AI] No winner detected in previous game\n");
         }
 
         // 新規対戦開始
+        printf("[AI] Starting new game record\n");
         start_game_record();
     } else if (move_count == 0) {
         // 初回対戦開始
+        printf("[AI] First game ever - starting game record\n");
         start_game_record();
     }
 
@@ -178,6 +191,16 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     // ========================================
     if (move_count > g_previous_move_count) {
         detect_and_record_new_moves(board);
+
+        // プレイヤーが既に勝っているかチェック
+        int winner = detect_winner(board);
+        if (winner != STONE_SPACE) {
+            printf("[AI] Game already finished! Winner: %d (AI color: %d)\n", winner, g_ai_color);
+            int result = (winner == g_ai_color) ? 1 : -1;
+            printf("[AI] Recording game result: %d\n", result);
+            finish_game_record(result);
+            start_game_record();  // 新規ゲーム開始
+        }
     }
 
     // 現在の盤面を保存
@@ -235,8 +258,9 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     // フェーズ2: 詰みと必死のチェック (TSS)
     // ========================================
     int win_x, win_y;
+    int attack_level;
 
-    // 自分の勝ち手をチェック
+    // 自分の勝ち手をチェック（五連）
     if (find_winning_move(board, com, &win_x, &win_y)) {
         *pos_x = win_x;
         *pos_y = win_y;
@@ -244,11 +268,45 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
         return 0;
     }
 
-    // 相手の勝ち手を防ぐ
+    // 相手の勝ち手を防ぐ（五連防御）
     if (find_threat_move(board, com, &win_x, &win_y)) {
         *pos_x = win_x;
         *pos_y = win_y;
         printf("[AI] Threat defended!\n");
+        return 0;
+    }
+
+    // 自分の開いた四をチェック（最優先攻撃）
+    attack_level = find_strong_attack_move(board, com, &win_x, &win_y);
+    if (attack_level == 2) {  // 開いた四
+        *pos_x = win_x;
+        *pos_y = win_y;
+        printf("[AI] Open four attack executed!\n");
+        return 0;
+    }
+
+    // 相手の開いた四を防ぐ（最優先防御）
+    int defense_level = find_strong_defense_move(board, com, &win_x, &win_y);
+    if (defense_level == 2) {
+        *pos_x = win_x;
+        *pos_y = win_y;
+        printf("[AI] Defended opponent's open four!\n");
+        return 0;
+    }
+
+    // 自分の開いた三または間空き三を作る
+    if (attack_level == 1) {  // 開いた三 or 間空き三
+        *pos_x = win_x;
+        *pos_y = win_y;
+        printf("[AI] Open three / split three attack executed!\n");
+        return 0;
+    }
+
+    // 相手の開いた三または間空き三を防ぐ
+    if (defense_level == 1) {
+        *pos_x = win_x;
+        *pos_y = win_y;
+        printf("[AI] Defended opponent's open three / split three!\n");
         return 0;
     }
 
@@ -277,6 +335,25 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     record_move(*pos_x, *pos_y, com);
 
     printf("[AI] Final move: (%d, %d) with score %d\n", *pos_x, *pos_y, score);
+
+    // AIの手を盤面に反映して勝敗判定（学習用）
+    int temp_board[BOARD_SIZE][BOARD_SIZE];
+    memcpy(temp_board, board, sizeof(temp_board));
+    temp_board[*pos_y][*pos_x] = com;
+
+    // 勝敗判定
+    int winner = detect_winner(temp_board);
+    if (winner == com) {
+        printf("[AI] AI wins! Recording victory.\n");
+        finish_game_record(1);  // AI勝利
+        // 新規ゲームを開始
+        start_game_record();
+    } else if (winner != STONE_SPACE) {
+        printf("[AI] AI loses! Recording defeat.\n");
+        finish_game_record(-1);  // AI敗北
+        // 新規ゲームを開始
+        start_game_record();
+    }
 
     // デバッグ: 評価値の詳細
     if (g_config.debug_level >= 2) {

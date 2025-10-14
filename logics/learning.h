@@ -56,4 +56,7 @@ void set_learning_mode(LearningMode mode);
 LearningMode get_learning_mode(void);
 const char* get_learning_mode_name(void);
 
+// 現在のゲームの手数を取得
+int get_current_move_count(void);
+
 #endif

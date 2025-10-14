@@ -203,7 +203,12 @@ docs/
 ### 📙 [検証・最適化レポート](./docs/verification/)
 **評価関数の最適化、窓サイズの分析、正確性の検証**
 
-#### 最新の最適化成果
+#### 最新の検証レポート
+| ファイル | 説明 | 日付 | 重要度 |
+|---------|------|------|--------|
+| [TSS_AND_LEARNING_VERIFICATION.md](./docs/verification/TSS_AND_LEARNING_VERIFICATION.md) | 🎯 TSS機能と学習システム実装検証 | 2025-10-14 | ⭐⭐⭐⭐⭐ |
+
+#### 最適化成果
 | ファイル | 説明 | 日付 | 重要度 |
 |---------|------|------|--------|
 | [WINDOW_SIZE_ANALYSIS.md](./docs/verification/WINDOW_SIZE_ANALYSIS.md) | 🔍 窓サイズ詳細分析 | 2025-10-12 | ⭐⭐⭐⭐⭐ |

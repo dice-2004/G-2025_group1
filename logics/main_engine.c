@@ -2,6 +2,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <time.h>
+#include <stdlib.h>
 #include "main_engine.h"
 #include "../gomoku_ai.h"
 #include "../config.h"
@@ -17,6 +18,9 @@ static int g_nodes_searched = 0;      // 探索ノード数
 static int g_cutoffs = 0;             // 枝刈り回数
 static int g_tt_hits_in_search = 0;   // 置換表ヒット数
 static clock_t g_search_start_time;   // 探索開始時刻
+static clock_t g_search_deadline;     // 絶対的な探索終了時刻
+static int g_time_limit_exceeded = 0; // 時間制限超過フラグ
+static int g_early_cutoff_threshold = 8000; // 早期カットオフ閾値（デフォルト: open-four相当）
 
 // 前方宣言
 static int alpha_beta(const int board[][BOARD_SIZE], int depth, int alpha, int beta,
@@ -92,6 +96,15 @@ static int is_game_over(const int board[][BOARD_SIZE]) {
 static int alpha_beta(const int board[][BOARD_SIZE], int depth, int alpha, int beta,
                       int color, int max_color, uint64_t hash) {
     g_nodes_searched++;  // デバッグ: ノード数カウント
+
+    // 時間制限の厳格なチェック（探索途中でも必ず停止）
+    if (g_search_deadline > 0) {
+        clock_t current = clock();
+        if (current >= g_search_deadline) {
+            g_time_limit_exceeded = 1;
+            return 0;  // 時間切れ、評価値は不定だが即座に返す
+        }
+    }
 
     // 終了条件: 深さ0 or ゲーム終了
     if (depth == 0 || is_game_over(board)) {
@@ -215,6 +228,19 @@ static int alpha_beta(const int board[][BOARD_SIZE], int depth, int alpha, int b
 // Alpha-Beta探索のエントリポイント
 // ========================================
 
+// 手の評価値を保存する構造体
+typedef struct {
+    int x, y;
+    int score;
+} ScoredMove;
+
+// スコア比較関数（降順ソート用）
+static int compare_scored_moves(const void *a, const void *b) {
+    const ScoredMove *ma = (const ScoredMove *)a;
+    const ScoredMove *mb = (const ScoredMove *)b;
+    return mb->score - ma->score;  // 降順
+}
+
 int alpha_beta_search(const int board[][BOARD_SIZE], int color, int depth,
                       int *best_x, int *best_y) {
     // デバッグ統計をリセット
@@ -233,7 +259,6 @@ int alpha_beta_search(const int board[][BOARD_SIZE], int color, int depth,
     }
 
     int best_score = -INF;
-    int best_idx = 0;
     int opponent = (color == STONE_BLACK) ? STONE_WHITE : STONE_BLACK;
 
     // 現在の局面のハッシュ値を計算
@@ -243,31 +268,50 @@ int alpha_beta_search(const int board[][BOARD_SIZE], int color, int depth,
         printf("[Alpha-Beta] Searching %d moves at depth %d...\n", move_count, depth);
     }
 
+    // 各手に評価値を割り当ててソート
+    ScoredMove scored_moves[BOARD_SIZE * BOARD_SIZE];
+    for (int i = 0; i < move_count; i++) {
+        scored_moves[i].x = moves[i].x;
+        scored_moves[i].y = moves[i].y;
+        scored_moves[i].score = 0;  // 初期値
+    }
+
     for (int i = 0; i < move_count; i++) {
         // 手を打つ
         int temp_board[BOARD_SIZE][BOARD_SIZE];
         memcpy(temp_board, board, sizeof(temp_board));
-        temp_board[moves[i].y][moves[i].x] = color;
+        temp_board[scored_moves[i].y][scored_moves[i].x] = color;
 
         // ハッシュ値を更新
-        uint64_t new_hash = update_zobrist_hash(hash, moves[i].x, moves[i].y, color);
+        uint64_t new_hash = update_zobrist_hash(hash, scored_moves[i].x, scored_moves[i].y, color);
 
         // Alpha-Beta探索
         int score = alpha_beta(temp_board, depth - 1, -INF, INF, opponent, color, new_hash);
+        scored_moves[i].score = score;
 
         if (g_config.debug_level >= 3) {
             printf("[Root] Move %d/%d: (%d,%d) score=%d\n",
-                   i+1, move_count, moves[i].x, moves[i].y, score);
+                   i+1, move_count, scored_moves[i].x, scored_moves[i].y, score);
         }
 
         if (score > best_score) {
             best_score = score;
-            best_idx = i;
         }
     }
 
-    *best_x = moves[best_idx].x;
-    *best_y = moves[best_idx].y;
+    // 次の深さのために手をソート（評価値の高い順）
+    qsort(scored_moves, move_count, sizeof(ScoredMove), compare_scored_moves);
+
+    if (g_config.debug_level >= 2) {
+        printf("[Alpha-Beta] Moves sorted by score (top 5):\n");
+        for (int i = 0; i < move_count && i < 5; i++) {
+            printf("  %d. (%d,%d) score=%d\n", i+1,
+                   scored_moves[i].x, scored_moves[i].y, scored_moves[i].score);
+        }
+    }
+
+    *best_x = scored_moves[0].x;  // ソート後の最良手
+    *best_y = scored_moves[0].y;
 
     // デバッグ統計を出力
     clock_t end_time = clock();
@@ -326,6 +370,7 @@ int iterative_deepening(const int board[][BOARD_SIZE], int color, int time_limit
         printf("  Max depth: %d\n", max_depth);
         printf("  Time limit: %d ms\n", time_limit_ms);
         printf("  Time threshold: %.0f%%\n", threshold * 100);
+        printf("  Early cutoff threshold: %d\n", g_early_cutoff_threshold);
         printf("========================================\n\n");
     }
 
@@ -343,6 +388,22 @@ int iterative_deepening(const int board[][BOARD_SIZE], int color, int time_limit
                 printf("[ID] Returning result from depth %d.\n", completed_depth);
             }
             break;
+        }
+
+        // 厳格な時間制限を設定（この深さの探索中に絶対に超えてはいけない時間）
+        g_time_limit_exceeded = 0;
+        if (time_limit_ms > 0) {
+            // 残り時間を計算し、その時間でデッドラインを設定
+            double remaining_ms = time_limit_ms - elapsed;
+            if (remaining_ms <= 0) {
+                if (g_config.debug_level >= 1) {
+                    printf("[ID] No time remaining, stopping before depth %d.\n", depth);
+                }
+                break;
+            }
+            g_search_deadline = start_time + (clock_t)((time_limit_ms * CLOCKS_PER_SEC) / 1000);
+        } else {
+            g_search_deadline = 0;  // 時間制限なし
         }
 
         clock_t depth_start = clock();
@@ -371,6 +432,19 @@ int iterative_deepening(const int board[][BOARD_SIZE], int color, int time_limit
             break;
         }
 
+        // 時間制限超過フラグがセットされている場合、この深さの結果を破棄
+        if (g_time_limit_exceeded) {
+            if (g_config.debug_level >= 1) {
+                printf("[ID] Strict time limit exceeded during depth %d search.\n", depth);
+                printf("[ID] Discarding depth %d result, returning depth %d result: (%d, %d) score=%d\n",
+                       depth, completed_depth, prev_x, prev_y, prev_score);
+            }
+            *best_x = prev_x;
+            *best_y = prev_y;
+            best_score = prev_score;
+            break;
+        }
+
         // 探索成功 - 前の結果を保存してから更新
         prev_x = *best_x;
         prev_y = *best_y;
@@ -385,6 +459,16 @@ int iterative_deepening(const int board[][BOARD_SIZE], int color, int time_limit
             printf("[ID] Depth %d completed: (%d, %d) score=%d time=%.3fs (elapsed: %.0fms / %dms = %.1f%%)\n",
                    depth, *best_x, *best_y, score, depth_time, elapsed, time_limit_ms,
                    time_limit_ms > 0 ? (elapsed / time_limit_ms) * 100 : 0);
+        }
+
+        // 早期カットオフ: 十分に高い評価値が得られたら次の深さに進まずに返す
+        if (g_early_cutoff_threshold > 0 && score >= g_early_cutoff_threshold) {
+            if (g_config.debug_level >= 1) {
+                printf("[ID] Early cutoff triggered! score=%d >= threshold=%d\n",
+                       score, g_early_cutoff_threshold);
+                printf("[ID] Returning without deeper search.\n");
+            }
+            break;
         }
 
         // 勝ちが見つかったら終了
