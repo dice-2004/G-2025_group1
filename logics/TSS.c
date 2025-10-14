@@ -171,7 +171,7 @@ static int has_open_four(const int board[][BOARD_SIZE], int x, int y, int color)
             int left_open = (left_end_x >= 0 && left_end_x < BOARD_SIZE &&
                            left_end_y >= 0 && left_end_y < BOARD_SIZE &&
                            board[left_end_y][left_end_x] == STONE_SPACE);
-            
+
             int right_open = (right_end_x >= 0 && right_end_x < BOARD_SIZE &&
                             right_end_y >= 0 && right_end_y < BOARD_SIZE &&
                             board[right_end_y][right_end_x] == STONE_SPACE);
@@ -239,11 +239,11 @@ static int has_open_three(const int board[][BOARD_SIZE], int x, int y, int color
         // この位置を含めて3連になるか？（左+1+右 == 3）
         if (left_count + right_count == 2) {
             // 3連になる可能性がある。両端が空いているかチェック
-            
+
             // 左端の位置
             int left_end_x = x - dx * (left_count + 1);
             int left_end_y = y - dy * (left_count + 1);
-            
+
             // 右端の位置
             int right_end_x = x + dx * (right_count + 1);
             int right_end_y = y - dy * (right_count + 1);
@@ -251,7 +251,7 @@ static int has_open_three(const int board[][BOARD_SIZE], int x, int y, int color
             int left_open = (left_end_x >= 0 && left_end_x < BOARD_SIZE &&
                            left_end_y >= 0 && left_end_y < BOARD_SIZE &&
                            board[left_end_y][left_end_x] == STONE_SPACE);
-            
+
             int right_open = (right_end_x >= 0 && right_end_x < BOARD_SIZE &&
                             right_end_y >= 0 && right_end_y < BOARD_SIZE &&
                             board[right_end_y][right_end_x] == STONE_SPACE);
