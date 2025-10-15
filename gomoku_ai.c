@@ -235,27 +235,7 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     }
 
     // ========================================
-    // フェーズ1: 序盤定石のチェック
-    // ========================================
-    if (move_count < 5) {  // 最初の5手は定石を参照
-        int book_x, book_y;
-        if (find_opening_move(board, move_count, &book_x, &book_y)) {
-            *pos_x = book_x;
-            *pos_y = book_y;
-            return 0;
-        }
-    }
-
-    // 初手の場合は中央
-    if (move_count == 0) {
-        *pos_y = BOARD_SIZE / 2;
-        *pos_x = BOARD_SIZE / 2;
-        printf("[AI] First move at center (%d, %d)\n", *pos_x, *pos_y);
-        return 0;
-    }
-
-    // ========================================
-    // フェーズ2: 詰みと必死のチェック (TSS)
+    // フェーズ1: 詰みと必死のチェック (TSS) - 最優先
     // ========================================
     int win_x, win_y;
     int attack_level;
@@ -298,11 +278,34 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     if (attack_level == 1) {  // 開いた三 or 間空き三
         *pos_x = win_x;
         *pos_y = win_y;
-        printf("[AI] Open three / split three attack executed!\n");
+        printf("[AI] Strong attack move executed!\n");
         return 0;
     }
 
-    // 相手の開いた三または間空き三を防ぐ
+    // ========================================
+    // フェーズ2: 序盤定石のチェック（脅威手より後に実行）
+    // ========================================
+    if (move_count < 5) {  // 最初の5手は定石を参照（脅威がない場合のみ）
+        int book_x, book_y;
+        if (find_opening_move(board, move_count, &book_x, &book_y)) {
+            *pos_x = book_x;
+            *pos_y = book_y;
+            printf("[AI] Opening book move: (%d, %d)\n", *pos_x, *pos_y);
+            return 0;
+        }
+    }
+
+    // 初手の場合は中央（定石が見つからなかった場合）
+    if (move_count == 0) {
+        *pos_y = BOARD_SIZE / 2;
+        *pos_x = BOARD_SIZE / 2;
+        printf("[AI] First move at center (%d, %d)\n", *pos_x, *pos_y);
+        return 0;
+    }
+
+    // ========================================
+    // フェーズ3: 相手の開いた三を防ぐ（定石より後）
+    // ========================================
     if (defense_level == 1) {
         *pos_x = win_x;
         *pos_y = win_y;
@@ -311,7 +314,7 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     }
 
     // ========================================
-    // フェーズ3: Alpha-Beta探索 or 反復深化探索
+    // フェーズ4: Alpha-Beta探索 or 反復深化探索
     // ========================================
     int best_x, best_y;
     int score;

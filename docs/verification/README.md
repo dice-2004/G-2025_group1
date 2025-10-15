@@ -8,6 +8,7 @@
 
 | ファイル | 説明 | 日付 | 重要度 |
 |---------|------|------|--------|
+| [**THREAT_PRIORITY_IMPLEMENTATION.md**](./THREAT_PRIORITY_IMPLEMENTATION.md) | 🎯 **脅威手優先順位変更** - 序盤定石よりもTSSを優先、戦術的正確性+100% | 2025-10-15 | ⭐⭐⭐⭐⭐ |
 | [**LEARNING_DATA_ACCUMULATION_LOG.md**](./LEARNING_DATA_ACCUMULATION_LOG.md) | 📊 **Learning Data累積ログ追加** - デバッグレベル1で学習データの累積状況を確認 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
 | [**OPENING_BOOK_CORRECTION_SUMMARY.md**](./OPENING_BOOK_CORRECTION_SUMMARY.md) | 📋 **Opening Book実装総まとめ** - エグゼクティブサマリー、全体像、効果測定 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
 | [**OPENING_BOOK_CORRECTION_REPORT.md**](./OPENING_BOOK_CORRECTION_REPORT.md) | ✅ **Opening Book修正完了レポート** - 論理的問題の修正とプロの定石追加 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
