@@ -47,3 +47,18 @@ DEBUG_LEVEL=3
 # 注意: 探索中に時間切れになった場合、その深度の結果は破棄され、
 #       前の深度の結果が返されます
 ID_TIME_THRESHOLD=0.8
+
+# 厳格な時間制限（ミリ秒、0=TIMEOUT_MSと同じ）
+# TIMEOUT_MSとは別に、探索中に「絶対に超えてはいけない」時間制限を設定できます
+# 0: TIMEOUT_MSと同じ時間制限を使用（デフォルト）
+# >0: TIMEOUT_MSとは独立した厳格な制限時間
+#
+# 使用例:
+#   TIMEOUT_MS=10000, STRICT_TIME_LIMIT_MS=0     → 10秒の通常制限
+#   TIMEOUT_MS=10000, STRICT_TIME_LIMIT_MS=8000  → 通常10秒だが、絶対に8秒で停止
+#   TIMEOUT_MS=15000, STRICT_TIME_LIMIT_MS=12000 → 通常15秒だが、絶対に12秒で停止
+#
+# メリット:
+#   - ターン制ゲームで時間切れによる失格を防ぐ
+#   - 制限時間ぎりぎりまで探索しつつ、安全マージンを確保
+STRICT_TIME_LIMIT_MS=0

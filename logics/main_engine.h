@@ -12,4 +12,8 @@ int alpha_beta_search(const int board[][BOARD_SIZE], int color, int depth,
 int iterative_deepening(const int board[][BOARD_SIZE], int color, int time_limit_ms,
                         int *best_x, int *best_y);
 
+// 早期カットオフ閾値の取得・設定（学習用）
+int get_early_cutoff_threshold(void);
+void set_early_cutoff_threshold(int threshold);
+
 #endif

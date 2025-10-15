@@ -145,6 +145,18 @@ static int alpha_beta(const int board[][BOARD_SIZE], int depth, int alpha, int b
         int max_eval = -INF;
 
         for (int i = 0; i < move_count; i++) {
+            // ループ内での時間制限チェック
+            if (g_search_deadline > 0) {
+                clock_t current = clock();
+                if (current >= g_search_deadline) {
+                    g_time_limit_exceeded = 1;
+                    if (g_config.debug_level >= 3) {
+                        printf("  [Time Limit] Exceeded in Max loop at move %d/%d\n", i+1, move_count);
+                    }
+                    return max_eval;  // 現在の最良値を返す
+                }
+            }
+
             // 手を打つ
             int temp_board[BOARD_SIZE][BOARD_SIZE];
             memcpy(temp_board, board, sizeof(temp_board));
@@ -155,6 +167,11 @@ static int alpha_beta(const int board[][BOARD_SIZE], int depth, int alpha, int b
 
             // 再帰呼び出し
             int eval = alpha_beta(temp_board, depth - 1, alpha, beta, opponent, max_color, new_hash);
+
+            // 時間切れフラグがセットされていたら即座に返す
+            if (g_time_limit_exceeded) {
+                return max_eval;
+            }
 
             if (eval > max_eval) {
                 max_eval = eval;
@@ -186,6 +203,18 @@ static int alpha_beta(const int board[][BOARD_SIZE], int depth, int alpha, int b
         int min_eval = INF;
 
         for (int i = 0; i < move_count; i++) {
+            // ループ内での時間制限チェック
+            if (g_search_deadline > 0) {
+                clock_t current = clock();
+                if (current >= g_search_deadline) {
+                    g_time_limit_exceeded = 1;
+                    if (g_config.debug_level >= 3) {
+                        printf("  [Time Limit] Exceeded in Min loop at move %d/%d\n", i+1, move_count);
+                    }
+                    return min_eval;  // 現在の最良値を返す
+                }
+            }
+
             // 手を打つ
             int temp_board[BOARD_SIZE][BOARD_SIZE];
             memcpy(temp_board, board, sizeof(temp_board));
@@ -196,6 +225,11 @@ static int alpha_beta(const int board[][BOARD_SIZE], int depth, int alpha, int b
 
             // 再帰呼び出し
             int eval = alpha_beta(temp_board, depth - 1, alpha, beta, opponent, max_color, new_hash);
+
+            // 時間切れフラグがセットされていたら即座に返す
+            if (g_time_limit_exceeded) {
+                return min_eval;
+            }
 
             if (eval < min_eval) {
                 min_eval = eval;
@@ -277,6 +311,18 @@ int alpha_beta_search(const int board[][BOARD_SIZE], int color, int depth,
     }
 
     for (int i = 0; i < move_count; i++) {
+        // ルート探索での時間制限チェック
+        if (g_search_deadline > 0) {
+            clock_t current = clock();
+            if (current >= g_search_deadline) {
+                g_time_limit_exceeded = 1;
+                if (g_config.debug_level >= 2) {
+                    printf("[Root] Time limit exceeded at move %d/%d\n", i+1, move_count);
+                }
+                break;  // これまでの最良手を使用
+            }
+        }
+
         // 手を打つ
         int temp_board[BOARD_SIZE][BOARD_SIZE];
         memcpy(temp_board, board, sizeof(temp_board));
@@ -288,6 +334,14 @@ int alpha_beta_search(const int board[][BOARD_SIZE], int color, int depth,
         // Alpha-Beta探索
         int score = alpha_beta(temp_board, depth - 1, -INF, INF, opponent, color, new_hash);
         scored_moves[i].score = score;
+
+        // 時間切れフラグがセットされていたら終了
+        if (g_time_limit_exceeded) {
+            if (g_config.debug_level >= 2) {
+                printf("[Root] Time exceeded during search, stopping at move %d/%d\n", i+1, move_count);
+            }
+            break;
+        }
 
         if (g_config.debug_level >= 3) {
             printf("[Root] Move %d/%d: (%d,%d) score=%d\n",
@@ -337,6 +391,24 @@ int alpha_beta_search(const int board[][BOARD_SIZE], int color, int depth,
 }
 
 // ========================================
+// 早期カットオフ閾値の取得・設定（学習用）
+// ========================================
+
+int get_early_cutoff_threshold(void) {
+    return g_early_cutoff_threshold;
+}
+
+void set_early_cutoff_threshold(int threshold) {
+    // 範囲チェック：3000～15000の範囲に制限
+    if (threshold < 3000) threshold = 3000;
+    if (threshold > 15000) threshold = 15000;
+
+    g_early_cutoff_threshold = threshold;
+
+    printf("[Engine] Early cutoff threshold set to %d\n", g_early_cutoff_threshold);
+}
+
+// ========================================
 // 反復深化探索
 // ========================================
 
@@ -364,11 +436,23 @@ int iterative_deepening(const int board[][BOARD_SIZE], int color, int time_limit
     if (threshold < 0.0) threshold = 0.0;
     if (threshold > 1.0) threshold = 1.0;
 
+    // 厳格な時間制限の取得（0の場合はtime_limit_msと同じ）
+    int strict_time_limit = g_config.strict_time_limit_ms;
+    if (strict_time_limit == 0) {
+        strict_time_limit = time_limit_ms;
+    }
+
     if (g_config.debug_level >= 1) {
         printf("\n========================================\n");
         printf("[Iterative Deepening] Starting search\n");
         printf("  Max depth: %d\n", max_depth);
         printf("  Time limit: %d ms\n", time_limit_ms);
+        printf("  Strict time limit: %d ms", strict_time_limit);
+        if (g_config.strict_time_limit_ms == 0) {
+            printf(" (same as time limit)\n");
+        } else {
+            printf(" (configured separately)\n");
+        }
         printf("  Time threshold: %.0f%%\n", threshold * 100);
         printf("  Early cutoff threshold: %d\n", g_early_cutoff_threshold);
         printf("========================================\n\n");
@@ -380,7 +464,17 @@ int iterative_deepening(const int board[][BOARD_SIZE], int color, int time_limit
         clock_t current_time = clock();
         double elapsed = (double)(current_time - start_time) / CLOCKS_PER_SEC * 1000;
 
-        // 閾値を超えている場合は、次の深度の探索を開始しない
+        // 【重要】厳格な時間制限を先にチェック（絶対に超えてはいけない）
+        if (strict_time_limit > 0 && elapsed >= strict_time_limit) {
+            if (g_config.debug_level >= 1) {
+                printf("[ID] Strict time limit reached before depth %d (%.0fms >= %dms strict).\n",
+                       depth, elapsed, strict_time_limit);
+                printf("[ID] Returning result from depth %d.\n", completed_depth);
+            }
+            break;
+        }
+
+        // 通常の閾値チェック（次の深度に進むかの判定）
         if (time_limit_ms > 0 && elapsed > time_limit_ms * threshold) {
             if (g_config.debug_level >= 1) {
                 printf("[ID] Time threshold reached (%.0fms / %dms = %.1f%%), stopping before depth %d.\n",
@@ -392,16 +486,16 @@ int iterative_deepening(const int board[][BOARD_SIZE], int color, int time_limit
 
         // 厳格な時間制限を設定（この深さの探索中に絶対に超えてはいけない時間）
         g_time_limit_exceeded = 0;
-        if (time_limit_ms > 0) {
-            // 残り時間を計算し、その時間でデッドラインを設定
-            double remaining_ms = time_limit_ms - elapsed;
-            if (remaining_ms <= 0) {
-                if (g_config.debug_level >= 1) {
-                    printf("[ID] No time remaining, stopping before depth %d.\n", depth);
-                }
-                break;
+        if (strict_time_limit > 0) {
+            // 厳格な時間制限を使用してデッドラインを設定
+            // これは元のtime_limit_msとは独立した、絶対に守らなければならない制限
+            g_search_deadline = start_time + (clock_t)((strict_time_limit * CLOCKS_PER_SEC) / 1000);
+
+            if (g_config.debug_level >= 3) {
+                double strict_remaining = strict_time_limit - elapsed;
+                printf("[ID] Strict deadline set: %.0f ms remaining (of %d ms strict limit)\n",
+                       strict_remaining, strict_time_limit);
             }
-            g_search_deadline = start_time + (clock_t)((time_limit_ms * CLOCKS_PER_SEC) / 1000);
         } else {
             g_search_deadline = 0;  // 時間制限なし
         }
@@ -417,11 +511,12 @@ int iterative_deepening(const int board[][BOARD_SIZE], int color, int time_limit
         // 探索完了後に時間チェック
         elapsed = (double)(depth_end - start_time) / CLOCKS_PER_SEC * 1000;
 
-        // 時間制限を超えた場合は、この深度の結果を破棄して前の深度の結果を返す
-        if (time_limit_ms > 0 && elapsed > time_limit_ms) {
+        // 厳格な時間制限を超えた場合は、この深度の結果を破棄して前の深度の結果を返す
+        // これは通常の時間制限とは別に、必ず守られるべき制限
+        if (strict_time_limit > 0 && elapsed > strict_time_limit) {
             if (g_config.debug_level >= 1) {
-                printf("[ID] Time limit exceeded during depth %d search (%.0fms / %dms).\n",
-                       depth, elapsed, time_limit_ms);
+                printf("[ID] Strict time limit exceeded during depth %d search (%.0fms / %dms strict).\n",
+                       depth, elapsed, strict_time_limit);
                 printf("[ID] Discarding depth %d result, returning depth %d result: (%d, %d) score=%d\n",
                        depth, completed_depth, prev_x, prev_y, prev_score);
             }
@@ -435,7 +530,7 @@ int iterative_deepening(const int board[][BOARD_SIZE], int color, int time_limit
         // 時間制限超過フラグがセットされている場合、この深さの結果を破棄
         if (g_time_limit_exceeded) {
             if (g_config.debug_level >= 1) {
-                printf("[ID] Strict time limit exceeded during depth %d search.\n", depth);
+                printf("[ID] Strict time limit exceeded during depth %d search (detected by flag).\n", depth);
                 printf("[ID] Discarding depth %d result, returning depth %d result: (%d, %d) score=%d\n",
                        depth, completed_depth, prev_x, prev_y, prev_score);
             }

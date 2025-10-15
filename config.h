@@ -13,6 +13,7 @@ typedef struct {
     int iterative_deepening;     // 反復深化探索（0=OFF, 1=ON）
     int debug_level;             // デバッグレベル（0-3）
     double id_time_threshold;    // ID時間制限閾値（0.0～1.0）
+    int strict_time_limit_ms;    // 厳格な時間制限（ミリ秒、0=timeout_msと同じ）
 } AIConfig;
 
 // グローバル設定

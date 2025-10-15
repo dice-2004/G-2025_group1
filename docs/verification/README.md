@@ -8,6 +8,8 @@
 
 | ファイル | 説明 | 日付 | 重要度 |
 |---------|------|------|--------|
+| [**TIME_LIMIT_VERIFICATION.md**](./TIME_LIMIT_VERIFICATION.md) | ⏱️ **時間制限機能の検証レポート** - 通常時間制限と厳格時間制限の独立動作検証 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [**TIME_LIMIT_TEST_GUIDE.md**](./TIME_LIMIT_TEST_GUIDE.md) | 🧪 **時間制限機能のテストガイド** - 実行例、期待される動作、検証チェックリスト | 2025-10-15 | ⭐⭐⭐⭐ |
 | [**TSS_AND_LEARNING_VERIFICATION.md**](./TSS_AND_LEARNING_VERIFICATION.md) | 🎯 **TSS機能と学習システム実装検証** - 勝ち手・防御手検出、学習データファイル作成の検証 | 2025-10-14 | ⭐⭐⭐⭐⭐ |
 
 ### 🆕 最適化成果

@@ -12,7 +12,8 @@ AIConfig g_config = {
     .learning_mode = LEARNING_MODE_PRACTICE,  // デフォルトは練習モード
     .iterative_deepening = 1,                 // デフォルトはON
     .debug_level = 1,                         // デフォルトは基本情報
-    .id_time_threshold = 0.8                  // デフォルトは80%
+    .id_time_threshold = 0.8,                 // デフォルトは80%
+    .strict_time_limit_ms = 0                 // デフォルトは0（timeout_msと同じ）
 };
 
 // デフォルト設定を使用
@@ -25,6 +26,7 @@ void use_default_config(void) {
     g_config.iterative_deepening = 1;
     g_config.debug_level = 1;
     g_config.id_time_threshold = 0.8;
+    g_config.strict_time_limit_ms = 0;
 }
 
 // 設定ファイルから読み込み
@@ -87,6 +89,10 @@ int load_config(const char *filename) {
                 if (g_config.id_time_threshold < 0.0) g_config.id_time_threshold = 0.0;
                 if (g_config.id_time_threshold > 1.0) g_config.id_time_threshold = 1.0;
                 loaded++;
+            } else if (strcmp(key, "STRICT_TIME_LIMIT_MS") == 0) {
+                g_config.strict_time_limit_ms = atoi(value);
+                if (g_config.strict_time_limit_ms < 0) g_config.strict_time_limit_ms = 0;
+                loaded++;
             }
         }
     }
@@ -108,6 +114,12 @@ int load_config(const char *filename) {
     else printf("(超詳細)\n");
     printf("  ID_TIME_THRESHOLD = %.2f (%.0f%%)\n",
            g_config.id_time_threshold, g_config.id_time_threshold * 100);
+    printf("  STRICT_TIME_LIMIT_MS = %d ms", g_config.strict_time_limit_ms);
+    if (g_config.strict_time_limit_ms == 0) {
+        printf(" (same as TIMEOUT_MS)\n");
+    } else {
+        printf("\n");
+    }
 
     return loaded;
 }

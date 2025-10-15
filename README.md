@@ -206,6 +206,7 @@ docs/
 #### 最新の検証レポート
 | ファイル | 説明 | 日付 | 重要度 |
 |---------|------|------|--------|
+| [TIME_LIMIT_VERIFICATION.md](./docs/verification/TIME_LIMIT_VERIFICATION.md) | ⏱️ **時間制限機能の検証レポート** - 通常/厳格制限の動作検証 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
 | [TSS_AND_LEARNING_VERIFICATION.md](./docs/verification/TSS_AND_LEARNING_VERIFICATION.md) | 🎯 TSS機能と学習システム実装検証 | 2025-10-14 | ⭐⭐⭐⭐⭐ |
 
 #### 最適化成果
