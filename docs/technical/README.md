@@ -28,6 +28,7 @@
 |---------|------|--------|
 | [**LEARNING_GUIDE.md**](./LEARNING_GUIDE.md) | 📊 **学習機能の詳細ガイド** - 学習アルゴリズム、データ永続化 | 開発者・研究者 |
 | [**LEARNING_IMPLEMENTATION.md**](./LEARNING_IMPLEMENTATION.md) | 💡 **学習システム実装詳細** - 実装手順と技術選択の理由 | 開発者 |
+| [**LEARNING_DEBUG_GUIDE.md**](./LEARNING_DEBUG_GUIDE.md) | 🐛 **学習機能デバッグガイド** - トラブルシューティングとデバッグ方法 | 開発者 |
 
 ## 🎯 読む順番（推奨）
 

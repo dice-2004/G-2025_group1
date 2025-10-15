@@ -14,6 +14,7 @@ typedef struct {
     int debug_level;             // デバッグレベル（0-3）
     double id_time_threshold;    // ID時間制限閾値（0.0～1.0）
     int strict_time_limit_ms;    // 厳格な時間制限（ミリ秒、0=timeout_msと同じ）
+    double early_cutoff_time_threshold;  // Early cutoff時間閾値（0.0～1.0）
 } AIConfig;
 
 // グローバル設定

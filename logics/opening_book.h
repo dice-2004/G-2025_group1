@@ -9,6 +9,7 @@ typedef struct {
     int x;
     int y;
     char comment[128];
+    int game_id;  // 学習元のゲーム番号（-1 = ゲームIDなし）
 } OpeningMove;
 
 // 序盤定石の読み込み

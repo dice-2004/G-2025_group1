@@ -195,6 +195,7 @@ docs/
 |---------|------|--------|
 | [LEARNING_GUIDE.md](./docs/technical/LEARNING_GUIDE.md) | 📊 学習機能の詳細ガイド - 学習アルゴリズム | 開発者・研究者 |
 | [LEARNING_IMPLEMENTATION.md](./docs/technical/LEARNING_IMPLEMENTATION.md) | 💡 学習システム実装詳細 - 実装手順と技術選択 | 開発者 |
+| [LEARNING_DEBUG_GUIDE.md](./docs/technical/LEARNING_DEBUG_GUIDE.md) | 🐛 学習機能デバッグガイド - トラブルシューティング | 開発者 |
 
 **詳細は→** [技術ドキュメント README](./docs/technical/README.md)
 
@@ -206,7 +207,16 @@ docs/
 #### 最新の検証レポート
 | ファイル | 説明 | 日付 | 重要度 |
 |---------|------|------|--------|
+| [OPENING_BOOK_CORRECTION_SUMMARY.md](./docs/verification/OPENING_BOOK_CORRECTION_SUMMARY.md) | 📋 **Opening Book実装総まとめ** - 論理的問題の修正完了とエグゼクティブサマリー | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [OPENING_BOOK_CORRECTION_REPORT.md](./docs/verification/OPENING_BOOK_CORRECTION_REPORT.md) | ✅ **Opening Book修正完了レポート** - 11種類の定石追加と動作検証 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [OPENING_BOOK_LOGICAL_VERIFICATION.md](./docs/verification/OPENING_BOOK_LOGICAL_VERIFICATION.md) | 🔍 **Opening Book論理的検証** - 3つの重大な問題の発見と修正提案 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [OPENING_BOOK_GAME_SEQUENCE_IMPLEMENTATION.md](./docs/verification/OPENING_BOOK_GAME_SEQUENCE_IMPLEMENTATION.md) | 🎯 **Opening Bookゲーム単位選択の実装** - 手順整合性を保証する最適な定石選択 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [OPENING_BOOK_SEQUENCE_ANALYSIS.md](./docs/verification/OPENING_BOOK_SEQUENCE_ANALYSIS.md) | 🔍 **Opening Book手順整合性の問題分析** - ユーザー洞察に基づく改善と検証 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [THREAT_DETECTION_TIMING_ANALYSIS.md](./docs/verification/THREAT_DETECTION_TIMING_ANALYSIS.md) | 🛡️ **脅威検出タイミング分析** - 防御判定の戦略的改善提案 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [EARLY_CUTOFF_ANALYSIS.md](./docs/verification/EARLY_CUTOFF_ANALYSIS.md) | 🎯 **Early Cutoff機能の検証と改善** - 時間有効活用の改善 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [EARLY_CUTOFF_IMPLEMENTATION.md](./docs/verification/EARLY_CUTOFF_IMPLEMENTATION.md) | 💡 **Early Cutoff実装完了レポート** - 改善実装の詳細 | 2025-10-15 | ⭐⭐⭐⭐ |
 | [TIME_LIMIT_VERIFICATION.md](./docs/verification/TIME_LIMIT_VERIFICATION.md) | ⏱️ **時間制限機能の検証レポート** - 通常/厳格制限の動作検証 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [TIME_LIMIT_TEST_GUIDE.md](./docs/verification/TIME_LIMIT_TEST_GUIDE.md) | 🧪 **時間制限テストガイド** - テスト方法と検証手順 | 2025-10-15 | ⭐⭐⭐⭐ |
 | [TSS_AND_LEARNING_VERIFICATION.md](./docs/verification/TSS_AND_LEARNING_VERIFICATION.md) | 🎯 TSS機能と学習システム実装検証 | 2025-10-14 | ⭐⭐⭐⭐⭐ |
 
 #### 最適化成果
@@ -252,6 +262,9 @@ docs/
 #### 修正・メンテナンスレポート
 | ファイル | 説明 | 実施日 |
 |---------|------|--------|
+| [ID_AND_TSS_IMPROVEMENTS.md](./docs/reports/ID_AND_TSS_IMPROVEMENTS.md) | 🔧 ID & TSS改善レポート - 反復深化とTSSの機能強化 | 2025-10-11 |
+| [LEARNING_AND_TSS_FIX_REPORT.md](./docs/reports/LEARNING_AND_TSS_FIX_REPORT.md) | 🔧 学習&TSS修正レポート - バグ修正と動作改善 | 2025-10-11 |
+| [TSS_AND_LEARNING_FIX_V2.md](./docs/reports/TSS_AND_LEARNING_FIX_V2.md) | 🔧 TSS&学習修正v2 - 追加修正と検証 | 2025-10-11 |
 | [MAKEFILE_FIX_REPORT.md](./docs/reports/MAKEFILE_FIX_REPORT.md) | 🔨 Makefile修正レポート - クロスプラットフォーム対応 | 2025-10-11 |
 | [WARNING_FIX_REPORT.md](./docs/reports/WARNING_FIX_REPORT.md) | ⚠️ 警告修正レポート - コンパイラ警告の解消 | 2025-10-11 |
 | [DOCUMENTATION_ORGANIZATION_REPORT.md](./docs/reports/DOCUMENTATION_ORGANIZATION_REPORT.md) | 📂 ドキュメント整理レポート | 2025-10-12 |
@@ -407,12 +420,12 @@ make rebuild
 
 | カテゴリ | ドキュメント数 | 総ページ数（推定） |
 |---------|--------------|------------------|
-| クイックスタート・プレゼン | 2個 | ~100ページ |
-| ガイドドキュメント | 9個 | ~300ページ |
-| 技術ドキュメント | 5個 | ~1,500ページ |
-| 検証・最適化レポート | 6個 | ~400ページ |
-| 実装検証・報告書 | 11個 | ~600ページ |
-| **合計** | **33個** | **~2,900ページ** |
+| クイックスタート・プレゼン | 3個 | ~100ページ |
+| ガイドドキュメント | 10個 | ~300ページ |
+| 技術ドキュメント | 7個 | ~1,500ページ |
+| 検証・最適化レポート | 13個 | ~600ページ |
+| 実装検証・報告書 | 15個 | ~700ページ |
+| **合計** | **48個** | **~3,200ページ** |
 
 ---
 

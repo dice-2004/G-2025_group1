@@ -556,22 +556,33 @@ int iterative_deepening(const int board[][BOARD_SIZE], int color, int time_limit
                    time_limit_ms > 0 ? (elapsed / time_limit_ms) * 100 : 0);
         }
 
-        // 早期カットオフ: 十分に高い評価値が得られたら次の深さに進まずに返す
-        if (g_early_cutoff_threshold > 0 && score >= g_early_cutoff_threshold) {
-            if (g_config.debug_level >= 1) {
-                printf("[ID] Early cutoff triggered! score=%d >= threshold=%d\n",
-                       score, g_early_cutoff_threshold);
-                printf("[ID] Returning without deeper search.\n");
-            }
-            break;
-        }
-
-        // 勝ちが見つかったら終了
+        // 勝ちが見つかったら終了（最優先）
         if (score > SCORE_FIVE / 2) {
             if (g_config.debug_level >= 1) {
                 printf("[ID] Winning move found! (score=%d)\n", score);
             }
             break;
+        }
+
+        // 早期カットオフ: 十分に高い評価値 + 時間的余裕がない場合のみ
+        if (g_early_cutoff_threshold > 0 && score >= g_early_cutoff_threshold) {
+            double time_usage = (time_limit_ms > 0) ? (elapsed / time_limit_ms) : 0.0;
+            double time_threshold = g_config.early_cutoff_time_threshold;
+
+            // 時間を閾値以上使っている場合のみカットオフ
+            if (time_usage >= time_threshold) {
+                if (g_config.debug_level >= 1) {
+                    printf("[ID] Early cutoff triggered! score=%d >= threshold=%d (time usage: %.1f%% >= %.1f%%)\n",
+                           score, g_early_cutoff_threshold, time_usage * 100, time_threshold * 100);
+                    printf("[ID] Returning without deeper search.\n");
+                }
+                break;
+            } else {
+                if (g_config.debug_level >= 2) {
+                    printf("[ID] High score (%d >= %d) but time remaining (%.1f%% < %.1f%%), continuing search.\n",
+                           score, g_early_cutoff_threshold, time_usage * 100, time_threshold * 100);
+                }
+            }
         }
 
         // 負けが確定したら終了

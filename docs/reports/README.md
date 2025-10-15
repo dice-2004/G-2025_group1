@@ -25,9 +25,13 @@
 
 | ファイル | 説明 | 実施日 |
 |---------|------|--------|
+| [**ID_AND_TSS_IMPROVEMENTS.md**](./ID_AND_TSS_IMPROVEMENTS.md) | 🔧 **ID & TSS改善レポート** - 反復深化とTSSの機能強化 | 2025-10-11 |
+| [**LEARNING_AND_TSS_FIX_REPORT.md**](./LEARNING_AND_TSS_FIX_REPORT.md) | 🔧 **学習&TSS修正レポート** - バグ修正と動作改善 | 2025-10-11 |
+| [**TSS_AND_LEARNING_FIX_V2.md**](./TSS_AND_LEARNING_FIX_V2.md) | 🔧 **TSS&学習修正v2** - 追加修正と検証 | 2025-10-11 |
 | [**MAKEFILE_FIX_REPORT.md**](./MAKEFILE_FIX_REPORT.md) | 🔨 **Makefile修正レポート** - クロスプラットフォーム対応 | 2025-10-11 |
 | [**WARNING_FIX_REPORT.md**](./WARNING_FIX_REPORT.md) | ⚠️ **警告修正レポート** - コンパイラ警告の解消 | 2025-10-11 |
 | [**DOCUMENTATION_ORGANIZATION_REPORT.md**](./DOCUMENTATION_ORGANIZATION_REPORT.md) | 📂 **ドキュメント整理レポート** - ドキュメント構造の再編成 | 2025-10-12 |
+| [**CATEGORY_ORGANIZATION_REPORT.md**](./CATEGORY_ORGANIZATION_REPORT.md) | 🗂️ **カテゴリ整理レポート** - カテゴリ分類の改善 | 2025-10-12 |
 
 ## 🎯 読む順番（推奨）
 

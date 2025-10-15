@@ -13,7 +13,8 @@ AIConfig g_config = {
     .iterative_deepening = 1,                 // デフォルトはON
     .debug_level = 1,                         // デフォルトは基本情報
     .id_time_threshold = 0.8,                 // デフォルトは80%
-    .strict_time_limit_ms = 0                 // デフォルトは0（timeout_msと同じ）
+    .strict_time_limit_ms = 0,                // デフォルトは0（timeout_msと同じ）
+    .early_cutoff_time_threshold = 0.5        // デフォルトは50%
 };
 
 // デフォルト設定を使用
@@ -27,6 +28,7 @@ void use_default_config(void) {
     g_config.debug_level = 1;
     g_config.id_time_threshold = 0.8;
     g_config.strict_time_limit_ms = 0;
+    g_config.early_cutoff_time_threshold = 0.5;
 }
 
 // 設定ファイルから読み込み
@@ -93,6 +95,11 @@ int load_config(const char *filename) {
                 g_config.strict_time_limit_ms = atoi(value);
                 if (g_config.strict_time_limit_ms < 0) g_config.strict_time_limit_ms = 0;
                 loaded++;
+            } else if (strcmp(key, "EARLY_CUTOFF_TIME_THRESHOLD") == 0) {
+                g_config.early_cutoff_time_threshold = atof(value);
+                if (g_config.early_cutoff_time_threshold < 0.0) g_config.early_cutoff_time_threshold = 0.0;
+                if (g_config.early_cutoff_time_threshold > 1.0) g_config.early_cutoff_time_threshold = 1.0;
+                loaded++;
             }
         }
     }
@@ -120,6 +127,8 @@ int load_config(const char *filename) {
     } else {
         printf("\n");
     }
+    printf("  EARLY_CUTOFF_TIME_THRESHOLD = %.2f (%.0f%%)\n",
+           g_config.early_cutoff_time_threshold, g_config.early_cutoff_time_threshold * 100);
 
     return loaded;
 }

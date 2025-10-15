@@ -35,6 +35,10 @@
 評価関数の最適化、窓サイズの分析、正確性の検証
 
 **主なドキュメント:**
+- 🆕 **Opening Book実装総まとめ** - 論理的問題の修正完了
+- 🆕 **Opening Book修正完了レポート** - 11種類の定石追加
+- 🆕 **Opening Book論理的検証** - 3つの重大な問題の発見
+- 🆕 **Opening Bookゲーム単位選択の実装** - 手順整合性保証
 - 🆕 窓サイズ詳細分析
 - 🆕 11マス抽出+6マス窓実装レポート
 - テンプレートマッチング分析
@@ -82,6 +86,9 @@
 ### 技術詳細を知りたい
 → [完全技術資料](./technical/TECHNICAL_DOCUMENT.md)
 
+### Opening Bookの修正内容を知りたい（NEW!）
+→ [Opening Book実装総まとめ](./verification/OPENING_BOOK_CORRECTION_SUMMARY.md)
+
 ### 最適化の詳細を知りたい
 → [窓サイズ詳細分析](./verification/WINDOW_SIZE_ANALYSIS.md)
 
@@ -118,12 +125,12 @@
 
 | カテゴリ | ドキュメント数 | 総ページ数（推定） |
 |---------|--------------|------------------|
-| ガイドドキュメント | 5個 | ~300ページ |
-| 技術ドキュメント | 4個 | ~1,500ページ |
-| 検証・最適化レポート | 6個 | ~400ページ |
-| 実装検証・報告書 | 10個 | ~600ページ |
-| クイックスタート・プレゼン | 2個 | ~100ページ |
-| **合計** | **27個** | **~2,900ページ** |
+| クイックスタート・プレゼン | 3個 | ~100ページ |
+| ガイドドキュメント | 10個 | ~300ページ |
+| 技術ドキュメント | 7個 | ~1,500ページ |
+| 検証・最適化レポート | 15個 | ~700ページ |
+| 実装検証・報告書 | 15個 | ~700ページ |
+| **合計** | **50個** | **~3,300ページ** |
 
 ---
 
@@ -134,6 +141,12 @@
 - **デバッグ**: [デバッグ&ID実装ガイド](./guides/DEBUG_AND_ID_GUIDE.md)
 - **時間管理**: [ID時間管理ガイド](./guides/ID_TIME_MANAGEMENT.md)
 - **評価関数**: [完全技術資料](./technical/TECHNICAL_DOCUMENT.md) の評価関数セクション
+
+### Opening Book関連を調べたい（NEW!）
+- **実装総まとめ**: [Opening Book実装総まとめ](./verification/OPENING_BOOK_CORRECTION_SUMMARY.md)
+- **修正完了レポート**: [Opening Book修正完了レポート](./verification/OPENING_BOOK_CORRECTION_REPORT.md)
+- **論理的検証**: [Opening Book論理的検証](./verification/OPENING_BOOK_LOGICAL_VERIFICATION.md)
+- **ゲーム単位選択**: [Opening Bookゲーム単位選択の実装](./verification/OPENING_BOOK_GAME_SEQUENCE_IMPLEMENTATION.md)
 
 ### 特定のバージョンを調べたい
 - **v3.3**: [COMPLETION_v3.3.md](./reports/COMPLETION_v3.3.md)

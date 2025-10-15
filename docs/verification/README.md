@@ -8,6 +8,17 @@
 
 | ファイル | 説明 | 日付 | 重要度 |
 |---------|------|------|--------|
+| [**LEARNING_DATA_ACCUMULATION_LOG.md**](./LEARNING_DATA_ACCUMULATION_LOG.md) | 📊 **Learning Data累積ログ追加** - デバッグレベル1で学習データの累積状況を確認 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [**OPENING_BOOK_CORRECTION_SUMMARY.md**](./OPENING_BOOK_CORRECTION_SUMMARY.md) | 📋 **Opening Book実装総まとめ** - エグゼクティブサマリー、全体像、効果測定 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [**OPENING_BOOK_CORRECTION_REPORT.md**](./OPENING_BOOK_CORRECTION_REPORT.md) | ✅ **Opening Book修正完了レポート** - 論理的問題の修正とプロの定石追加 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [**OPENING_BOOK_LOGICAL_VERIFICATION.md**](./OPENING_BOOK_LOGICAL_VERIFICATION.md) | 🔍 **Opening Book論理的検証** - opening_book.csvの問題発見と修正提案 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [**OPENING_BOOK_GAME_SEQUENCE_IMPLEMENTATION.md**](./OPENING_BOOK_GAME_SEQUENCE_IMPLEMENTATION.md) | 🎯 **Opening Bookゲーム単位選択の実装** - 手順の整合性を保証する最適な定石選択 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [**OPENING_BOOK_SEQUENCE_ANALYSIS.md**](./OPENING_BOOK_SEQUENCE_ANALYSIS.md) | 🔍 **Opening Book手順整合性の問題分析** - ユーザー洞察に基づく改善提案と検証 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [**OPENING_BOOK_RANDOM_SELECTION.md**](./OPENING_BOOK_RANDOM_SELECTION.md) | 🎲 **Opening Bookランダム選択機能の実装** - 学習システムとの連携による多様な序盤戦略（旧版） | 2025-10-15 | ⭐⭐⭐ |
+| [**OPENING_BOOK_ANALYSIS.md**](./OPENING_BOOK_ANALYSIS.md) | 📖 **Opening Book問題分析と改善提案** - 現状の問題点と4つの改善提案 | 2025-10-15 | ⭐⭐⭐⭐ |
+| [**THREAT_DETECTION_TIMING_ANALYSIS.md**](./THREAT_DETECTION_TIMING_ANALYSIS.md) | 🛡️ **脅威検出タイミングの検証と改善提案** - 防御判定の戦略的分析と攻守バランス改善 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [**EARLY_CUTOFF_ANALYSIS.md**](./EARLY_CUTOFF_ANALYSIS.md) | 🎯 **Early Cutoff機能の検証と改善** - 時間有効活用のための改善提案と実装 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
+| [**EARLY_CUTOFF_IMPLEMENTATION.md**](./EARLY_CUTOFF_IMPLEMENTATION.md) | 💡 **Early Cutoff実装完了レポート** - 改善実装の詳細と期待される効果 | 2025-10-15 | ⭐⭐⭐⭐ |
 | [**TIME_LIMIT_VERIFICATION.md**](./TIME_LIMIT_VERIFICATION.md) | ⏱️ **時間制限機能の検証レポート** - 通常時間制限と厳格時間制限の独立動作検証 | 2025-10-15 | ⭐⭐⭐⭐⭐ |
 | [**TIME_LIMIT_TEST_GUIDE.md**](./TIME_LIMIT_TEST_GUIDE.md) | 🧪 **時間制限機能のテストガイド** - 実行例、期待される動作、検証チェックリスト | 2025-10-15 | ⭐⭐⭐⭐ |
 | [**TSS_AND_LEARNING_VERIFICATION.md**](./TSS_AND_LEARNING_VERIFICATION.md) | 🎯 **TSS機能と学習システム実装検証** - 勝ち手・防御手検出、学習データファイル作成の検証 | 2025-10-14 | ⭐⭐⭐⭐⭐ |
@@ -34,6 +45,13 @@
 | [**EVALUATION_OPTIMIZATION.md**](./EVALUATION_OPTIMIZATION.md) | 🚀 **評価関数最適化ガイド** - 最適化手法と実装方法 | 2025-10-12 |
 
 ## 🎯 読む順番（推奨）
+
+### Opening Book修正の全体像を理解したい方（NEW! ⭐推奨⭐）
+1. **OPENING_BOOK_CORRECTION_SUMMARY.md** - 📋 実装総まとめ（エグゼクティブサマリー）
+2. **OPENING_BOOK_CORRECTION_REPORT.md** - ✅ 修正完了レポート（詳細版）
+3. **OPENING_BOOK_LOGICAL_VERIFICATION.md** - 🔍 論理的問題の発見と分析
+4. **OPENING_BOOK_GAME_SEQUENCE_IMPLEMENTATION.md** - 🎯 ゲーム単位選択の実装
+5. **OPENING_BOOK_SEQUENCE_ANALYSIS.md** - 📖 手順整合性の分析
 
 ### 最適化の全体像を理解したい方
 1. **WINDOW_SIZE_ANALYSIS.md** - 窓サイズの詳細分析（最重要）

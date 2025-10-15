@@ -360,6 +360,26 @@ void finish_game_record(int result) {
            g_stats.total_games, g_stats.wins, g_stats.losses, g_stats.draws);
     printf("[Learning] Win rate: %.2f%%\n", g_stats.win_rate * 100.0);
 
+    // デバッグレベル1以上で累積統計の変化を表示
+    if (g_config.debug_level >= 1) {
+        printf("[Learning] ========================================\n");
+        printf("[Learning] Learning Progress Update:\n");
+        printf("[Learning] ----------------------------------------\n");
+        printf("[Learning]   This game result: %s\n",
+               result == 1 ? "WIN (+1)" : (result == -1 ? "LOSS (-1)" : "DRAW (0)"));
+        printf("[Learning]   Accumulated total: %d games\n", g_stats.total_games);
+        printf("[Learning]   Win/Loss/Draw: %d / %d / %d\n",
+               g_stats.wins, g_stats.losses, g_stats.draws);
+        printf("[Learning]   Overall win rate: %.2f%%\n", g_stats.win_rate * 100.0);
+        if (g_stats.total_games >= MIN_GAMES_FOR_LEARNING) {
+            printf("[Learning]   Learning status: ACTIVE (>=%d games)\n", MIN_GAMES_FOR_LEARNING);
+        } else {
+            printf("[Learning]   Learning status: WARMING UP (need %d more games)\n",
+                   MIN_GAMES_FOR_LEARNING - g_stats.total_games);
+        }
+        printf("[Learning] ========================================\n");
+    }
+
     // 早期カットオフ閾値の学習
     learn_cutoff_threshold(result);
 
@@ -386,21 +406,25 @@ LearningStats get_learning_stats(void) {
 // 学習データの保存・読み込み
 // ========================================
 void save_learning_data(void) {
-    printf("[Learning] Attempting to save learning data...\n");
-    printf("[Learning]   Stats: total=%d, wins=%d, losses=%d, draws=%d\n",
-           g_stats.total_games, g_stats.wins, g_stats.losses, g_stats.draws);
+    if (g_config.debug_level >= 2) {
+        printf("[Learning] Attempting to save learning data...\n");
+        printf("[Learning]   Stats: total=%d, wins=%d, losses=%d, draws=%d\n",
+               g_stats.total_games, g_stats.wins, g_stats.losses, g_stats.draws);
 
-    // カレントディレクトリを表示
-    char cwd[256];
-    #ifdef _WIN32
-    _getcwd(cwd, sizeof(cwd));
-    #else
-    getcwd(cwd, sizeof(cwd));
-    #endif
-    printf("[Learning] Current directory: %s\n", cwd);
+        // カレントディレクトリを表示
+        char cwd[256];
+        #ifdef _WIN32
+        _getcwd(cwd, sizeof(cwd));
+        #else
+        getcwd(cwd, sizeof(cwd));
+        #endif
+        printf("[Learning] Current directory: %s\n", cwd);
+    }
 
     const char *filename = "learning_data.dat";
-    printf("[Learning] Attempting to open %s for writing...\n", filename);
+    if (g_config.debug_level >= 2) {
+        printf("[Learning] Attempting to open %s for writing...\n", filename);
+    }
 
     FILE *fp = fopen(filename, "wb");
     if (!fp) {
@@ -410,33 +434,66 @@ void save_learning_data(void) {
         return;
     }
 
-    printf("[Learning] File opened successfully (handle=%p)\n", (void*)fp);
+    if (g_config.debug_level >= 2) {
+        printf("[Learning] File opened successfully (handle=%p)\n", (void*)fp);
+    }
 
     // 統計データ保存
     size_t written1 = fwrite(&g_stats, sizeof(LearningStats), 1, fp);
-    printf("[Learning] Wrote stats: %lu records (%lu bytes)\n",
-           (unsigned long)written1, (unsigned long)sizeof(LearningStats));
+    if (g_config.debug_level >= 2) {
+        printf("[Learning] Wrote stats: %lu records (%lu bytes)\n",
+               (unsigned long)written1, (unsigned long)sizeof(LearningStats));
+    }
 
     // 早期カットオフ学習データ保存
     size_t written2 = fwrite(&g_cutoff_learning, sizeof(CutoffLearningData), 1, fp);
-    printf("[Learning] Wrote cutoff data: %lu records (%lu bytes)\n",
-           (unsigned long)written2, (unsigned long)sizeof(CutoffLearningData));
+    if (g_config.debug_level >= 2) {
+        printf("[Learning] Wrote cutoff data: %lu records (%lu bytes)\n",
+               (unsigned long)written2, (unsigned long)sizeof(CutoffLearningData));
+    }
 
     // パターン学習データ保存
     size_t written3 = fwrite(g_pattern_learning, sizeof(PatternScoreLearning), 8, fp);
-    printf("[Learning] Wrote pattern data: %lu records (%lu bytes)\n",
-           (unsigned long)written3, (unsigned long)(sizeof(PatternScoreLearning) * 8));
+    if (g_config.debug_level >= 2) {
+        printf("[Learning] Wrote pattern data: %lu records (%lu bytes)\n",
+               (unsigned long)written3, (unsigned long)(sizeof(PatternScoreLearning) * 8));
+    }
 
     fflush(fp);  // バッファをフラッシュ
     fclose(fp);
-    printf("[Learning] Learning data saved successfully (file closed).\n");
+
+    // デバッグレベル1以上で保存成功と累積データを表示
+    if (g_config.debug_level >= 1) {
+        printf("[Learning] ========================================\n");
+        printf("[Learning] Learning Data Saved Successfully\n");
+        printf("[Learning] ----------------------------------------\n");
+        printf("[Learning]   File: %s\n", filename);
+        printf("[Learning]   Total games: %d (+1 from previous)\n", g_stats.total_games);
+        printf("[Learning]   Current stats: W:%d L:%d D:%d\n",
+               g_stats.wins, g_stats.losses, g_stats.draws);
+        printf("[Learning]   Win rate: %.2f%%\n", g_stats.win_rate * 100.0);
+        printf("[Learning] ----------------------------------------\n");
+        printf("[Learning]   Data integrity:\n");
+        printf("[Learning]     Stats: %s\n", written1 == 1 ? "OK" : "FAILED");
+        printf("[Learning]     Cutoff: %s\n", written2 == 1 ? "OK" : "FAILED");
+        printf("[Learning]     Patterns: %s\n", written3 == 8 ? "OK" : "FAILED");
+        printf("[Learning] ========================================\n");
+    } else if (g_config.debug_level >= 2) {
+        printf("[Learning] Learning data saved successfully (file closed).\n");
+    }
 }
 
 void load_learning_data(void) {
     FILE *fp = fopen("learning_data.dat", "rb");
     if (!fp) {
-        printf("[Learning] No previous learning data found. Starting fresh.\n");
+        if (g_config.debug_level >= 1) {
+            printf("[Learning] No previous learning data found. Starting fresh.\n");
+        }
         return;
+    }
+
+    if (g_config.debug_level >= 1) {
+        printf("[Learning] Loading learning data from learning_data.dat...\n");
     }
 
     // 統計データ読み込み
@@ -466,13 +523,29 @@ void load_learning_data(void) {
 
     fclose(fp);
 
-    printf("[Learning] Loaded previous learning data:\n");
-    printf("  Total games: %d (W:%d L:%d D:%d)\n",
-           g_stats.total_games, g_stats.wins, g_stats.losses, g_stats.draws);
-    printf("  Win rate: %.2f%%\n", g_stats.win_rate * 100.0);
-    printf("  Cutoff threshold: %d (games=%d, wins=%d, win_rate=%.2f%%)\n",
-           g_cutoff_learning.threshold, g_cutoff_learning.games_with_cutoff,
-           g_cutoff_learning.wins_with_cutoff, g_cutoff_learning.cutoff_win_rate * 100.0);
+    // デバッグレベル1以上で累積学習データを表示
+    if (g_config.debug_level >= 1) {
+        printf("[Learning] ========================================\n");
+        printf("[Learning] Accumulated Learning Data Summary:\n");
+        printf("[Learning] ----------------------------------------\n");
+        printf("[Learning]   Total games played: %d\n", g_stats.total_games);
+        printf("[Learning]   Wins: %d (%.2f%%)\n", g_stats.wins,
+               g_stats.total_games > 0 ? (g_stats.wins * 100.0 / g_stats.total_games) : 0.0);
+        printf("[Learning]   Losses: %d (%.2f%%)\n", g_stats.losses,
+               g_stats.total_games > 0 ? (g_stats.losses * 100.0 / g_stats.total_games) : 0.0);
+        printf("[Learning]   Draws: %d (%.2f%%)\n", g_stats.draws,
+               g_stats.total_games > 0 ? (g_stats.draws * 100.0 / g_stats.total_games) : 0.0);
+        printf("[Learning]   Overall win rate: %.2f%%\n", g_stats.win_rate * 100.0);
+        printf("[Learning] ----------------------------------------\n");
+        printf("[Learning]   Cutoff threshold: %d\n", g_cutoff_learning.threshold);
+        printf("[Learning]   Games with cutoff: %d\n", g_cutoff_learning.games_with_cutoff);
+        printf("[Learning]   Wins with cutoff: %d\n", g_cutoff_learning.wins_with_cutoff);
+        if (g_cutoff_learning.games_with_cutoff > 0) {
+            printf("[Learning]   Cutoff win rate: %.2f%%\n",
+                   g_cutoff_learning.cutoff_win_rate * 100.0);
+        }
+        printf("[Learning] ========================================\n");
+    }
 
     // 学習済みのパターン調整を即座に適用
     if (g_stats.total_games >= MIN_GAMES_FOR_LEARNING) {
