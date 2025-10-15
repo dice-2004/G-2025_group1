@@ -5,6 +5,7 @@
 //  https://ja.wikipedia.org/wiki/%E4%BA%94%E7%9B%AE%E4%B8%A6%E3%81%B9
 
 #include "gomoku.h"
+#include "logics/opening_book.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -12,7 +13,7 @@
 #include <string.h>
 #include <time.h>
 
-int inputPutPos(int board[][BOARD_SIZE], int which, int com);
+int inputPutPos(int board[][BOARD_SIZE], int which, int com, int move_count);
 void changeTurn(int *which_turn);
 int checkOutPos(int x, int y);
 int gameInit(int board[][BOARD_SIZE], int c33Board[][BOARD_SIZE],int c44Board[][BOARD_SIZE], int *which_turn, int *com);
@@ -33,6 +34,7 @@ int main() {
     int c44Board[BOARD_SIZE][BOARD_SIZE];
     int which_turn;
     int com;
+    int move_count = 0;  // 手数カウンタ
 
     // 初期処理
     if(gameInit(board, c33Board, c44Board,  &which_turn, &com) == 1) return 1;
@@ -42,10 +44,11 @@ int main() {
     //---- メインループ
     while(1) {
         //--- 入力処理
-        if(inputPutPos(board, which_turn, com) == 1) return 1;
+        if(inputPutPos(board, which_turn, com, move_count) == 1) return 1;
 
         //--- 手番交代処理
         changeTurn(&which_turn);
+        move_count++;  // 手数を増やす
 
         //--- 出力処理
         boardPrint(board);
@@ -61,7 +64,7 @@ int main() {
 //-------------------------------------------------
 // 置く場所入力
 //-------------------------------------------------
-int inputPutPos(int board[][BOARD_SIZE], int which, int com) {
+int inputPutPos(int board[][BOARD_SIZE], int which, int com, int move_count) {
     int pos_x = -1, pos_y = -1;
     char buf[10];
 
@@ -84,6 +87,11 @@ int inputPutPos(int board[][BOARD_SIZE], int which, int com) {
                 printf("不正な入力です\n> ");
                 continue;
             }
+        }
+
+        // 相手（人間）の手が定石から外れていないか検証
+        if (move_count < 10) {
+            validate_opponent_move(board, move_count, com, pos_x, pos_y);
         }
     }
     board[pos_y][pos_x] = which;
@@ -178,4 +186,3 @@ void boardPrint(int board[][BOARD_SIZE]) {
     }
     puts("");
 }
-

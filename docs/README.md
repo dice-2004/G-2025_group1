@@ -86,6 +86,9 @@
 ### 技術詳細を知りたい
 → [完全技術資料](./technical/TECHNICAL_DOCUMENT.md)
 
+### 戦略理論を理解したい（NEW!）
+→ [防御戦略の分析](./technical/DEFENSE_STRATEGY_ANALYSIS.md)
+
 ### Opening Bookの修正内容を知りたい（NEW!）
 → [Opening Book実装総まとめ](./verification/OPENING_BOOK_CORRECTION_SUMMARY.md)
 

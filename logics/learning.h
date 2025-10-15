@@ -19,6 +19,8 @@ typedef struct {
     int move_color[BOARD_SIZE * BOARD_SIZE];
     int move_count;
     int result;  // 1=勝ち, 0=引き分け, -1=負け
+    int opening_game_id;  // 使用した定石のゲームID（-1=未使用）
+    int ai_color;  // AIの石の色（STONE_BLACK or STONE_WHITE）
 } GameRecord;
 
 // 学習統計
@@ -58,5 +60,8 @@ const char* get_learning_mode_name(void);
 
 // 現在のゲームの手数を取得
 int get_current_move_count(void);
+
+// AIの色を設定
+void set_ai_color(int color);
 
 #endif

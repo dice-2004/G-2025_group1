@@ -25,6 +25,8 @@
 
 | ファイル | 説明 | 実施日 |
 |---------|------|--------|
+| [**TSS_OPEN_THREE_BUG_FIX.md**](./TSS_OPEN_THREE_BUG_FIX.md) | 🐛 **TSS開いた三判定バグ修正** - 座標計算の重大バグ修正（🆕） | 2025-10-15 |
+| [**FORBIDDEN_MOVE_FIX_REPORT.md**](./FORBIDDEN_MOVE_FIX_REPORT.md) | 🚫 **禁じ手判定修正レポート** - .libgomoku.cとの統一 | 2025-10-15 |
 | [**ID_AND_TSS_IMPROVEMENTS.md**](./ID_AND_TSS_IMPROVEMENTS.md) | 🔧 **ID & TSS改善レポート** - 反復深化とTSSの機能強化 | 2025-10-11 |
 | [**LEARNING_AND_TSS_FIX_REPORT.md**](./LEARNING_AND_TSS_FIX_REPORT.md) | 🔧 **学習&TSS修正レポート** - バグ修正と動作改善 | 2025-10-11 |
 | [**TSS_AND_LEARNING_FIX_V2.md**](./TSS_AND_LEARNING_FIX_V2.md) | 🔧 **TSS&学習修正v2** - 追加修正と検証 | 2025-10-11 |

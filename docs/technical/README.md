@@ -22,6 +22,13 @@
 |---------|------|--------|
 | [**EVALUATION_PATTERNS.md**](./EVALUATION_PATTERNS.md) | 🎯 **評価パターンガイド** - 20種類のパターン詳細、カスタマイズ方法 | 開発者・研究者 |
 
+### 戦略分析（🆕）
+
+| ファイル | 説明 | 対象者 |
+|---------|------|--------|
+| [**DEFENSE_STRATEGY_ANALYSIS.md**](./DEFENSE_STRATEGY_ANALYSIS.md) | 🛡️ **防御戦略の分析** - 開いた三防御の必要性、戦略理論、勝率分析 | 開発者・研究者 |
+| [**DEFENSE_STRATEGY_SUPPLEMENT.md**](./DEFENSE_STRATEGY_SUPPLEMENT.md) | ⚡ **防御戦略の補足** - 実戦例に基づく問題点の発見と修正提案 | 開発者 |
+
 ### 学習システムの詳細
 
 | ファイル | 説明 | 対象者 |
@@ -46,6 +53,11 @@
 1. **LEARNING_GUIDE.md** - 学習機能の概要
 2. **LEARNING_IMPLEMENTATION.md** - 実装の詳細
 3. **TECHNICAL_DOCUMENT.md** の学習セクション
+
+### 戦略理論を研究したい方
+1. **DEFENSE_STRATEGY_ANALYSIS.md** - 防御戦略の理論分析
+2. **EVALUATION_PATTERNS.md** - 評価パターンの詳細
+3. **AI_IMPLEMENTATION.md** - AI実装の概要
 
 ### アルゴリズムを研究したい方
 1. **TECHNICAL_DOCUMENT.md** - 全体像の把握

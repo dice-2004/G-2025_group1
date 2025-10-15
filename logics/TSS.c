@@ -101,7 +101,7 @@ int find_threat_move(const int board[][BOARD_SIZE], int color, int *threat_x, in
 // ========================================
 
 // 特定方向に石を数える
-static int count_stones_in_direction(const int board[][BOARD_SIZE], int x, int y, int dx, int dy, int color, int *spaces_before_block) {
+static __attribute__((unused)) int count_stones_in_direction(const int board[][BOARD_SIZE], int x, int y, int dx, int dy, int color, int *spaces_before_block) {
     int count = 0;
     int spaces = 0;
     int nx = x + dx;
@@ -188,7 +188,7 @@ static int has_open_four(const int board[][BOARD_SIZE], int x, int y, int color)
 // 開いた三（両端が空いている3連で、4連にできる）を検出
 // board[y][x]は空きマス。ここに石を置いたら3連両空きができるかチェック
 // パターン: _●●●_ (●が3つ連続、両端が空き、この位置がその一部または端)
-static int has_open_three(const int board[][BOARD_SIZE], int x, int y, int color) {
+static __attribute__((unused)) int has_open_three(const int board[][BOARD_SIZE], int x, int y, int color) {
     if (board[y][x] != STONE_SPACE) {
         return 0;  // 既に石がある
     }
@@ -246,7 +246,7 @@ static int has_open_three(const int board[][BOARD_SIZE], int x, int y, int color
 
             // 右端の位置
             int right_end_x = x + dx * (right_count + 1);
-            int right_end_y = y - dy * (right_count + 1);
+            int right_end_y = y + dy * (right_count + 1);  // 修正: - を + に
 
             int left_open = (left_end_x >= 0 && left_end_x < BOARD_SIZE &&
                            left_end_y >= 0 && left_end_y < BOARD_SIZE &&
@@ -282,7 +282,7 @@ static int has_open_three(const int board[][BOARD_SIZE], int x, int y, int color
 // 間空き三（●●_● や ●_●● など）を検出
 // board[y][x]は空きマス。ここに石を置いたら間空き三ができるかチェック
 // _●●_●_ または _●_●●_ のパターンを検出
-static int has_split_three(const int board[][BOARD_SIZE], int x, int y, int color) {
+static __attribute__((unused)) int has_split_three(const int board[][BOARD_SIZE], int x, int y, int color) {
     if (board[y][x] != STONE_SPACE) {
         return 0;
     }
@@ -382,8 +382,7 @@ static int has_split_three(const int board[][BOARD_SIZE], int x, int y, int colo
 
 // 間空き四（●●_●● のようなパターン）を検出
 // 注: 現在未使用だが、将来的な拡張のために保持
-__attribute__((unused))
-static int has_split_four(const int board[][BOARD_SIZE], int x, int y, int color) {
+static __attribute__((unused)) int has_split_four(const int board[][BOARD_SIZE], int x, int y, int color) {
     int directions[4][2] = {{1, 0}, {0, 1}, {1, 1}, {1, -1}};
 
     for (int d = 0; d < 4; d++) {
@@ -441,13 +440,13 @@ typedef struct {
 } ThreatCandidate;
 
 // 中央からの距離を計算（マンハッタン距離）
-static int distance_from_center(int x, int y) {
+static __attribute__((unused)) int distance_from_center(int x, int y) {
     int center = BOARD_SIZE / 2;
     return abs(x - center) + abs(y - center);
 }
 
 // 脅威候補を比較（優先度順、同じ優先度なら中央に近い方）
-static int compare_threats(const void *a, const void *b) {
+static __attribute__((unused)) int compare_threats(const void *a, const void *b) {
     const ThreatCandidate *ta = (const ThreatCandidate *)a;
     const ThreatCandidate *tb = (const ThreatCandidate *)b;
 
@@ -460,26 +459,13 @@ static int compare_threats(const void *a, const void *b) {
     return ta->distance_to_center - tb->distance_to_center;
 }
 
-// 自分が開いた四または開いた三を作れる手を探す（すべての候補を評価）
+// 開いた四のみを探す（開いた三は探索しない - 過剰防御防止）
 int find_strong_attack_move(const int board[][BOARD_SIZE], int color, int *attack_x, int *attack_y) {
-    printf("[TSS] ===== Searching for strong ATTACK moves (color=%d) =====\n", color);
-
-    int empty_count = 0;
-    for (int y = 0; y < BOARD_SIZE; y++) {
-        for (int x = 0; x < BOARD_SIZE; x++) {
-            if (board[y][x] == STONE_SPACE) empty_count++;
-        }
+    if (g_config.debug_level >= 2) {
+        printf("[TSS] Searching for OPEN-FOUR only (color=%d)\n", color);
     }
-    printf("[TSS] Total empty spaces: %d\n", empty_count);
 
-    // 候補リストを作成（最大でempty_count個）
-    ThreatCandidate *candidates = (ThreatCandidate *)malloc(sizeof(ThreatCandidate) * empty_count);
-    int candidate_count = 0;
-
-    // Phase 1: すべての空きマスをチェックして候補を収集
-    printf("[TSS] Phase 1: Scanning all positions for threats...\n");
-    int checked_count = 0;
-
+    // 開いた四のみを探す
     for (int y = 0; y < BOARD_SIZE; y++) {
         for (int x = 0; x < BOARD_SIZE; x++) {
             if (board[y][x] == STONE_SPACE) {
@@ -488,97 +474,22 @@ int find_strong_attack_move(const int board[][BOARD_SIZE], int color, int *attac
                     continue;
                 }
 
-                checked_count++;
-                if (checked_count <= 5 || checked_count % 20 == 0) {
-                    printf("[TSS] Checking position (%d,%d)... ", x, y);
-                }
-
                 // 開いた四をチェック
                 if (has_open_four((const int(*)[BOARD_SIZE])board, x, y, color)) {
-                    candidates[candidate_count].x = x;
-                    candidates[candidate_count].y = y;
-                    candidates[candidate_count].priority = 0;  // 最優先
-                    candidates[candidate_count].distance_to_center = distance_from_center(x, y);
-                    candidate_count++;
-                    if (checked_count <= 5 || checked_count % 20 == 0) {
-                        printf("OPEN-FOUR!\n");
+                    *attack_x = x;
+                    *attack_y = y;
+                    if (g_config.debug_level >= 1) {
+                        printf("[TSS] ★ OPEN-FOUR found at (%d, %d) ★\n", x, y);
                     }
-                    continue;
-                }
-
-                // 開いた三をチェック
-                if (has_open_three((const int(*)[BOARD_SIZE])board, x, y, color)) {
-                    candidates[candidate_count].x = x;
-                    candidates[candidate_count].y = y;
-                    candidates[candidate_count].priority = 1;
-                    candidates[candidate_count].distance_to_center = distance_from_center(x, y);
-                    candidate_count++;
-                    if (checked_count <= 5 || checked_count % 20 == 0) {
-                        printf("open-three\n");
-                    }
-                    continue;
-                }
-
-                // 間空き三をチェック
-                if (has_split_three((const int(*)[BOARD_SIZE])board, x, y, color)) {
-                    candidates[candidate_count].x = x;
-                    candidates[candidate_count].y = y;
-                    candidates[candidate_count].priority = 2;
-                    candidates[candidate_count].distance_to_center = distance_from_center(x, y);
-                    candidate_count++;
-                    if (checked_count <= 5 || checked_count % 20 == 0) {
-                        printf("split-three\n");
-                    }
-                    continue;
-                }
-
-                if (checked_count <= 5 || checked_count % 20 == 0) {
-                    printf("no pattern\n");
+                    return 2;  // 開いた四
                 }
             }
         }
     }
 
-    printf("[TSS] Total positions checked: %d\n", checked_count);
-    printf("[TSS] Total threats found: %d\n", candidate_count);
-
-    // Phase 2: 候補が見つかった場合、最良のものを選択
-    if (candidate_count > 0) {
-        // 候補をソート（優先度順）
-        qsort(candidates, candidate_count, sizeof(ThreatCandidate), compare_threats);
-
-        // 最良の候補を選択
-        *attack_x = candidates[0].x;
-        *attack_y = candidates[0].y;
-        int result_level = (candidates[0].priority == 0) ? 2 : 1;
-
-        const char *threat_type = "";
-        if (candidates[0].priority == 0) threat_type = "OPEN-FOUR";
-        else if (candidates[0].priority == 1) threat_type = "OPEN-THREE";
-        else threat_type = "SPLIT-THREE";
-
-        printf("[TSS] ★★★ Best threat selected: %s at (%d, %d) ★★★\n",
-               threat_type, *attack_x, *attack_y);
-
-        // デバッグ: 他の候補も表示（最大5個）
-        if (g_config.debug_level >= 2 && candidate_count > 1) {
-            printf("[TSS] Other candidates found:\n");
-            for (int i = 1; i < candidate_count && i < 6; i++) {
-                const char *type = "";
-                if (candidates[i].priority == 0) type = "OPEN-FOUR";
-                else if (candidates[i].priority == 1) type = "OPEN-THREE";
-                else type = "SPLIT-THREE";
-                printf("[TSS]   #%d: %s at (%d, %d) dist=%d\n",
-                       i+1, type, candidates[i].x, candidates[i].y, candidates[i].distance_to_center);
-            }
-        }
-
-        free(candidates);
-        return result_level;
+    if (g_config.debug_level >= 2) {
+        printf("[TSS] No open-four found\n");
     }
-
-    free(candidates);
-    printf("[TSS] ===== No strong attack move found =====\n\n");
     return 0;  // 見つからず
 }
 

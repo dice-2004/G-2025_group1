@@ -4,7 +4,7 @@
 PROGRAM = gomoku
 
 # オブジェクトファイル（v3.3 完全版）
-OBJS = .libgomoku.o gomoku.o gomoku_ai.o config.o \
+OBJS = .libgomoku.o gomoku.o gomoku_ai.o config.o .libgomoku_to.o\
        logics/evaluation.o logics/transposition.o logics/opening_book.o \
        logics/learning.o logics/main_engine.o logics/TSS.o logics/debug_utils.o
 
@@ -27,6 +27,10 @@ $(PROGRAM): $(OBJS)
 .libgomoku.o: .libgomoku.c gomoku.h
 	@echo "Compiling .libgomoku.c..."
 	$(CC) $(CFLAGS) -c .libgomoku.c -o .libgomoku.o
+
+.libgomoku_to.o: .libgomoku_to.c gomoku.h
+	@echo "Compiling .libgomoku_to.c..."
+	$(CC) $(CFLAGS) -c .libgomoku_to.c -o .libgomoku_to.o
 
 gomoku.o: gomoku.c gomoku.h
 	@echo "Compiling gomoku.c..."

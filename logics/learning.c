@@ -15,6 +15,7 @@
 #include "learning.h"
 #include "evaluation.h"
 #include "main_engine.h"
+#include "opening_book.h"
 #include "../config.h"
 
 // グローバル学習データ
@@ -77,6 +78,8 @@ void start_game_record(void) {
     if (!g_learning_initialized) init_learning();
 
     memset(&g_current_game, 0, sizeof(GameRecord));
+    g_current_game.opening_game_id = -1;  // 初期値
+    g_current_game.ai_color = STONE_SPACE;  // まだ不明
     printf("[Learning] Game recording started (move_count reset to 0).\n");
 }
 
@@ -95,6 +98,15 @@ void record_move(int x, int y, int color) {
     g_current_game.move_y[idx] = y;
     g_current_game.move_color[idx] = color;
     g_current_game.move_count++;
+
+    // 1手目で定石のゲームIDを記録
+    if (g_current_game.move_count == 1) {
+        g_current_game.opening_game_id = get_selected_game_id();
+        if (g_current_game.opening_game_id >= 0) {
+            printf("[Learning] Opening game ID %d will be tracked for this game\n",
+                   g_current_game.opening_game_id);
+        }
+    }
 
     if (g_current_game.move_count <= 10 || g_current_game.move_count % 10 == 0) {
         printf("[Learning] Recorded move #%d: (%d,%d) color=%d\n",
@@ -236,15 +248,143 @@ static void apply_pattern_learning(void) {
 }
 
 // ========================================
+// 低勝率定石削除機能
+// ========================================
+// 指定された色（黒または白）の学習定石をカウント
+static int count_learned_openings(int player_color) {
+    FILE *fp = fopen("opening_book.csv", "r");
+    if (!fp) return 0;
+
+    char line[512];
+    int game_ids[1000] = {0};  // 最大999までのgame_idを追跡
+    int count = 0;
+
+    // ヘッダー行をスキップ
+    if (fgets(line, sizeof(line), fp)) {
+        // ヘッダー行
+    }
+
+    while (fgets(line, sizeof(line), fp)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+
+        int game_id, move_number;
+        char color_str[10];
+        int x, y;
+        float win_rate;
+
+        if (sscanf(line, "%d,%d,%[^,],%d,%d,%f", &game_id, &move_number, color_str, &x, &y, &win_rate) == 6) {
+            // 学習定石の範囲をチェック（重複なし設計）
+            int is_learning_opening = 0;
+            if (player_color == STONE_BLACK && game_id >= 200 && game_id <= 599) {
+                // 黒番学習定石: 200-599
+                is_learning_opening = 1;
+            } else if (player_color == STONE_WHITE && game_id >= 600 && game_id <= 999) {
+                // 白番学習定石: 600-999
+                is_learning_opening = 1;
+            }
+
+            if (is_learning_opening && move_number == 1 && !game_ids[game_id]) {
+                game_ids[game_id] = 1;
+                count++;
+            }
+        }
+    }
+
+    fclose(fp);
+    return count;
+}
+
+// 最も勝率の低い学習定石を削除
+static void remove_lowest_winrate_opening(int player_color) {
+    FILE *fp = fopen("opening_book.csv", "r");
+    if (!fp) {
+        printf("[Learning] ERROR: Could not open opening_book.csv for reading\n");
+        return;
+    }
+
+    char lines[50000][512];  // 最大50000行
+    int line_count = 0;
+    int lowest_game_id = -1;
+    float lowest_win_rate = 2.0f;  // 勝率は0.0-1.0なので2.0で初期化
+
+    // 全行を読み込み、最低勝率のgame_idを探す
+    while (fgets(lines[line_count], sizeof(lines[0]), fp) && line_count < 50000) {
+        char *line = lines[line_count];
+
+        if (line[0] == '#' || line[0] == '\n' || line_count == 0) {
+            line_count++;
+            continue;
+        }
+
+        int game_id, move_number;
+        char color_str[10];
+        int x, y;
+        float win_rate;
+
+        if (sscanf(line, "%d,%d,%[^,],%d,%d,%f", &game_id, &move_number, color_str, &x, &y, &win_rate) == 6) {
+            // 学習定石の範囲をチェック（重複なし設計）
+            int is_target = 0;
+            if (player_color == STONE_BLACK && game_id >= 200 && game_id <= 599) {
+                // 黒番学習定石: 200-599
+                is_target = 1;
+            } else if (player_color == STONE_WHITE && game_id >= 600 && game_id <= 999) {
+                // 白番学習定石: 600-999
+                is_target = 1;
+            }
+
+            if (is_target && move_number == 1) {
+                if (win_rate < lowest_win_rate) {
+                    lowest_win_rate = win_rate;
+                    lowest_game_id = game_id;
+                }
+            }
+        }
+
+        line_count++;
+    }
+    fclose(fp);
+
+    if (lowest_game_id == -1) {
+        printf("[Learning] No opening to remove found\n");
+        return;
+    }
+
+    printf("[Learning] Removing game_id %d (win_rate=%.3f) to make space\n",
+           lowest_game_id, lowest_win_rate);
+
+    // 対象game_idを除外して書き戻し
+    fp = fopen("opening_book.csv", "w");
+    if (!fp) {
+        printf("[Learning] ERROR: Could not open opening_book.csv for writing\n");
+        return;
+    }
+
+    for (int i = 0; i < line_count; i++) {
+        int game_id;
+        if (sscanf(lines[i], "%d,", &game_id) == 1 && game_id == lowest_game_id) {
+            // この行はスキップ（削除）
+            continue;
+        }
+        fputs(lines[i], fp);
+    }
+
+    fclose(fp);
+    printf("[Learning] Successfully removed game_id %d\n", lowest_game_id);
+}
+
+// ========================================
 // 序盤定石の学習
 // ========================================
 static void learn_opening_moves(int result) {
     printf("[Learning] learn_opening_moves called: result=%d, move_count=%d\n",
            result, g_current_game.move_count);
 
-    if (result != 1) {
-        printf("[Learning] Skipping opening book update (not a win)\n");
-        return;  // 勝った試合のみ学習
+    // 勝った場合: 自分の手を学習
+    // 負けた場合: 相手の手を学習
+    // 引き分け: 学習しない
+    if (result == 0) {
+        printf("[Learning] Skipping opening book update (draw)\n");
+        return;
     }
 
     if (g_current_game.move_count < 5) {
@@ -290,21 +430,125 @@ static void learn_opening_moves(int result) {
     // ファイルが新規作成の場合はヘッダーを書く
     if (!file_exists) {
         printf("[Learning] Writing header to new file...\n");
-        fprintf(fp, "move_number,x,y,comment\n");
+        fprintf(fp, "# game_id,move_number,player_color,x,y,win_rate,comment\n");
     }
 
-    // 勝利した試合の序盤手を追加
-    printf("[Learning] Writing %d opening moves...\n",
-           (g_current_game.move_count < 5) ? g_current_game.move_count : 5);
+    // 勝利した場合: 両者の手を10手分記録（AIの観点から）
+    // 敗北した場合: 相手を基準に両者の手を10手分記録
+    // ゲームID規則: 手動1-49/51-99, プロ101-149/151-199, 学習200-599/600-999
 
-    for (int i = 0; i < 5 && i < g_current_game.move_count; i++) {
-        int written = fprintf(fp, "%d,%d,%d,Learned from win (game %d)\n",
-                i + 1,
-                g_current_game.move_x[i],
-                g_current_game.move_y[i],
-                g_stats.total_games);
-        printf("[Learning]   Move %d: (%d,%d) - wrote %d bytes\n",
-               i+1, g_current_game.move_x[i], g_current_game.move_y[i], written);
+    int ai_color = g_current_game.ai_color;
+    int base_game_id = g_stats.total_games;
+    int game_id;
+    const char* opening_type;
+
+    if (result == 1) {
+        // 勝利 - AIの色に応じてゲームIDを決定（重複なし設計）
+        if (ai_color == STONE_BLACK) {
+            // AIが黒番で勝利 → 黒番用定石（200-599）
+            game_id = (base_game_id % 400) + 200;
+            opening_type = "BLACK opening";
+
+            // スロット満杯チェック（黒番: 上限400）
+            int current_count = count_learned_openings(STONE_BLACK);
+            if (current_count >= 400) {
+                printf("[Learning] BLACK opening slots full (%d/400), removing lowest win-rate opening\n", current_count);
+                remove_lowest_winrate_opening(STONE_BLACK);
+            }
+        } else {
+            // AIが白番で勝利 → 白番用定石（600-999）
+            game_id = (base_game_id % 400) + 600;
+            opening_type = "WHITE opening";
+
+            // スロット満杯チェック（白番: 上限400）
+            int current_count = count_learned_openings(STONE_WHITE);
+            if (current_count >= 400) {
+                printf("[Learning] WHITE opening slots full (%d/400), removing lowest win-rate opening\n", current_count);
+                remove_lowest_winrate_opening(STONE_WHITE);
+            }
+        }
+
+        printf("[Learning] Writing opening sequence (WIN) - %s...\n", opening_type);
+        printf("[Learning] AI color: %s, Game ID: %d\n",
+               ai_color == STONE_BLACK ? "BLACK" : "WHITE", game_id);
+
+        // 最初の10手を記録
+        int moves_to_record = (g_current_game.move_count < 10) ? g_current_game.move_count : 10;
+        for (int i = 0; i < moves_to_record; i++) {
+            int move_number = i + 1;
+            // 手数から色を自動計算（奇数手=黒、偶数手=白）
+            int player_color = (move_number % 2 == 1) ? STONE_BLACK : STONE_WHITE;
+            const char* color_str = (player_color == STONE_BLACK) ? "BLACK" : "WHITE";
+
+            int written = fprintf(fp, "%d,%d,%s,%d,%d,0.50,Learned from %s win (game %d)\n",
+                    game_id,
+                    move_number,
+                    color_str,
+                    g_current_game.move_x[i],
+                    g_current_game.move_y[i],
+                    opening_type,
+                    base_game_id);
+            printf("[Learning]   Move %d (%s): (%d,%d) - wrote %d bytes\n",
+                   move_number, color_str,
+                   g_current_game.move_x[i], g_current_game.move_y[i], written);
+        }
+
+        printf("[Learning] Learned %d moves as %s\n", moves_to_record, opening_type);
+
+    } else if (result == -1) {
+        // 敗北 - 相手の色に応じてゲームIDを決定（相手の視点で学習）
+        int opponent_color = (ai_color == STONE_BLACK) ? STONE_WHITE : STONE_BLACK;
+
+        if (opponent_color == STONE_BLACK) {
+            // 相手が黒番で勝利 → 黒番用定石（200-599）
+            game_id = (base_game_id % 400) + 200;
+            opening_type = "BLACK opening";
+
+            // スロット満杯チェック（黒番: 上限400）
+            int current_count = count_learned_openings(STONE_BLACK);
+            if (current_count >= 400) {
+                printf("[Learning] BLACK opening slots full (%d/400), removing lowest win-rate opening\n", current_count);
+                remove_lowest_winrate_opening(STONE_BLACK);
+            }
+        } else {
+            // 相手が白番で勝利 → 白番用定石（600-999）
+            game_id = (base_game_id % 400) + 600;
+            opening_type = "WHITE opening";
+
+            // スロット満杯チェック（白番: 上限400）
+            int current_count = count_learned_openings(STONE_WHITE);
+            if (current_count >= 400) {
+                printf("[Learning] WHITE opening slots full (%d/400), removing lowest win-rate opening\n", current_count);
+                remove_lowest_winrate_opening(STONE_WHITE);
+            }
+        }
+
+        printf("[Learning] Writing opening sequence (LOSS) - learning from opponent...\n");
+        printf("[Learning] Opponent color: %s, Game ID: %d\n",
+               opponent_color == STONE_BLACK ? "BLACK" : "WHITE", game_id);
+
+        // 最初の10手を記録（相手の視点で）
+        int moves_to_record = (g_current_game.move_count < 10) ? g_current_game.move_count : 10;
+        for (int i = 0; i < moves_to_record; i++) {
+            int move_number = i + 1;
+            // 手数から色を自動計算（奇数手=黒、偶数手=白）
+            int player_color = (move_number % 2 == 1) ? STONE_BLACK : STONE_WHITE;
+            const char* color_str = (player_color == STONE_BLACK) ? "BLACK" : "WHITE";
+
+            int written = fprintf(fp, "%d,%d,%s,%d,%d,0.50,Learned from %s opponent (game %d)\n",
+                    game_id,
+                    move_number,
+                    color_str,
+                    g_current_game.move_x[i],
+                    g_current_game.move_y[i],
+                    opening_type,
+                    base_game_id);
+            printf("[Learning]   Move %d (%s): (%d,%d) - wrote %d bytes\n",
+                   move_number, color_str,
+                   g_current_game.move_x[i], g_current_game.move_y[i], written);
+        }
+
+        printf("[Learning] Learned %d moves as %s from opponent\n", moves_to_record, opening_type);
     }
 
     fflush(fp);  // バッファをフラッシュ
@@ -388,6 +632,19 @@ void finish_game_record(int result) {
 
     // 序盤定石の学習
     learn_opening_moves(result);
+
+    // 定石の勝率を更新（使用した定石がある場合）
+    if (g_current_game.opening_game_id >= 0) {
+        int win = (result == 1) ? 1 : 0;
+        int updated = update_opening_win_rate(g_current_game.opening_game_id, win);
+        if (updated > 0) {
+            printf("[Learning] Updated win rate for opening game %d (%d moves)\n",
+                   g_current_game.opening_game_id, updated);
+
+            // 定石データを保存
+            save_opening_book("opening_book.csv");
+        }
+    }
 
     // 学習データの保存
     save_learning_data();
@@ -585,4 +842,18 @@ int get_current_move_count(void) {
         return 0;
     }
     return g_current_game.move_count;
+}
+
+// ========================================
+// AIの色を設定
+// ========================================
+void set_ai_color(int color) {
+    if (!g_learning_initialized) {
+        init_learning();
+    }
+    if (g_current_game.ai_color == STONE_SPACE) {
+        g_current_game.ai_color = color;
+        printf("[Learning] AI color set to: %s\n",
+               color == STONE_BLACK ? "BLACK" : "WHITE");
+    }
 }

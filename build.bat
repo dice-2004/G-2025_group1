@@ -42,17 +42,23 @@ echo [8/10] Compiling logics/TSS.c...
 gcc -Wall -O3 -c logics\TSS.c -o logics\TSS.o
 if errorlevel 1 goto error
 
-echo [9/11] Compiling logics/debug_utils.c...
+echo [9/12] Compiling logics/debug_utils.c...
 gcc -Wall -O3 -c logics\debug_utils.c -o logics\debug_utils.o
 if errorlevel 1 goto error
 
-echo [10/11] Compiling .libgomoku.c and gomoku.c...
+echo [10/12] Compiling .libgomoku.c (for gomoku.c)...
 gcc -Wall -O3 -c .libgomoku.c -o .libgomoku.o
+if errorlevel 1 goto error
+
+echo [11/12] Compiling .libgomoku_to.c (for AI - no logs)...
+gcc -Wall -O3 -c .libgomoku_to.c -o .libgomoku_to.o
+if errorlevel 1 goto error
+
+echo [12/12] Compiling gomoku.c and linking...
 gcc -Wall -O3 -c gomoku.c -o gomoku.o
 if errorlevel 1 goto error
 
-echo [11/11] Linking...
-gcc gomoku.o gomoku_ai.o config.o .libgomoku.o logics\evaluation.o logics\transposition.o logics\opening_book.o logics\learning.o logics\main_engine.o logics\TSS.o logics\debug_utils.o -o gomoku_new.exe
+gcc gomoku.o gomoku_ai.o config.o .libgomoku.o .libgomoku_to.o logics\evaluation.o logics\transposition.o logics\opening_book.o logics\learning.o logics\main_engine.o logics\TSS.o logics\debug_utils.o -o gomoku_new.exe
 if errorlevel 1 goto error
 
 echo.

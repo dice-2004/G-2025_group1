@@ -26,6 +26,11 @@
 #include "logics/learning.h"
 #include "logics/debug_utils.h"
 
+// .libgomoku_to.c の禁じ手判定関数を使用（AI思考用：ログなし）
+extern int isSan_to(int board[][BOARD_SIZE], int x, int y);
+extern int isShi_to(int board[][BOARD_SIZE], int x, int y);
+extern int isRoku_to(int board[][BOARD_SIZE], int x, int y);
+
 // ビットマップ関連の定義は gomoku_ai.h で定義済み
 
 // 斜めビットテーブルとインデックスの変換表
@@ -157,6 +162,7 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     // AIの色を記録
     if (g_ai_color == STONE_SPACE) {
         g_ai_color = com;
+        set_ai_color(com);  // 学習システムにも通知
     }
 
     // ========================================
@@ -242,52 +248,81 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
 
     // 自分の勝ち手をチェック（五連）
     if (find_winning_move(board, com, &win_x, &win_y)) {
-        *pos_x = win_x;
-        *pos_y = win_y;
-        printf("[AI] Winning move executed!\n");
-        return 0;
+        // 禁じ手チェック（黒の場合）
+        if (com == STONE_BLACK && is_forbidden(board, win_x, win_y, com)) {
+            if (g_config.debug_level >= 1) {
+                printf("[AI] Winning move at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
+            }
+        } else {
+            *pos_x = win_x;
+            *pos_y = win_y;
+            printf("[AI] Winning move executed!\n");
+            return 0;
+        }
     }
 
     // 相手の勝ち手を防ぐ（五連防御）
     if (find_threat_move(board, com, &win_x, &win_y)) {
-        *pos_x = win_x;
-        *pos_y = win_y;
-        printf("[AI] Threat defended!\n");
-        return 0;
+        // 防御手は禁じ手チェック不要（相手の手を防ぐだけ）
+        // ただし、念のためチェック
+        if (com == STONE_BLACK && is_forbidden(board, win_x, win_y, com)) {
+            if (g_config.debug_level >= 1) {
+                printf("[AI] Threat defense at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
+            }
+        } else {
+            *pos_x = win_x;
+            *pos_y = win_y;
+            printf("[AI] Threat defended!\n");
+            return 0;
+        }
     }
 
     // 自分の開いた四をチェック（最優先攻撃）
     attack_level = find_strong_attack_move(board, com, &win_x, &win_y);
     if (attack_level == 2) {  // 開いた四
-        *pos_x = win_x;
-        *pos_y = win_y;
-        printf("[AI] Open four attack executed!\n");
-        return 0;
+        // 禁じ手チェック（黒の場合）
+        if (com == STONE_BLACK && is_forbidden(board, win_x, win_y, com)) {
+            if (g_config.debug_level >= 1) {
+                printf("[AI] Open four at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
+            }
+            attack_level = 0;  // レベルをリセット
+        } else {
+            *pos_x = win_x;
+            *pos_y = win_y;
+            printf("[AI] Open four attack executed!\n");
+            return 0;
+        }
     }
 
     // 相手の開いた四を防ぐ（最優先防御）
     int defense_level = find_strong_defense_move(board, com, &win_x, &win_y);
     if (defense_level == 2) {
-        *pos_x = win_x;
-        *pos_y = win_y;
-        printf("[AI] Defended opponent's open four!\n");
-        return 0;
+        // 禁じ手チェック（黒の場合）
+        if (com == STONE_BLACK && is_forbidden(board, win_x, win_y, com)) {
+            if (g_config.debug_level >= 1) {
+                printf("[AI] Defense of open four at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
+            }
+            defense_level = 0;  // レベルをリセット
+        } else {
+            *pos_x = win_x;
+            *pos_y = win_y;
+            printf("[AI] Defended opponent's open four!\n");
+            return 0;
+        }
     }
 
-    // 自分の開いた三または間空き三を作る
-    if (attack_level == 1) {  // 開いた三 or 間空き三
-        *pos_x = win_x;
-        *pos_y = win_y;
-        printf("[AI] Strong attack move executed!\n");
-        return 0;
-    }
+    // 開いた三・間空き三は削除（過剰防御のため）
+    // → Alpha-Beta探索で評価
 
     // ========================================
     // フェーズ2: 序盤定石のチェック（脅威手より後に実行）
     // ========================================
-    if (move_count < 5) {  // 最初の5手は定石を参照（脅威がない場合のみ）
+    // 定石は10手目まで（両者合わせて）
+    // move_count = 0-9 → move_number = 1-10
+
+    if (move_count < 10) {
         int book_x, book_y;
-        if (find_opening_move(board, move_count, &book_x, &book_y)) {
+        if (find_opening_move(board, move_count, com, &book_x, &book_y)) {
             *pos_x = book_x;
             *pos_y = book_y;
             printf("[AI] Opening book move: (%d, %d)\n", *pos_x, *pos_y);
@@ -303,15 +338,8 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
         return 0;
     }
 
-    // ========================================
-    // フェーズ3: 相手の開いた三を防ぐ（定石より後）
-    // ========================================
-    if (defense_level == 1) {
-        *pos_x = win_x;
-        *pos_y = win_y;
-        printf("[AI] Defended opponent's open three / split three!\n");
-        return 0;
-    }
+    // 開いた三の防御は削除（過剰防御のため）
+    // → Alpha-Beta探索で評価
 
     // ========================================
     // フェーズ4: Alpha-Beta探索 or 反復深化探索
@@ -714,7 +742,7 @@ int check_choren(const int board[][BOARD_SIZE], int x, int y) {
     return 0;
 }
 
-// 総合的な禁じ手判定
+// 総合的な禁じ手判定 (.libgomoku_to.cの判定ロジックを使用：AI思考用ログなし版)
 int is_forbidden(const int board[][BOARD_SIZE], int x, int y, int color) {
     // 白石の場合は禁じ手なし
     if (color != STONE_BLACK) return 0;
@@ -722,10 +750,42 @@ int is_forbidden(const int board[][BOARD_SIZE], int x, int y, int color) {
     // 既に石がある場合は置けない
     if (board[y][x] != STONE_SPACE) return 1;
 
-    // 禁じ手チェック
-    if (check_choren(board, x, y)) return 1;
-    if (check_sansan(board, x, y)) return 1;
-    if (check_shishi(board, x, y)) return 1;
+    // 一時的に盤面コピーして石を置いてみる
+    int temp_board[BOARD_SIZE][BOARD_SIZE];
+    memcpy(temp_board, board, sizeof(temp_board));
+    temp_board[y][x] = STONE_BLACK;
+
+    // .libgomoku_to.c の禁じ手判定関数を使用（AI思考用：ログなし）
+    // check変数で有効な禁じ手をチェック（gomoku.hで定義）
+
+    // 長連チェック (check & CHOLEN)
+    if ((check & CHOLEN) && isRoku_to(temp_board, x, y)) {
+        return 1;
+    }
+
+    // 三三チェック (check & SANSAN)
+    if ((check & SANSAN)) {
+        int san_value = isSan_to(temp_board, x, y);
+        // isSan_to()は三が見つかった方向の合計値を返す
+        // LEFT=1, TATE=2, YOKO=4, RIGT=8
+        // 複数方向の場合（単一方向でない場合）は三三
+        if (san_value > 0 &&
+            san_value != LEFT && san_value != TATE &&
+            san_value != YOKO && san_value != RIGT) {
+            return 1;
+        }
+    }
+
+    // 四四チェック (check & SHISHI)
+    if ((check & SHISHI)) {
+        int shi_value = isShi_to(temp_board, x, y);
+        // 複数方向の場合（単一方向でない場合）は四四
+        if (shi_value > 0 &&
+            shi_value != LEFT && shi_value != TATE &&
+            shi_value != YOKO && shi_value != RIGT) {
+            return 1;
+        }
+    }
 
     return 0;
 }
