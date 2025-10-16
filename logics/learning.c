@@ -25,9 +25,10 @@ static int g_learning_initialized = 0;
 static LearningMode g_learning_mode = LEARNING_MODE_PRACTICE;  // デフォルトは練習モード
 
 // 学習率パラメータ
-#define LEARNING_RATE 0.05
-#define PATTERN_ADJUST_RATE 0.02
-#define MIN_GAMES_FOR_LEARNING 5
+#define LEARNING_RATE 0.15           // 0.05→0.15に増加（より大きな学習効果）
+#define PATTERN_ADJUST_RATE 0.20     // 0.05→0.20に増加（勝率に応じて最大±20%調整）
+#define MIN_GAMES_FOR_LEARNING 3     // 3ゲームで学習開始
+#define MAX_ADJUSTMENT_FACTOR 1.5    // 調整係数の最大値（±1.5倍まで）
 
 // 早期カットオフ閾値の学習データ
 typedef struct {
@@ -130,30 +131,37 @@ static void learn_cutoff_threshold(int result) {
         g_cutoff_learning.cutoff_win_rate =
             (double)g_cutoff_learning.wins_with_cutoff / g_cutoff_learning.games_with_cutoff;
 
-        // 勝率に基づいて閾値を調整
-        if (g_cutoff_learning.games_with_cutoff % 10 == 0) {  // 10ゲームごとに調整
+        // 勝率に基づいて閾値を調整（5ゲームごとに調整して即応性を高める）
+        if (g_cutoff_learning.games_with_cutoff % 5 == 0) {
             int old_threshold = g_cutoff_learning.threshold;
 
-            if (g_cutoff_learning.cutoff_win_rate < 0.40) {
-                // 勝率が低い → 閾値が高すぎて早くカットオフしすぎている可能性
-                // 閾値を上げて、より慎重に判断させる
+            // より積極的な調整（勝率に応じて大きく変更）
+            if (g_cutoff_learning.cutoff_win_rate < 0.35) {
+                // 勝率が非常に低い → 閾値を大きく上げて慎重に
+                g_cutoff_learning.threshold += 1000;
+            } else if (g_cutoff_learning.cutoff_win_rate < 0.45) {
+                // 勝率が低い → 閾値を上げる
                 g_cutoff_learning.threshold += 500;
+            } else if (g_cutoff_learning.cutoff_win_rate > 0.70) {
+                // 勝率が非常に高い → 閾値を大きく下げて効率化
+                g_cutoff_learning.threshold -= 800;
             } else if (g_cutoff_learning.cutoff_win_rate > 0.60) {
-                // 勝率が高い → 閾値を少し下げて効率を上げる
-                g_cutoff_learning.threshold -= 200;
+                // 勝率が高い → 閾値を下げる
+                g_cutoff_learning.threshold -= 400;
             }
-            // 0.40～0.60の範囲なら調整しない（適切な閾値）
+            // 0.45～0.60の範囲なら調整しない（適切な閾値）
 
-            // 範囲制限
-            if (g_cutoff_learning.threshold < 3000) g_cutoff_learning.threshold = 3000;
-            if (g_cutoff_learning.threshold > 15000) g_cutoff_learning.threshold = 15000;
+            // 範囲制限（より広い範囲を許容）
+            if (g_cutoff_learning.threshold < 2000) g_cutoff_learning.threshold = 2000;
+            if (g_cutoff_learning.threshold > 20000) g_cutoff_learning.threshold = 20000;
 
             // エンジンに反映
             set_early_cutoff_threshold(g_cutoff_learning.threshold);
 
-            if (g_config.debug_level >= 2) {
-                printf("[Learning] Cutoff threshold adjusted: %d -> %d (win_rate=%.2f%%)\n",
+            if (g_config.debug_level >= 1) {
+                printf("[Learning] Cutoff threshold adjusted: %d -> %d (Δ=%+d, win_rate=%.2f%%)\n",
                        old_threshold, g_cutoff_learning.threshold,
+                       g_cutoff_learning.threshold - old_threshold,
                        g_cutoff_learning.cutoff_win_rate * 100.0);
             }
         }
@@ -173,9 +181,14 @@ static void learn_pattern_scores(int result) {
         }
     }
 
-    // 一定ゲーム数ごとにスコアを調整
-    if (g_stats.total_games % 20 == 0 && g_stats.total_games >= MIN_GAMES_FOR_LEARNING) {
+    // 毎ゲーム学習を適用（データが十分な場合）
+    if (g_stats.total_games >= MIN_GAMES_FOR_LEARNING) {
+        // 学習頻度を高めて即座に適応
         apply_pattern_learning();
+
+        if (g_config.debug_level >= 1) {
+            printf("[Learning] Pattern scores adjusted after game #%d\n", g_stats.total_games);
+        }
     }
 }
 
@@ -190,55 +203,122 @@ static void apply_pattern_learning(void) {
     // パターンごとの勝率を計算して調整係数を更新
     for (int i = 0; i < 8; i++) {
         int total = g_pattern_learning[i].wins + g_pattern_learning[i].losses;
-        if (total >= 10) {  // 最低10ゲームのデータが必要
+        if (total >= 3) {  // 最低3ゲームのデータがあれば調整開始
             double win_rate = (double)g_pattern_learning[i].wins / total;
 
             // 勝率に基づいて調整係数を計算
-            // 勝率50%を基準に、±0.5の範囲で調整
-            g_pattern_learning[i].adjustment_factor = (win_rate - 0.5) * 2.0;
+            // 勝率50%を基準に、±MAX_ADJUSTMENT_FACTOR の範囲で調整
+            // 例: 勝率100% → factor = 1.5 (150%ボーナス)
+            //     勝率0%   → factor = -1.5 (150%ペナルティ)
+            //     勝率50%  → factor = 0.0 (調整なし)
+            g_pattern_learning[i].adjustment_factor = (win_rate - 0.5) * (MAX_ADJUSTMENT_FACTOR * 2.0);
 
-            // -0.5 ～ +0.5 の範囲に制限
-            if (g_pattern_learning[i].adjustment_factor > 0.5)
-                g_pattern_learning[i].adjustment_factor = 0.5;
-            if (g_pattern_learning[i].adjustment_factor < -0.5)
-                g_pattern_learning[i].adjustment_factor = -0.5;
+            // -MAX_ADJUSTMENT_FACTOR ～ +MAX_ADJUSTMENT_FACTOR の範囲に制限
+            if (g_pattern_learning[i].adjustment_factor > MAX_ADJUSTMENT_FACTOR)
+                g_pattern_learning[i].adjustment_factor = MAX_ADJUSTMENT_FACTOR;
+            if (g_pattern_learning[i].adjustment_factor < -MAX_ADJUSTMENT_FACTOR)
+                g_pattern_learning[i].adjustment_factor = -MAX_ADJUSTMENT_FACTOR;
+
+            // デバッグレベル2: 調整係数の計算過程を表示
+            if (g_config.debug_level >= 2) {
+                printf("[Learning]   Pattern %d: wins=%d, losses=%d, total=%d, win_rate=%.2f%%, factor=%.3f\n",
+                       i, g_pattern_learning[i].wins, g_pattern_learning[i].losses,
+                       total, win_rate * 100.0, g_pattern_learning[i].adjustment_factor);
+            }
+        } else {
+            // データ不足の場合は調整係数を0に保つ
+            g_pattern_learning[i].adjustment_factor = 0.0;
         }
     }
 
-    // 実際のスコアに反映（小さい調整率で）
+    // 実際のスコアに反映（調整率を適用）
     // パターン0: OPEN_THREE
+    int old_open_three = g_score_open_three;
     g_score_open_three = SCORE_OPEN_THREE +
         (int)(SCORE_OPEN_THREE * g_pattern_learning[0].adjustment_factor * PATTERN_ADJUST_RATE);
 
     // パターン1: BROKEN_THREE
+    int old_broken_three = g_score_broken_three;
     g_score_broken_three = SCORE_BROKEN_THREE +
         (int)(SCORE_BROKEN_THREE * g_pattern_learning[1].adjustment_factor * PATTERN_ADJUST_RATE);
 
     // パターン2: THREE
+    int old_three = g_score_three;
     g_score_three = SCORE_THREE +
         (int)(SCORE_THREE * g_pattern_learning[2].adjustment_factor * PATTERN_ADJUST_RATE);
 
     // パターン3: OPEN_TWO
+    int old_open_two = g_score_open_two;
     g_score_open_two = SCORE_OPEN_TWO +
         (int)(SCORE_OPEN_TWO * g_pattern_learning[3].adjustment_factor * PATTERN_ADJUST_RATE);
 
     // パターン4: TWO
+    int old_two = g_score_two;
     g_score_two = SCORE_TWO +
         (int)(SCORE_TWO * g_pattern_learning[4].adjustment_factor * PATTERN_ADJUST_RATE);
 
     // パターン5: CENTER
+    int old_center = g_score_center;
     g_score_center = SCORE_CENTER +
         (int)(SCORE_CENTER * g_pattern_learning[5].adjustment_factor * PATTERN_ADJUST_RATE);
 
     // パターン6: NEAR_ENEMY
+    int old_near_enemy = g_score_near_enemy;
     g_score_near_enemy = SCORE_NEAR_ENEMY +
         (int)(SCORE_NEAR_ENEMY * g_pattern_learning[6].adjustment_factor * PATTERN_ADJUST_RATE);
 
     // パターン7: CONNECTION
+    int old_connection = g_score_connection;
     g_score_connection = SCORE_CONNECTION +
         (int)(SCORE_CONNECTION * g_pattern_learning[7].adjustment_factor * PATTERN_ADJUST_RATE);
 
-    if (g_config.debug_level >= 2) {
+    // デバッグレベル1: 学習データによるパターンスコア調整を表示
+    if (g_config.debug_level >= 1) {
+        printf("[Learning] ========================================\n");
+        printf("[Learning] DEBUG_LEVEL=1: Pattern Scores Adjusted by Learning:\n");
+        printf("[Learning] ----------------------------------------\n");
+        printf("  [0] OPEN_THREE: %d->%d (base=%d, Δ=%+d, factor=%.3f, W/L=%d/%d)\n",
+               old_open_three, g_score_open_three, SCORE_OPEN_THREE,
+               g_score_open_three - SCORE_OPEN_THREE,
+               g_pattern_learning[0].adjustment_factor,
+               g_pattern_learning[0].wins, g_pattern_learning[0].losses);
+        printf("  [1] BROKEN_THREE: %d->%d (base=%d, Δ=%+d, factor=%.3f, W/L=%d/%d)\n",
+               old_broken_three, g_score_broken_three, SCORE_BROKEN_THREE,
+               g_score_broken_three - SCORE_BROKEN_THREE,
+               g_pattern_learning[1].adjustment_factor,
+               g_pattern_learning[1].wins, g_pattern_learning[1].losses);
+        printf("  [2] THREE: %d->%d (base=%d, Δ=%+d, factor=%.3f, W/L=%d/%d)\n",
+               old_three, g_score_three, SCORE_THREE,
+               g_score_three - SCORE_THREE,
+               g_pattern_learning[2].adjustment_factor,
+               g_pattern_learning[2].wins, g_pattern_learning[2].losses);
+        printf("  [3] OPEN_TWO: %d->%d (base=%d, Δ=%+d, factor=%.3f, W/L=%d/%d)\n",
+               old_open_two, g_score_open_two, SCORE_OPEN_TWO,
+               g_score_open_two - SCORE_OPEN_TWO,
+               g_pattern_learning[3].adjustment_factor,
+               g_pattern_learning[3].wins, g_pattern_learning[3].losses);
+        printf("  [4] TWO: %d->%d (base=%d, Δ=%+d, factor=%.3f, W/L=%d/%d)\n",
+               old_two, g_score_two, SCORE_TWO,
+               g_score_two - SCORE_TWO,
+               g_pattern_learning[4].adjustment_factor,
+               g_pattern_learning[4].wins, g_pattern_learning[4].losses);
+        printf("  [5] CENTER: %d->%d (base=%d, Δ=%+d, factor=%.3f, W/L=%d/%d)\n",
+               old_center, g_score_center, SCORE_CENTER,
+               g_score_center - SCORE_CENTER,
+               g_pattern_learning[5].adjustment_factor,
+               g_pattern_learning[5].wins, g_pattern_learning[5].losses);
+        printf("  [6] NEAR_ENEMY: %d->%d (base=%d, Δ=%+d, factor=%.3f, W/L=%d/%d)\n",
+               old_near_enemy, g_score_near_enemy, SCORE_NEAR_ENEMY,
+               g_score_near_enemy - SCORE_NEAR_ENEMY,
+               g_pattern_learning[6].adjustment_factor,
+               g_pattern_learning[6].wins, g_pattern_learning[6].losses);
+        printf("  [7] CONNECTION: %d->%d (base=%d, Δ=%+d, factor=%.3f, W/L=%d/%d)\n",
+               old_connection, g_score_connection, SCORE_CONNECTION,
+               g_score_connection - SCORE_CONNECTION,
+               g_pattern_learning[7].adjustment_factor,
+               g_pattern_learning[7].wins, g_pattern_learning[7].losses);
+        printf("[Learning] ========================================\n");
+    } else if (g_config.debug_level >= 2) {
         printf("[Learning] Pattern scores adjusted:\n");
         printf("  OPEN_THREE: %d (factor=%.3f)\n", g_score_open_three, g_pattern_learning[0].adjustment_factor);
         printf("  BROKEN_THREE: %d (factor=%.3f)\n", g_score_broken_three, g_pattern_learning[1].adjustment_factor);
@@ -646,6 +726,12 @@ void finish_game_record(int result) {
         }
     }
 
+    // パターン学習を常に適用して調整係数を更新（保存前に最新化）
+    if (g_stats.total_games >= MIN_GAMES_FOR_LEARNING) {
+        printf("[Learning] Applying pattern learning before saving...\n");
+        apply_pattern_learning();
+    }
+
     // 学習データの保存
     save_learning_data();
 
@@ -783,7 +869,7 @@ void load_learning_data(void) {
     // デバッグレベル1以上で累積学習データを表示
     if (g_config.debug_level >= 1) {
         printf("[Learning] ========================================\n");
-        printf("[Learning] Accumulated Learning Data Summary:\n");
+        printf("[Learning] DEBUG_LEVEL=1: Loaded Learning Data from .dat file\n");
         printf("[Learning] ----------------------------------------\n");
         printf("[Learning]   Total games played: %d\n", g_stats.total_games);
         printf("[Learning]   Wins: %d (%.2f%%)\n", g_stats.wins,
@@ -800,6 +886,20 @@ void load_learning_data(void) {
         if (g_cutoff_learning.games_with_cutoff > 0) {
             printf("[Learning]   Cutoff win rate: %.2f%%\n",
                    g_cutoff_learning.cutoff_win_rate * 100.0);
+        }
+        printf("[Learning] ----------------------------------------\n");
+        printf("[Learning]   Pattern Learning Data (from .dat):\n");
+        for (int i = 0; i < 8; i++) {
+            const char *pattern_names[] = {
+                "OPEN_THREE", "BROKEN_THREE", "THREE", "OPEN_TWO",
+                "TWO", "CENTER", "NEAR_ENEMY", "CONNECTION"
+            };
+            int total = g_pattern_learning[i].wins + g_pattern_learning[i].losses;
+            double win_rate = total > 0 ? (g_pattern_learning[i].wins * 100.0 / total) : 0.0;
+            printf("[Learning]     [%d] %-15s: wins=%d, losses=%d, total=%d, win_rate=%.2f%%, factor=%.3f\n",
+                   i, pattern_names[i],
+                   g_pattern_learning[i].wins, g_pattern_learning[i].losses, total,
+                   win_rate, g_pattern_learning[i].adjustment_factor);
         }
         printf("[Learning] ========================================\n");
     }
