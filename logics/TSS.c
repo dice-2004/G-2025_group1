@@ -259,7 +259,7 @@ static int has_closed_four(const int board[][BOARD_SIZE], int x, int y, int colo
 // 開いた三（両端が空いている3連で、4連にできる）を検出
 // board[y][x]は空きマス。ここに石を置いたら3連両空きができるかチェック
 // パターン: _●●●_ (●が3つ連続、両端が空き、この位置がその一部または端)
-static __attribute__((unused)) int has_open_three(const int board[][BOARD_SIZE], int x, int y, int color) {
+static int has_open_three(const int board[][BOARD_SIZE], int x, int y, int color) {
     if (board[y][x] != STONE_SPACE) {
         return 0;  // 既に石がある
     }
@@ -615,11 +615,18 @@ int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defe
                     }
                 }
 
-                // 注意: 開いた三の防御は削除（過剰防御を避けるため）
-                // 開いた三を防いでも相手は別の場所で四連を作れるため、意味がない
+                // 相手の開いた三をチェック（中優先度）
+                // 開いた三は次に四連にされると防げなくなるため、防御が必要
+                if (has_open_three((const int(*)[BOARD_SIZE])board, x, y, opponent)) {
+                    if (max_threat < 1) max_threat = 1;
+                    total_threats++;
+                    if (g_config.debug_level >= 2) {
+                        printf("[TSS] Position (%d,%d) blocks OPEN-THREE\n", x, y);
+                    }
+                }
 
-                // この位置が四連の脅威を防ぐ場合、候補に追加
-                if (max_threat >= 2) {  // 片側空き四以上のみ
+                // この位置が脅威を防ぐ場合、候補に追加
+                if (max_threat >= 1) {  // 開いた三以上を防御対象に
                     candidates[candidate_count].x = x;
                     candidates[candidate_count].y = y;
                     candidates[candidate_count].threat_level = max_threat;

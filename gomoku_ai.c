@@ -290,7 +290,7 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
         }
     }
 
-    // 自分の開いた四をチェック（最優先攻撃）
+        // 自分の開いた四をチェック(最優先攻撃)
     attack_level = find_strong_attack_move(board, com, &win_x, &win_y);
     if (attack_level == 2) {  // 開いた四
         // 禁じ手チェック（黒の場合）
@@ -310,8 +310,31 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
         }
     }
 
+    // 相手の脅威を防ぐ（開いた四、片側空き四、開いた三）
+    // 攻撃より防御を優先することで、相手の三連両空きに対応
+    int defense_level = find_strong_defense_move(board, com, &win_x, &win_y);
+    if (defense_level >= 1) {  // 1=開いた三, 2=片側空き四, 3=開いた四
+        // 禁じ手チェック（黒の場合）
+        if (com == STONE_BLACK && is_forbidden(board, win_x, win_y, com)) {
+            if (g_config.debug_level >= 1) {
+                printf("[AI-TSS] Defense at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
+            }
+            defense_level = 0;  // レベルをリセット
+        } else {
+            *pos_x = win_x;
+            *pos_y = win_y;
+            if (g_config.debug_level >= 1) {
+                const char *defense_type = (defense_level == 3) ? "Open Four" :
+                                          (defense_level == 2) ? "Closed Four" : "Open Three";
+                printf("[AI-TSS] Selected method: %s Defense\n", defense_type);
+                printf("[AI] Decision: (%d, %d)\n", *pos_x, *pos_y);
+            }
+            return 0;
+        }
+    }
+
     // 攻撃的な手をチェック（四連または複数の開いた三を作る）
-    // 防御より前にチェックすることで、攻めの姿勢を保つ
+    // 防御の後にチェックすることで、相手の脅威に確実に対応
     int aggressive_level = find_aggressive_attack_move(board, com, &win_x, &win_y);
     if (aggressive_level >= 1) {  // 1=四連, 2=複数の開いた三
         // 禁じ手チェック（黒の場合）
@@ -326,28 +349,6 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
             if (g_config.debug_level >= 1) {
                 const char *attack_type = (aggressive_level == 1) ? "Four Creation" : "Multiple Open-Threes";
                 printf("[AI-TSS] Selected method: Aggressive Attack (%s)\n", attack_type);
-                printf("[AI] Decision: (%d, %d)\n", *pos_x, *pos_y);
-            }
-            return 0;
-        }
-    }
-
-    // 相手の脅威を防ぐ（開いた四、片側空き四のみ）
-    // 注意: 開いた三は防御しない（過剰防御のため）
-    int defense_level = find_strong_defense_move(board, com, &win_x, &win_y);
-    if (defense_level >= 2) {  // 2=片側空き四, 3=開いた四
-        // 禁じ手チェック（黒の場合）
-        if (com == STONE_BLACK && is_forbidden(board, win_x, win_y, com)) {
-            if (g_config.debug_level >= 1) {
-                printf("[AI-TSS] Defense at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
-            }
-            defense_level = 0;  // レベルをリセット
-        } else {
-            *pos_x = win_x;
-            *pos_y = win_y;
-            if (g_config.debug_level >= 1) {
-                const char *defense_type = (defense_level == 3) ? "Open Four" : "Closed Four";
-                printf("[AI-TSS] Selected method: %s Defense\n", defense_type);
                 printf("[AI] Decision: (%d, %d)\n", *pos_x, *pos_y);
             }
             return 0;
