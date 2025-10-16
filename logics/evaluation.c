@@ -200,14 +200,44 @@ int evaluate_line(const int line[], int length, int my_color) {
 
         // 自分のパターン評価（6マス窓）
         if (opp_count == 0) {
-            if (my_count == 5) {
-                // 5連達成
+            if (my_count >= 6) {
+                // 6連以上（長連）は黒番のみ禁じ手
+                if (my_color == STONE_BLACK) {
+                    // 黒番の場合は長連なので大幅なペナルティ
+                    score -= g_score_five;  // -100000点（最悪の手）
+                } else {
+                    // 白番の場合は6連以上でも勝ち
+                    score += g_score_five;
+                }
+            } else if (my_count == 5) {
+                // 5連達成（黒白とも勝ち）
                 score += g_score_five;
             } else if (my_count == 4) {
                 // 4連パターン（6マス窓なので開いた四を正確に検出可能）
                 if (space_count == 2 && line[i] == STONE_SPACE && line[i + 5] == STONE_SPACE) {
                     // [_][●][●][●][●][_] - 完全な開いた四
                     score += g_score_open_four;
+                } else if (space_count == 1) {
+                    // 飛び四のパターン検出（●●_●●、●_●●●、●●●_●）
+                    bool is_broken_four = false;
+                    if (line[i] == my_color && line[i+1] == my_color && line[i+2] == STONE_SPACE &&
+                        line[i+3] == my_color && line[i+4] == my_color) {
+                        is_broken_four = true;  // ●●_●●
+                    } else if (line[i] == my_color && line[i+1] == STONE_SPACE &&
+                               line[i+2] == my_color && line[i+3] == my_color && line[i+4] == my_color) {
+                        is_broken_four = true;  // ●_●●●
+                    } else if (line[i] == my_color && line[i+1] == my_color && line[i+2] == my_color &&
+                               line[i+3] == STONE_SPACE && line[i+4] == my_color) {
+                        is_broken_four = true;  // ●●●_●
+                    }
+
+                    if (is_broken_four) {
+                        score += g_score_broken_four;  // 飛び四スコア
+                    } else if (left_open && right_open) {
+                        score += g_score_open_four * 0.9;
+                    } else {
+                        score += g_score_four;
+                    }
                 } else if (left_open && right_open) {
                     // その他の開いた四
                     score += g_score_open_four * 0.9;
@@ -217,14 +247,47 @@ int evaluate_line(const int line[], int length, int my_color) {
                 }
             } else if (my_count == 3 && space_count >= 2) {
                 // 3連パターン
-                if (left_open && right_open) {
+                bool is_broken_three = false;
+
+                // 飛び三のパターン検出（●●_●、●_●●）
+                if (space_count == 2 || space_count == 3) {
+                    if (line[i] == my_color && line[i+1] == my_color && line[i+2] == STONE_SPACE && line[i+3] == my_color) {
+                        is_broken_three = true;  // ●●_●
+                    } else if (line[i] == my_color && line[i+1] == STONE_SPACE && line[i+2] == my_color && line[i+3] == my_color) {
+                        is_broken_three = true;  // ●_●●
+                    } else if (line[i] == my_color && line[i+1] == STONE_SPACE &&
+                               line[i+2] == STONE_SPACE && line[i+3] == my_color && line[i+4] == my_color) {
+                        is_broken_three = true;  // ●__●●
+                    } else if (line[i] == my_color && line[i+1] == my_color &&
+                               line[i+2] == STONE_SPACE && line[i+3] == STONE_SPACE && line[i+4] == my_color) {
+                        is_broken_three = true;  // ●●__●
+                    }
+                }
+
+                if (is_broken_three && left_open && right_open) {
+                    score += g_score_broken_three;  // 飛び三スコア
+                } else if (left_open && right_open) {
                     score += g_score_open_three;
                 } else {
                     score += g_score_three;
                 }
             } else if (my_count == 2 && space_count >= 3) {
                 // 2連パターン
-                if (left_open && right_open) {
+                bool is_broken_two = false;
+
+                // 飛び二のパターン検出（●_●）
+                if (space_count >= 3) {
+                    if (line[i] == my_color && line[i+1] == STONE_SPACE && line[i+2] == my_color) {
+                        is_broken_two = true;  // ●_●
+                    } else if (line[i] == my_color && line[i+1] == STONE_SPACE &&
+                               line[i+2] == STONE_SPACE && line[i+3] == my_color) {
+                        is_broken_two = true;  // ●__●
+                    }
+                }
+
+                if (is_broken_two && left_open && right_open) {
+                    score += g_score_broken_two;  // 飛び二スコア
+                } else if (left_open && right_open) {
                     score += g_score_open_two;
                 } else {
                     score += g_score_two;
@@ -299,16 +362,125 @@ int evaluate_position(const int board[][BOARD_SIZE], int x, int y, int color) {
         {1, -1}   // 右上斜め
     };
 
+    // 各方向のパターンカウント（複合パターン検出用）
+    int four_count = 0;
+    int open_three_count = 0;
+    int three_count = 0;
+    int open_two_count = 0;
+    int two_count = 0;
+
     for (int i = 0; i < 4; i++) {
         extract_line(board, x, y, directions[i][0], directions[i][1], line, &length, 11);
         score += evaluate_line(line, length, color);
+
+        // パターンカウント（複合検出用）
+        if (length >= 11) {
+            int my_count = 0, space_count = 0, opp_count = 0;
+            int opponent = (color == STONE_BLACK) ? STONE_WHITE : STONE_BLACK;
+
+            // 中心付近の6マス窓を分析
+            for (int j = 2; j < 8; j++) {
+                if (line[j] == color) my_count++;
+                else if (line[j] == STONE_SPACE) space_count++;
+                else if (line[j] == opponent) opp_count++;
+            }
+
+            if (opp_count == 0) {
+                if (my_count == 4) four_count++;
+                else if (my_count == 3 && space_count >= 2) {
+                    // 開いているかチェック
+                    bool left_open = (line[1] != opponent && line[1] >= 0);
+                    bool right_open = (line[8] != opponent && line[8] >= 0);
+                    if (left_open && right_open) open_three_count++;
+                    else three_count++;
+                } else if (my_count == 2 && space_count >= 3) {
+                    bool left_open = (line[1] != opponent && line[1] >= 0);
+                    bool right_open = (line[8] != opponent && line[8] >= 0);
+                    if (left_open && right_open) open_two_count++;
+                    else two_count++;
+                }
+            }
+        }
     }
 
-    // 中央に近いほど少しボーナス（序盤の安定性）
+    // 複合パターンのボーナススコア
+    // ⚠️ 重要: 黒番（先手）は四四と三三が禁じ手
+    if (four_count >= 2) {
+        // 四四（2つ以上の四が交差）
+        if (color == STONE_BLACK) {
+            // 黒番の場合は禁じ手なので大幅なペナルティ
+            score -= g_score_five;  // 最悪の手として評価
+        } else {
+            // 白番の場合はボーナス（勝ち確定）
+            score += g_score_four_four;
+        }
+    } else if (four_count >= 1 && (three_count >= 1 || open_three_count >= 1)) {
+        // 四三（四と三が交差）- これは禁じ手ではない
+        score += g_score_four_three;
+    }
+
+    if (open_three_count >= 2) {
+        // 開いた三×2（三三）
+        if (color == STONE_BLACK) {
+            // 黒番の場合は禁じ手なので大幅なペナルティ
+            score -= g_score_five;  // 最悪の手として評価
+        } else {
+            // 白番の場合はボーナス（勝ちパターン）
+            score += g_score_open_three_three;
+        }
+    } else if (three_count >= 2 || (three_count >= 1 && open_three_count >= 1)) {
+        // 三×2（片側閉じた三が含まれる場合は禁じ手ではない）
+        score += g_score_three_three;
+    }
+
+    if (open_two_count >= 2) {
+        // 開いた二×2
+        score += g_score_open_two_two;
+    } else if (two_count >= 2 || (two_count >= 1 && open_two_count >= 1)) {
+        // 二×2
+        score += g_score_two_two;
+    }
+
+    // 中央に近いほど少しボーナス（序盤の安定性）- CENTER パターン
     int center_x = BOARD_SIZE / 2;
     int center_y = BOARD_SIZE / 2;
     int dist = abs(x - center_x) + abs(y - center_y);
     score += (BOARD_SIZE - dist) * 2;
+
+    // 中央付近の特別ボーナス
+    if (dist <= 2) {
+        score += g_score_center;
+    }
+
+    // NEAR_ENEMY パターン: 相手の石の近く（牽制・防御）
+    int opponent = (color == STONE_BLACK) ? STONE_WHITE : STONE_BLACK;
+    int enemy_nearby = 0;
+    int friendly_nearby = 0;
+
+    for (int dy = -2; dy <= 2; dy++) {
+        for (int dx = -2; dx <= 2; dx++) {
+            if (dx == 0 && dy == 0) continue;
+            int nx = x + dx;
+            int ny = y + dy;
+            if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+                if (board[ny][nx] == opponent) {
+                    enemy_nearby++;
+                } else if (board[ny][nx] == color) {
+                    friendly_nearby++;
+                }
+            }
+        }
+    }
+
+    // 相手の石の近くにいる場合のボーナス
+    if (enemy_nearby > 0) {
+        score += g_score_near_enemy * enemy_nearby;
+    }
+
+    // CONNECTION パターン: 既存の石との連結
+    if (friendly_nearby > 0) {
+        score += g_score_connection * friendly_nearby;
+    }
 
     return score;
 }

@@ -125,8 +125,8 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
         // 設定ファイル読み込み
         load_config("config.txt");
 
-        // パターンスコア読み込み
-        load_pattern_scores("patterns.csv");
+        // パターンスコア読み込み（拡張版を使用 - 20パターン完全対応）
+        load_pattern_scores("patterns_extended.csv");
 
         // 序盤定石読み込み
         load_opening_book("opening_book.csv");
