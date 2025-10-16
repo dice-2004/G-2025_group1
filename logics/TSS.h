@@ -17,4 +17,8 @@ int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defe
 // 四連防御（開いた四と片側空き四の両方を検出）
 int find_four_defense_move(const int board[][BOARD_SIZE], int color, int *defense_x, int *defense_y);
 
+// 攻撃的な手を探す（四連または複数の開いた三を作る）
+// 戻り値: 0=なし, 1=四連, 2=複数の開いた三
+int find_aggressive_attack_move(const int board[][BOARD_SIZE], int color, int *attack_x, int *attack_y);
+
 #endif

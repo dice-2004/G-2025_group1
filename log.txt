@@ -1,96 +1,75 @@
+========================================
+[AI] Move 17 - Thinking started
+========================================
+[TSS-AggressiveAttack] Best attack: (4,4) FOUR=1, OPEN_THREE=0, value=100
+[AI-TSS] Selected method: Aggressive Attack (Four Creation)
+[AI] Decision: (4, 4)
+                        1 1 1 1 1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4
+ 0 ・・・・・・・・・・・・・・・
+ 1 ・・・・・・・・・・・・・・・
+ 2 ・・・・・・・・・・・・・・・
+ 3 ・・・・・・・・・・・・・・・
+ 4 ・・・・●・○・・・・・・・・
+ 5 ・・・・・●●・・・・・・・・
+ 6 ・・・・○・●・・・・・・・・
+ 7 ・・・○●●●●○・・・・・・
+ 8 ・・・・・・●○○・・・・・・
+ 9 ・・・・・○○・・・・・・・・
+10 ・・・・・・・・・・・・・・・
+11 ・・・・・・・・・・・・・・・
+12 ・・・・・・・・・・・・・・・
+13 ・・・・・・・・・・・・・・・
+14 ・・・・・・・・・・・・・・・
+
+四連(4 4)
 ○の番です。どこに置きますか x y の順に入力してください
-> 8 2
+> 3 3
                         1 1 1 1 1
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4
  0 ・・・・・・・・・・・・・・・
- 1 ・・・・・・・○・・○・・・・
- 2 ・・・・●・●●○●・・・・・
- 3 ・・・・○○○●●○●・・・・
- 4 ・・・●○○○●○○●○・・・
- 5 ・・●○○○・●○○●・・・・
- 6 ・・●・○●・○○●○・・・・
- 7 ・・・・●○●●●・●●・・・
- 8 ・・・・・・●・・・・・・・・
- 9 ・・・・・・・・・・・・・・・
+ 1 ・・・・・・・・・・・・・・・
+ 2 ・・・・・・・・・・・・・・・
+ 3 ・・・○・・・・・・・・・・・
+ 4 ・・・・●・○・・・・・・・・
+ 5 ・・・・・●●・・・・・・・・
+ 6 ・・・・○・●・・・・・・・・
+ 7 ・・・○●●●●○・・・・・・
+ 8 ・・・・・・●○○・・・・・・
+ 9 ・・・・・○○・・・・・・・・
 10 ・・・・・・・・・・・・・・・
 11 ・・・・・・・・・・・・・・・
 12 ・・・・・・・・・・・・・・・
 13 ・・・・・・・・・・・・・・・
 14 ・・・・・・・・・・・・・・・
 
-飛び四(9 2)
-飛び四(8 3)
-飛び四(6 7)
-飛び四(7 7)
+[Learning] Recorded move #20: (3,3) color=2
 
 ========================================
-[AI] Move 47 - Thinking started
+[AI] Move 19 - Thinking started
 ========================================
-
-========================================
-Current Board State
-========================================
-    0  1  2  3  4  5  6  7  8  9 10 11 12 13 14
- 0  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·
- 1  ·  ·  ·  ·  ·  ·  ·  ○  ·  ·  ○  ·  ·  ·  ·
- 2  ·  ·  ·  ·  ●  ·  ●  ●  ○  ●  ·  ·  ·  ·  ·
- 3  ·  ·  ·  ·  ○  ○  ○  ●  ●  ○  ●  ·  ·  ·  ·
- 4  ·  ·  ·  ●  ○  ○  ○  ●  ○  ○  ●  ○  ·  ·  ·
- 5  ·  ·  ●  ○  ○  ○  ·  ●  ○  ○  ●  ·  ·  ·  ·
- 6  ·  ·  ●  ·  ○  ●  ·  ○  ○  ●  ○  ·  ·  ·  ·
- 7  ·  ·  ·  ·  ●  ○  ●  ●  ●  ·  ●  ●  ·  ·  ·
- 8  ·  ·  ·  ·  ·  ·  ●  ·  ·  ·  ·  ·  ·  ·  ·
- 9  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·
-10  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·
-11  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·
-12  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·
-13  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·
-14  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·
-========================================
-
-[TSS] Searching for OPEN-FOUR only (color=1)
-[TSS] No open-four found
-[TSS-Defense] Searching for defense moves (opponent=2)
-[TSS] ★★★ OPEN-THREE at (3,2) diagonal \ (↘): L=0 R=2 ★★★
-[TSS] Defense candidate 1: (3,2) blocks OPEN-THREE
-[TSS] Closed-four detected at (5,2) direction=(0,1) left_open=1 right_open=0
-[TSS] Defense candidate 2: (5,2) blocks CLOSED-FOUR
-[TSS] Closed-four detected at (3,3) direction=(1,0) left_open=1 right_open=0
-[TSS] Defense candidate 3: (3,3) blocks CLOSED-FOUR
-[TSS] Closed-four detected at (2,4) direction=(1,1) left_open=1 right_open=0
-[TSS] Defense candidate 4: (2,4) blocks CLOSED-FOUR
-[TSS] Closed-four detected at (6,5) direction=(1,1) left_open=1 right_open=0
-[TSS] Defense candidate 5: (6,5) blocks CLOSED-FOUR
-[TSS] Closed-four detected at (3,6) direction=(1,-1) left_open=1 right_open=0
-[TSS] Defense candidate 6: (3,6) blocks CLOSED-FOUR
-[TSS] Closed-four detected at (3,7) direction=(1,-1) left_open=1 right_open=0
-[TSS] Defense candidate 7: (3,7) blocks CLOSED-FOUR
-[TSS-Defense] Evaluating 7 defense candidates...
-[TSS]   Candidate 1: (5,2) threat_level=2 score=-14826 (self=15846, opp=15336)
-[TSS]   Candidate 2: (3,3) threat_level=2 score=-49104 (self=2384, opp=25744)
-[TSS]   Candidate 3: (2,4) threat_level=2 score=-7834 (self=22654, opp=15244)
-[TSS]   Candidate 4: (6,5) threat_level=2 score=20476 (self=51624, opp=15574)
-[TSS]   Candidate 5: (3,6) threat_level=2 score=-11000 (self=20840, opp=15920)
-[TSS]   Candidate 6: (3,7) threat_level=2 score=-29362 (self=2382, opp=15872)
-[TSS-Defense] Best defense selected: (6,5) CLOSED-FOUR score=20476 (from 7 candidates)
-[AI-TSS] Selected method: Closed Four Defense
-[AI] Decision: (6, 5)
+[TSS-AggressiveAttack] Best attack: (7,5) FOUR=0, OPEN_THREE=2, value=60
+[AI-TSS] Selected method: Aggressive Attack (Multiple Open-Threes)
+[AI] Decision: (7, 5)
                         1 1 1 1 1
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4
  0 ・・・・・・・・・・・・・・・
- 1 ・・・・・・・○・・○・・・・
- 2 ・・・・●・●●○●・・・・・
- 3 ・・・・○○○●●○●・・・・
- 4 ・・・●○○○●○○●○・・・
- 5 ・・●○○○●●○○●・・・・
- 6 ・・●・○●・○○●○・・・・
- 7 ・・・・●○●●●・●●・・・
- 8 ・・・・・・●・・・・・・・・
- 9 ・・・・・・・・・・・・・・・
+ 1 ・・・・・・・・・・・・・・・
+ 2 ・・・・・・・・・・・・・・・
+ 3 ・・・○・・・・・・・・・・・
+ 4 ・・・・●・○・・・・・・・・
+ 5 ・・・・・●●●・・・・・・・
+ 6 ・・・・○・●・・・・・・・・
+ 7 ・・・○●●●●○・・・・・・
+ 8 ・・・・・・●○○・・・・・・
+ 9 ・・・・・○○・・・・・・・・
 10 ・・・・・・・・・・・・・・・
 11 ・・・・・・・・・・・・・・・
 12 ・・・・・・・・・・・・・・・
 13 ・・・・・・・・・・・・・・・
 14 ・・・・・・・・・・・・・・・
 
-長連の禁じ手です。○の勝ちです
+三連(5 5)
+三連(7 5)
+三三の禁じ手です。○の勝ちです
+

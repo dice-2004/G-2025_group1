@@ -141,8 +141,16 @@ int load_pattern_scores(const char *filename) {
     fclose(fp);
 
     printf("[Patterns] Loaded %d patterns from %s\n", loaded, filename);
-    printf("  FIVE=%d, OPEN_FOUR=%d, FOUR=%d, OPEN_THREE=%d\n",
-           g_score_five, g_score_open_four, g_score_four, g_score_open_three);
+    printf("[Patterns] Critical patterns:\n");
+    printf("  FIVE=%d, OPEN_FOUR=%d, FOUR=%d, BROKEN_FOUR=%d\n",
+           g_score_five, g_score_open_four, g_score_four, g_score_broken_four);
+    printf("[Patterns] Learning-target patterns (will adapt based on W/L):\n");
+    printf("  OPEN_THREE=%d, BROKEN_THREE=%d, THREE=%d\n",
+           g_score_open_three, g_score_broken_three, g_score_three);
+    printf("  OPEN_TWO=%d, TWO=%d\n",
+           g_score_open_two, g_score_two);
+    printf("  CENTER=%d, NEAR_ENEMY=%d, CONNECTION=%d\n",
+           g_score_center, g_score_near_enemy, g_score_connection);
 
     return loaded;
 }
