@@ -795,21 +795,18 @@ int is_forbidden(const int board[][BOARD_SIZE], int x, int y, int color) {
     // check変数で有効な禁じ手をチェック（gomoku.hで定義）
 
     // 長連チェック (check & CHOLEN)
+    // .libgomoku_to.c の isRoku_to を使用
     if (check & CHOLEN) {
-        // 独自実装のcheck_choren関数を使用（より正確）
-        int is_long_chain_custom = check_choren(board, x, y);
-        // オリジナルのisRoku_toも試す
-        int is_long_chain_original = isRoku_to(temp_board, x, y);
+        int is_long_chain = isRoku_to(temp_board, x, y);
 
         if (g_config.debug_level >= 3) {
-            printf("[Forbidden-Check] Position (%d,%d): check=%d, check_choren=%d, isRoku_to=%d\n",
-                   x, y, check, is_long_chain_custom, is_long_chain_original);
+            printf("[Forbidden-Check] Position (%d,%d): check=%d, isRoku_to=%d\n",
+                   x, y, check, is_long_chain);
         }
 
-        if (is_long_chain_custom || is_long_chain_original) {
+        if (is_long_chain) {
             if (g_config.debug_level >= 2) {
-                printf("[Forbidden] Long-chain detected at (%d,%d) [custom=%d, original=%d]\n",
-                       x, y, is_long_chain_custom, is_long_chain_original);
+                printf("[Forbidden] Long-chain detected at (%d,%d)\n", x, y);
             }
             return 1;
         }
