@@ -12,6 +12,11 @@
 #include <string.h>
 #include <time.h>
 
+// 学習関数の宣言
+extern void finish_game_record(int result);
+extern void start_game_record(void);
+extern int get_ai_color(void);  // gomoku_ai.cから
+
 int gameEndProcess(int board[][BOARD_SIZE],int c33Board[][BOARD_SIZE],int c44Board[][BOARD_SIZE]);
 int lenCheck(int board[][BOARD_SIZE], int x, int y);
 int isSan(int board[][BOARD_SIZE], int x, int y);
@@ -20,14 +25,12 @@ int isRoku(int board[][BOARD_SIZE], int x, int y);
 
 //int check = 7;  // 1:三三のみ 2:四四のみ 4:長連のみ 3:三三と四四 5:三三と長連
                 // 6:四四と長連 7:全部
-int gTobiShi =0;
-int lTobiShi;
 
 //-------------------------------------------------
 // 距離計算
 //-------------------------------------------------
 int distance(int x, int y, int nx, int ny) {
-    int distance = -1; 
+    int distance = -1;
     if (x==nx) distance = abs(y-ny);
     if (y==ny) distance = abs(x-nx);
     if ((x!=nx)&&(y!=ny)&&(abs(x-nx)==abs(y-ny))) distance = abs(x-nx);
@@ -46,8 +49,6 @@ int gameEndProcess(int board[][BOARD_SIZE],int c33Board[][BOARD_SIZE],int c44Boa
     int tmp_x =0;
     int tmp_y =0;
 
-    lTobiShi =0;
-        
    for(i = 0; i < BOARD_SIZE; i++) {
         for(j = 0; j < BOARD_SIZE; j++) {
             if(board[i][j] == STONE_SPACE) {
@@ -59,7 +60,7 @@ int gameEndProcess(int board[][BOARD_SIZE],int c33Board[][BOARD_SIZE],int c44Boa
                 return 1;
             }
         }}
-    
+
    for(i = 0; i < BOARD_SIZE; i++) {
         for(j = 0; j < BOARD_SIZE; j++) {
             if(board[i][j] == STONE_SPACE) {
@@ -68,6 +69,17 @@ int gameEndProcess(int board[][BOARD_SIZE],int c33Board[][BOARD_SIZE],int c44Boa
             if(lenCheck(board, j, i)) {
                 printf("%sの勝ちです。\n",
                        (board[i][j] == STONE_BLACK) ? "●" : "○");
+
+                // 学習データを保存
+                int winner_color = board[i][j];
+                int ai_color = get_ai_color();
+                if (ai_color != 0) {  // AIが初期化されている場合
+                    int result = (winner_color == ai_color) ? 1 : -1;
+                    printf("[GameEnd] Recording result: %d (AI=%d, Winner=%d)\n", result, ai_color, winner_color);
+                    finish_game_record(result);
+                    start_game_record();  // 新規ゲーム開始
+                }
+
                 return 1;
             }
         }}
@@ -100,7 +112,7 @@ int gameEndProcess(int board[][BOARD_SIZE],int c33Board[][BOARD_SIZE],int c44Boa
                      printf("三三の禁じ手です。%sの勝ちです\n", "○");
                      return 1;}
                  }
-            
+
             }
 
             if((check & SHISHI) && board[i][j] == STONE_BLACK &&
@@ -117,7 +129,7 @@ int gameEndProcess(int board[][BOARD_SIZE],int c33Board[][BOARD_SIZE],int c44Boa
                     //printf("44num-1:%d\n", num);
                 };
                  if((num > 0)&&(n_shi > 0)&&(c44Board[i][j]!=num)) {
-                    c44Board[i][j]=num;                     
+                    c44Board[i][j]=num;
                     n_shi++;
                     c44Board[i][j]=num;
                     //printf("44num-2:%d\n", num);
@@ -132,15 +144,7 @@ int gameEndProcess(int board[][BOARD_SIZE],int c33Board[][BOARD_SIZE],int c44Boa
             }
         }
     }
-    //printf("lTobiShi:%d\n", lTobiShi);
-    //printf("gTobiShi:%d\n", gTobiShi);
-    if (lTobiShi - gTobiShi >1){
-    printf("四四の禁じ手です。%sの勝ちです\n", "○");    
-    return 1;}
-    gTobiShi = lTobiShi;
-    //if (lTobiShi2 >1){
-    //printf("四四の禁じ手です。%sの勝ちです\n", "○");    
-    //return 1;}
+
     return 0;
 }
 
@@ -283,7 +287,6 @@ int isShi(int board[][BOARD_SIZE], int x, int y) {
             case 3: num += RIGT; break;
             }
             //num++;
-            lTobiShi++;
             printf("飛び四(%d %d)\n", x, y);
         } else if(sum_stone == 4 && sum_space == 0) {
             //４連
