@@ -109,3 +109,13 @@ help:
 	@echo "  - Iterative Deepening with time management"
 	@echo "  - Debug utilities (DEBUG_LEVEL 0-3)"
 	@echo "  - Configurable via config.txt"
+# Gemini対戦モード
+gomoku_vs_gemini: gomoku_vs_gemini.c .libgomoku.o gomoku_ai.o config.o .libgomoku_to.o \
+                	logics/evaluation.o logics/transposition.o logics/opening_book.o \
+                	logics/learning.o logics/main_engine.o logics/TSS.o logics/debug_utils.o
+	@echo "Compiling gomoku_vs_gemini.c (Gemini match mode)..."
+	$(CC) $(CFLAGS) -o gomoku_vs_gemini gomoku_vs_gemini.c \
+	.libgomoku.o gomoku_ai.o config.o .libgomoku_to.o \
+	logics/evaluation.o logics/transposition.o logics/opening_book.o \
+	logics/learning.o logics/main_engine.o logics/TSS.o logics/debug_utils.o \
+	-lcurl -lm
