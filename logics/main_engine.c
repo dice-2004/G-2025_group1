@@ -422,14 +422,12 @@ int iterative_deepening(const int board[][BOARD_SIZE], int color, int time_limit
     int completed_depth = 0;  // 完了した最大深度
     clock_t start_time = clock();
 
-    // 時間制限に基づく最大深度の決定
+    // 最大深度の決定（config.txtの設定を使用）
+    // ユーザーがconfig.txtで設定した値を尊重する
     int max_depth = g_config.search_depth;
-    if (time_limit_ms > 0) {
-        // 時間制限がある場合は動的に調整
-        if (time_limit_ms < 1000) max_depth = 3;
-        else if (time_limit_ms < 3000) max_depth = 4;
-        else if (time_limit_ms < 10000) max_depth = 6;
-        else max_depth = MAX_DEPTH;
+
+    if (g_config.debug_level >= 2) {
+        printf("[ID] Using search depth from config.txt: %d\n", max_depth);
     }
 
     // 閾値の取得（config.txtから読み込み、0.0～1.0）

@@ -3,18 +3,19 @@
 #include <stdlib.h>
 #include "config.h"
 
-// グローバル設定
+// グローバル設定（デフォルト値）
+// 注意: config.txtが存在する場合、そちらの設定が優先されます
 AIConfig g_config = {
-    .search_depth = 4,
-    .tt_size = 262144,
-    .debug_mode = 0,
-    .timeout_ms = 10000,
-    .learning_mode = LEARNING_MODE_PRACTICE,  // デフォルトは練習モード
-    .iterative_deepening = 1,                 // デフォルトはON
-    .debug_level = 1,                         // デフォルトは基本情報
-    .id_time_threshold = 0.8,                 // デフォルトは80%
-    .strict_time_limit_ms = 0,                // デフォルトは0（timeout_msと同じ）
-    .early_cutoff_time_threshold = 0.5        // デフォルトは50%
+    .search_depth = 4,                        // config.txtで上書き可能
+    .tt_size = 262144,                        // config.txtで上書き可能
+    .debug_mode = 0,                          // config.txtで上書き可能
+    .timeout_ms = 10000,                      // config.txtで上書き可能
+    .learning_mode = LEARNING_MODE_PRACTICE,  // config.txtで上書き可能
+    .iterative_deepening = 1,                 // config.txtで上書き可能
+    .debug_level = 1,                         // config.txtで上書き可能
+    .id_time_threshold = 0.8,                 // config.txtで上書き可能
+    .strict_time_limit_ms = 0,                // config.txtで上書き可能（0=timeout_msと同じ）
+    .early_cutoff_time_threshold = 0.5        // config.txtで上書き可能
 };
 
 // デフォルト設定を使用
@@ -32,6 +33,7 @@ void use_default_config(void) {
 }
 
 // 設定ファイルから読み込み
+// 重要: config.txtで設定された値は、プログラム内のデフォルト値やハードコーディングされた値よりも優先されます
 int load_config(const char *filename) {
     FILE *fp = fopen(filename, "r");
     if (!fp) {
@@ -54,6 +56,7 @@ int load_config(const char *filename) {
         if (sscanf(line, "%[^=]=%s", key, value) == 2) {
             if (strcmp(key, "SEARCH_DEPTH") == 0) {
                 g_config.search_depth = atoi(value);
+                printf("[Config] SEARCH_DEPTH set to %d\n", g_config.search_depth);
                 if (g_config.search_depth < 1) g_config.search_depth = 1;
                 if (g_config.search_depth > 10) g_config.search_depth = 10;
                 loaded++;
@@ -106,11 +109,14 @@ int load_config(const char *filename) {
 
     fclose(fp);
 
-    printf("[Config] Loaded from %s\n", filename);
-    printf("  SEARCH_DEPTH = %d\n", g_config.search_depth);
-    printf("  TT_SIZE = %d\n", g_config.tt_size);
-    printf("  DEBUG_MODE = %d\n", g_config.debug_mode);
-    printf("  TIMEOUT_MS = %d\n", g_config.timeout_ms);
+    printf("[Config] ========================================\n");
+    printf("[Config] Loaded from %s (PRIORITY)\n", filename);
+    printf("[Config] These settings override all defaults\n");
+    printf("[Config] ========================================\n");
+    printf("  SEARCH_DEPTH = %d (from config.txt)\n", g_config.search_depth);
+    printf("  TT_SIZE = %d (from config.txt)\n", g_config.tt_size);
+    printf("  DEBUG_MODE = %d (from config.txt)\n", g_config.debug_mode);
+    printf("  TIMEOUT_MS = %d (from config.txt)\n", g_config.timeout_ms);
     printf("  LEARNING_MODE = %s\n",
            g_config.learning_mode == LEARNING_MODE_PRODUCTION ? "PRODUCTION (本番)" : "PRACTICE (練習)");
     printf("  ITERATIVE_DEEPENING = %s\n", g_config.iterative_deepening ? "ON" : "OFF");
@@ -129,6 +135,9 @@ int load_config(const char *filename) {
     }
     printf("  EARLY_CUTOFF_TIME_THRESHOLD = %.2f (%.0f%%)\n",
            g_config.early_cutoff_time_threshold, g_config.early_cutoff_time_threshold * 100);
+    printf("[Config] ========================================\n");
+    printf("[Config] All settings are active and will be used\n");
+    printf("[Config] ========================================\n");
 
     return loaded;
 }
