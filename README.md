@@ -159,6 +159,8 @@ docs/
 #### 機能別ガイド
 | ファイル | 説明 | 対象者 |
 |---------|------|--------|
+| [CONFIG_GUIDE.md](./docs/guides/CONFIG_GUIDE.md) | ⚙️ Config設定完全ガイド - 全設定項目の詳細説明 | 全員 |
+| [TRAINING_GUIDE.md](./docs/guides/TRAINING_GUIDE.md) | 📚 AI学習・トレーニングガイド - 学習の進め方と運用 | 全員 |
 | [ID_TIME_MANAGEMENT.md](./docs/guides/ID_TIME_MANAGEMENT.md) | ⏱️ ID時間管理完全ガイド (v3.3) | 中級〜上級 |
 | [DEBUG_AND_ID_GUIDE.md](./docs/guides/DEBUG_AND_ID_GUIDE.md) | 🐛 デバッグ&ID実装ガイド (v3.2) | 開発者 |
 | [LEARNING_MODE_GUIDE.md](./docs/guides/LEARNING_MODE_GUIDE.md) | 🎛️ 学習モード切替ガイド (v3.1) | 全員 |

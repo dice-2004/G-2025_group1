@@ -23,6 +23,8 @@
 
 | ファイル | 説明 | 対象者 |
 |---------|------|--------|
+| [**CONFIG_GUIDE.md**](./CONFIG_GUIDE.md) | ⚙️ **Config設定完全ガイド** - 全設定項目の詳細説明、推奨プリセット | 全員 |
+| [**TRAINING_GUIDE.md**](./TRAINING_GUIDE.md) | 📚 **AI学習・トレーニングガイド** - 学習の進め方、理想的なプロセス、運用方法 | 全員 |
 | [**ID_TIME_MANAGEMENT.md**](./ID_TIME_MANAGEMENT.md) | ⏱️ **ID時間管理完全ガイド（v3.3）** - 時間制限の完全制御、時間閾値調整 | 中級～上級 |
 | [**DEBUG_AND_ID_GUIDE.md**](./DEBUG_AND_ID_GUIDE.md) | 🐛 **デバッグ&ID実装ガイド（v3.2）** - デバッグレベル、反復深化探索 | 開発者 |
 | [**LEARNING_MODE_GUIDE.md**](./LEARNING_MODE_GUIDE.md) | 🎛️ **学習モード切替ガイド（v3.1）** - PRACTICE/PRODUCTION切替 | 全員 |
@@ -55,10 +57,17 @@
 3. [評価パターンガイド](../technical/EVALUATION_PATTERNS.md) - 20種類のパターン
 
 ### 設定をカスタマイズしたい方
-1. **USAGE_GUIDE.md** - 設定方法
-2. **LEARNING_MODE_GUIDE.md** - 学習モードの設定
-3. **ID_TIME_MANAGEMENT.md** - 時間閾値の調整
-4. **DEBUG_AND_ID_GUIDE.md** - デバッグレベルの設定
+1. **CONFIG_GUIDE.md** - 全設定項目の詳細説明
+2. **USAGE_GUIDE.md** - 設定方法
+3. **LEARNING_MODE_GUIDE.md** - 学習モードの設定
+4. **ID_TIME_MANAGEMENT.md** - 時間閾値の調整
+5. **DEBUG_AND_ID_GUIDE.md** - デバッグレベルの設定
+
+### AI学習を行いたい方
+1. **CONFIG_GUIDE.md** - 学習関連の設定を理解
+2. **TRAINING_GUIDE.md** - 学習の進め方を学ぶ
+3. **LEARNING_MODE_GUIDE.md** - 練習・本番モードの切替
+4. **SYSTEM_BEHAVIOR_GUIDE.md** - 学習の仕組みを理解
 
 ## 📌 関連リンク
 

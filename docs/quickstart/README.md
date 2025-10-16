@@ -85,6 +85,14 @@ gomoku_new.exe
 
 ## 📌 次のステップ
 
+### 設定をカスタマイズしたい方
+- [Config設定完全ガイド](../guides/CONFIG_GUIDE.md) - 全設定項目の詳細説明
+- [使い方ガイド](../guides/USAGE_GUIDE.md) - ビルド・実行・設定方法
+
+### AI学習を行いたい方
+- [AI学習・トレーニングガイド](../guides/TRAINING_GUIDE.md) - 学習の進め方と運用
+- [学習モード切替ガイド](../guides/LEARNING_MODE_GUIDE.md) - 練習・本番モードの切替
+
 ### さらに詳しく知りたい方
 - [ガイドドキュメント](../guides/) - 各機能の詳細な使い方
 - [技術ドキュメント](../technical/) - アルゴリズムの詳細

@@ -7,7 +7,28 @@
 ### 📘 [ガイドドキュメント](./guides/)
 システムの使い方、設定方法、機能の詳細ガイド
 
-**主なドキュメント:**
+**主なドキュメント### 🔍 検索のヒント
+
+### 設定関連を調べたい（NEW!）
+- **全設定項目**: [Config設定完全ガイド](./guides/CONFIG_GUIDE.md)
+- **学習モード**: [学習モード切替ガイド](./guides/LEARNING_MODE_GUIDE.md)
+- **時間管理**: [ID時間管理ガイド](./guides/ID_TIME_MANAGEMENT.md)
+- **デバッグレベル**: [デバッグ&ID実装ガイド](./guides/DEBUG_AND_ID_GUIDE.md)
+
+### AI学習関連を調べたい（NEW!）
+- **学習の進め方**: [AI学習・トレーニングガイド](./guides/TRAINING_GUIDE.md)
+- **学習の仕組み**: [学習機能の詳細ガイド](./technical/LEARNING_GUIDE.md)
+- **学習実装**: [学習システム実装詳細](./technical/LEARNING_IMPLEMENTATION.md)
+
+### 特定の機能を調べたい
+- **デバッグ**: [デバッグ&ID実装ガイド](./guides/DEBUG_AND_ID_GUIDE.md)
+- **時間管理**: [ID時間管理ガイド](./guides/ID_TIME_MANAGEMENT.md)
+- **評価関数**: [完全技術資料](./technical/TECHNICAL_DOCUMENT.md) の評価関数セクション
+
+### Opening Book関連を調べたい
+- **実装総まとめ**: [Opening Book実装総まとめ](./verification/OPENING_BOOK_CORRECTION_SUMMARY.md)
+- **修正完了レポート**: [Opening Book修正完了レポート](./verification/OPENING_BOOK_CORRECTION_REPORT.md)*Config設定完全ガイド** - 全設定項目の詳細説明
+- 🆕 **AI学習・トレーニングガイド** - 学習の進め方と運用
 - システム動作完全ガイド
 - ID時間管理ガイド
 - デバッグ&ID実装ガイド
@@ -83,13 +104,19 @@
 ### システム全体を理解したい
 → [システム動作完全ガイド](./guides/SYSTEM_BEHAVIOR_GUIDE.md)
 
+### 設定をカスタマイズしたい（NEW!）
+→ [Config設定完全ガイド](./guides/CONFIG_GUIDE.md)
+
+### AI学習を効果的に行いたい（NEW!）
+→ [AI学習・トレーニングガイド](./guides/TRAINING_GUIDE.md)
+
 ### 技術詳細を知りたい
 → [完全技術資料](./technical/TECHNICAL_DOCUMENT.md)
 
-### 戦略理論を理解したい（NEW!）
+### 戦略理論を理解したい
 → [防御戦略の分析](./technical/DEFENSE_STRATEGY_ANALYSIS.md)
 
-### Opening Bookの修正内容を知りたい（NEW!）
+### Opening Bookの修正内容を知りたい
 → [Opening Book実装総まとめ](./verification/OPENING_BOOK_CORRECTION_SUMMARY.md)
 
 ### 最適化の詳細を知りたい
@@ -104,8 +131,10 @@
 
 ### 🌱 初心者向け
 1. [クイックスタート](./quickstart/QUICKSTART.md) - まず使ってみる
-2. [システム動作完全ガイド](./guides/SYSTEM_BEHAVIOR_GUIDE.md) - システムの理解
-3. [学習モード切替ガイド](./guides/LEARNING_MODE_GUIDE.md) - 学習モードの活用
+2. [Config設定完全ガイド](./guides/CONFIG_GUIDE.md) - 設定をカスタマイズ
+3. [AI学習・トレーニングガイド](./guides/TRAINING_GUIDE.md) - AI学習の進め方
+4. [システム動作完全ガイド](./guides/SYSTEM_BEHAVIOR_GUIDE.md) - システムの理解
+5. [学習モード切替ガイド](./guides/LEARNING_MODE_GUIDE.md) - 学習モードの活用
 
 ### 🌿 中級者向け
 1. [プレゼン用スライド](./quickstart/PRESENTATION_SLIDES.md) - 全体像の把握

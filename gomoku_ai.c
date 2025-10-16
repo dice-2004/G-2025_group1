@@ -152,8 +152,11 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
         }
 
         initialized = 1;
-        printf("[AI] Initialization complete.\n");
-        printf("=================================================\n");
+        if (g_config.debug_level >= 1) {
+            printf("=================================================\n");
+            printf("[AI] Initialization complete - Ready to play\n");
+            printf("=================================================\n");
+        }
     }
 
     // 石数をカウント
@@ -233,7 +236,11 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     }
 #endif
 
-    printf("\n[AI] Move %d thinking...\n", move_count + 1);
+    if (g_config.debug_level >= 1) {
+        printf("\n========================================\n");
+        printf("[AI] Move %d - Thinking started\n", move_count + 1);
+        printf("========================================\n");
+    }
 
     // デバッグ: 盤面表示
     if (g_config.debug_level >= 2) {
@@ -251,12 +258,15 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
         // 禁じ手チェック（黒の場合）
         if (com == STONE_BLACK && is_forbidden(board, win_x, win_y, com)) {
             if (g_config.debug_level >= 1) {
-                printf("[AI] Winning move at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
+                printf("[AI-TSS] Winning move at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
             }
         } else {
             *pos_x = win_x;
             *pos_y = win_y;
-            printf("[AI] Winning move executed!\n");
+            if (g_config.debug_level >= 1) {
+                printf("[AI-TSS] Selected method: Winning Move (Five-in-a-row)\n");
+                printf("[AI] Decision: (%d, %d)\n", *pos_x, *pos_y);
+            }
             return 0;
         }
     }
@@ -267,12 +277,15 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
         // ただし、念のためチェック
         if (com == STONE_BLACK && is_forbidden(board, win_x, win_y, com)) {
             if (g_config.debug_level >= 1) {
-                printf("[AI] Threat defense at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
+                printf("[AI-TSS] Threat defense at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
             }
         } else {
             *pos_x = win_x;
             *pos_y = win_y;
-            printf("[AI] Threat defended!\n");
+            if (g_config.debug_level >= 1) {
+                printf("[AI-TSS] Selected method: Threat Defense (Block opponent's five)\n");
+                printf("[AI] Decision: (%d, %d)\n", *pos_x, *pos_y);
+            }
             return 0;
         }
     }
@@ -283,13 +296,16 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
         // 禁じ手チェック（黒の場合）
         if (com == STONE_BLACK && is_forbidden(board, win_x, win_y, com)) {
             if (g_config.debug_level >= 1) {
-                printf("[AI] Open four at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
+                printf("[AI-TSS] Open four at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
             }
             attack_level = 0;  // レベルをリセット
         } else {
             *pos_x = win_x;
             *pos_y = win_y;
-            printf("[AI] Open four attack executed!\n");
+            if (g_config.debug_level >= 1) {
+                printf("[AI-TSS] Selected method: Open Four Attack\n");
+                printf("[AI] Decision: (%d, %d)\n", *pos_x, *pos_y);
+            }
             return 0;
         }
     }
@@ -300,13 +316,16 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
         // 禁じ手チェック（黒の場合）
         if (com == STONE_BLACK && is_forbidden(board, win_x, win_y, com)) {
             if (g_config.debug_level >= 1) {
-                printf("[AI] Defense of open four at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
+                printf("[AI-TSS] Defense of open four at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
             }
             defense_level = 0;  // レベルをリセット
         } else {
             *pos_x = win_x;
             *pos_y = win_y;
-            printf("[AI] Defended opponent's open four!\n");
+            if (g_config.debug_level >= 1) {
+                printf("[AI-TSS] Selected method: Open Four Defense\n");
+                printf("[AI] Decision: (%d, %d)\n", *pos_x, *pos_y);
+            }
             return 0;
         }
     }
@@ -325,7 +344,10 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
         if (find_opening_move(board, move_count, com, &book_x, &book_y)) {
             *pos_x = book_x;
             *pos_y = book_y;
-            printf("[AI] Opening book move: (%d, %d)\n", *pos_x, *pos_y);
+            if (g_config.debug_level >= 1) {
+                printf("[AI-OpeningBook] Selected method: Opening Book\n");
+                printf("[AI] Decision: (%d, %d)\n", *pos_x, *pos_y);
+            }
             return 0;
         }
     }
@@ -334,7 +356,10 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     if (move_count == 0) {
         *pos_y = BOARD_SIZE / 2;
         *pos_x = BOARD_SIZE / 2;
-        printf("[AI] First move at center (%d, %d)\n", *pos_x, *pos_y);
+        if (g_config.debug_level >= 1) {
+            printf("[AI-OpeningBook] Selected method: First Move (Center)\n");
+            printf("[AI] Decision: (%d, %d)\n", *pos_x, *pos_y);
+        }
         return 0;
     }
 
@@ -350,12 +375,16 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     // 反復深化探索を使用するかどうか
     if (g_config.iterative_deepening) {
         // 反復深化探索（深さ1から徐々に探索）
-        printf("[AI] Starting Iterative Deepening search...\n");
+        if (g_config.debug_level >= 1) {
+            printf("[AI-Search] Starting Iterative Deepening search...\n");
+        }
         score = iterative_deepening(board, com, g_config.timeout_ms, &best_x, &best_y);
     } else {
         // 通常のAlpha-Beta探索（固定深度）
         int depth = g_config.search_depth;
-        printf("[AI] Starting Alpha-Beta search (depth=%d)...\n", depth);
+        if (g_config.debug_level >= 1) {
+            printf("[AI-Search] Starting Alpha-Beta search (depth=%d)...\n", depth);
+        }
         score = alpha_beta_search(board, com, depth, &best_x, &best_y);
     }
 
@@ -365,7 +394,12 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
     // 手を記録（学習用）
     record_move(*pos_x, *pos_y, com);
 
-    printf("[AI] Final move: (%d, %d) with score %d\n", *pos_x, *pos_y, score);
+    if (g_config.debug_level >= 1) {
+        printf("[AI-Search] Selected method: %s\n",
+               g_config.iterative_deepening ? "Iterative Deepening" : "Alpha-Beta");
+        printf("[AI-Search] Search completed with score=%d\n", score);
+        printf("[AI] Decision: (%d, %d)\n", *pos_x, *pos_y);
+    }
 
     // AIの手を盤面に反映して勝敗判定（学習用）
     int temp_board[BOARD_SIZE][BOARD_SIZE];

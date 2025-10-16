@@ -241,8 +241,10 @@ int find_opening_move(const int board[][BOARD_SIZE], int move_count, int ai_colo
             // 学習モード: ランダム選択
             if (g_config.learning_mode == LEARNING_MODE_PRACTICE) {
                 g_selected_game_id = game_ids[rand() % game_id_count];
-                printf("[OpeningBook] PRACTICE mode: Random game %d selected\n",
-                       g_selected_game_id);
+                if (g_config.debug_level >= 1) {
+                    printf("[OpeningBook] Selected game %d (PRACTICE mode: random selection)\n",
+                           g_selected_game_id);
+                }
             }
             // 本番モード: 勝率最高のゲームを選択
             else {
@@ -257,8 +259,10 @@ int find_opening_move(const int board[][BOARD_SIZE], int move_count, int ai_colo
                 }
 
                 g_selected_game_id = game_ids[best_idx];
-                printf("[OpeningBook] PRODUCTION mode: Best game %d selected (win_rate=%.3f)\n",
-                       g_selected_game_id, best_win_rate);
+                if (g_config.debug_level >= 1) {
+                    printf("[OpeningBook] Selected game %d (PRODUCTION mode: best win_rate=%.2f%%)\n",
+                           g_selected_game_id, best_win_rate * 100.0);
+                }
             }
         } else {
             printf("[OpeningBook] ERROR: No opening available for AI color %s at move %d\n",
@@ -283,11 +287,11 @@ int find_opening_move(const int board[][BOARD_SIZE], int move_count, int ai_colo
                     if (board[oy][ox] == STONE_SPACE) {
                         *x = ox;
                         *y = oy;
-                        printf("[OpeningBook] Move %d (AI=%s) from game %d: (%d,%d) - %s\n",
-                               current_move_number,
-                               ai_color == STONE_BLACK ? "BLACK" : "WHITE",
-                               g_selected_game_id, *x, *y,
-                               g_book[i].comment);
+                        if (g_config.debug_level >= 1) {
+                            printf("[OpeningBook] Move %d: (%d,%d) from game %d - %s\n",
+                                   current_move_number, *x, *y, g_selected_game_id,
+                                   g_book[i].comment);
+                        }
                         g_last_move_count = move_count;
                         return 1;
                     } else {

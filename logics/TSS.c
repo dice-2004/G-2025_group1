@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include "TSS.h"
+#include "evaluation.h"
 #include "../gomoku_ai.h"
 #include "../config.h"
 
@@ -69,7 +70,9 @@ int find_winning_move(const int board[][BOARD_SIZE], int color, int *win_x, int 
                 if (makes_five(board, x, y, color)) {
                     *win_x = x;
                     *win_y = y;
-                    printf("[TSS] Winning move found at (%d, %d)!\n", x, y);
+                    if (g_config.debug_level >= 1) {
+                        printf("[TSS-WinningMove] Five-in-a-row found at (%d, %d)\n", x, y);
+                    }
                     return 1;
                 }
             }
@@ -89,7 +92,9 @@ int find_threat_move(const int board[][BOARD_SIZE], int color, int *threat_x, in
 
     // 相手の勝ち手を探す
     if (find_winning_move(board, opponent, threat_x, threat_y)) {
-        printf("[TSS] Threat detected at (%d, %d), must defend!\n", *threat_x, *threat_y);
+        if (g_config.debug_level >= 1) {
+            printf("[TSS-ThreatMove] Opponent's winning threat at (%d, %d)\n", *threat_x, *threat_y);
+        }
         return 1;
     }
 
@@ -479,7 +484,7 @@ int find_strong_attack_move(const int board[][BOARD_SIZE], int color, int *attac
                     *attack_x = x;
                     *attack_y = y;
                     if (g_config.debug_level >= 1) {
-                        printf("[TSS] ★ OPEN-FOUR found at (%d, %d) ★\n", x, y);
+                        printf("[TSS-OpenFour] Open-four attack found at (%d, %d)\n", x, y);
                     }
                     return 2;  // 開いた四
                 }
@@ -493,16 +498,112 @@ int find_strong_attack_move(const int board[][BOARD_SIZE], int color, int *attac
     return 0;  // 見つからず
 }
 
-// 相手の開いた四・開いた三を防ぐ手を探す
+// 相手の開いた四・開いた三を防ぐ手を探す（深さ探索で最善手を選択）
 int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defense_x, int *defense_y) {
     int opponent = (color == STONE_BLACK) ? STONE_WHITE : STONE_BLACK;
 
-    printf("[TSS] ===== Searching for DEFENSE moves (blocking opponent color=%d) =====\n", opponent);
-    // 相手の強力な攻撃手を探す
-    int result = find_strong_attack_move(board, opponent, defense_x, defense_y);
-    if (result > 0) {
-        printf("[TSS] Defense required at (%d,%d) to block opponent's threat (level=%d)\n",
-               *defense_x, *defense_y, result);
+    if (g_config.debug_level >= 2) {
+        printf("[TSS-Defense] Searching for defense moves (opponent=%d)\n", opponent);
     }
-    return result;
+
+    // ステップ1: 相手の脅威をすべて収集
+    typedef struct {
+        int x, y;
+        int threat_level;  // 2=開いた四, 3=開いた三
+    } DefenseCandidate;
+
+    DefenseCandidate candidates[BOARD_SIZE * BOARD_SIZE];
+    int candidate_count = 0;
+
+    // 相手の開いた四をすべて探す
+    for (int y = 0; y < BOARD_SIZE; y++) {
+        for (int x = 0; x < BOARD_SIZE; x++) {
+            if (board[y][x] == STONE_SPACE) {
+                // 禁じ手チェック（自分が黒の場合）
+                if (color == STONE_BLACK && is_forbidden(board, x, y, color)) {
+                    continue;
+                }
+
+                // 相手の開いた四をチェック
+                if (has_open_four((const int(*)[BOARD_SIZE])board, x, y, opponent)) {
+                    candidates[candidate_count].x = x;
+                    candidates[candidate_count].y = y;
+                    candidates[candidate_count].threat_level = 2;
+                    candidate_count++;
+
+                    if (g_config.debug_level >= 2) {
+                        printf("[TSS] Defense candidate %d: (%d,%d) blocks OPEN-FOUR\n",
+                               candidate_count, x, y);
+                    }
+                }
+            }
+        }
+    }
+
+    // 防御候補が見つからなければ終了
+    if (candidate_count == 0) {
+        if (g_config.debug_level >= 2) {
+            printf("[TSS] No defense required\n");
+        }
+        return 0;
+    }
+
+    // ステップ2: 候補が1つだけなら、それを返す
+    if (candidate_count == 1) {
+        *defense_x = candidates[0].x;
+        *defense_y = candidates[0].y;
+        if (g_config.debug_level >= 1) {
+            printf("[TSS-Defense] Single defense candidate at (%d,%d)\n",
+                   *defense_x, *defense_y);
+        }
+        return candidates[0].threat_level;
+    }
+
+    // ステップ3: 複数の候補がある場合、深さ探索で最善手を選択
+    if (g_config.debug_level >= 1) {
+        printf("[TSS-Defense] Evaluating %d defense candidates with depth search...\n", candidate_count);
+    }
+
+    int best_score = -999999;
+    int best_idx = 0;
+
+    for (int i = 0; i < candidate_count; i++) {
+        int x = candidates[i].x;
+        int y = candidates[i].y;
+
+        // 仮に石を置いて評価
+        int temp_board[BOARD_SIZE][BOARD_SIZE];
+        memcpy(temp_board, board, sizeof(temp_board));
+        temp_board[y][x] = color;
+
+        // 評価値を計算（自分の視点で）
+        int score = evaluate_position((const int(*)[BOARD_SIZE])temp_board, x, y, color);
+
+        // 相手の視点でも評価（防御の完全性）
+        temp_board[y][x] = opponent;
+        int opponent_score = evaluate_position((const int(*)[BOARD_SIZE])temp_board, x, y, opponent);
+
+        // 総合評価: 自分の得点 - 相手の得点（防御の質を重視）
+        int total_score = score - opponent_score * 2;  // 防御を2倍重視
+
+        if (g_config.debug_level >= 2) {
+            printf("[TSS]   Candidate %d: (%d,%d) score=%d (self=%d, opp=%d)\n",
+                   i, x, y, total_score, score, opponent_score);
+        }
+
+        if (total_score > best_score) {
+            best_score = total_score;
+            best_idx = i;
+        }
+    }
+
+    *defense_x = candidates[best_idx].x;
+    *defense_y = candidates[best_idx].y;
+
+    if (g_config.debug_level >= 1) {
+        printf("[TSS-Defense] Best defense selected: (%d,%d) score=%d (from %d candidates)\n",
+               *defense_x, *defense_y, best_score, candidate_count);
+    }
+
+    return candidates[best_idx].threat_level;
 }
