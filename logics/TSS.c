@@ -576,6 +576,7 @@ int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defe
     typedef struct {
         int x, y;
         int threat_level;  // 1=開いた三, 2=片側空き四, 3=開いた四
+        int threat_count;  // この位置が防ぐ脅威の数
     } DefenseCandidate;
 
     DefenseCandidate candidates[BOARD_SIZE * BOARD_SIZE];
@@ -593,40 +594,50 @@ int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defe
                     continue;
                 }
 
+                int max_threat = 0;
+                int total_threats = 0;
+
                 // 相手の開いた四をチェック（最優先）
                 if (has_open_four((const int(*)[BOARD_SIZE])board, x, y, opponent)) {
-                    candidates[candidate_count].x = x;
-                    candidates[candidate_count].y = y;
-                    candidates[candidate_count].threat_level = 3;  // 最優先
-                    candidate_count++;
-
+                    max_threat = 3;
+                    total_threats++;
                     if (g_config.debug_level >= 2) {
-                        printf("[TSS] Defense candidate %d: (%d,%d) blocks OPEN-FOUR\n",
-                               candidate_count, x, y);
+                        printf("[TSS] Position (%d,%d) blocks OPEN-FOUR\n", x, y);
                     }
                 }
+
                 // 相手の片側空き四をチェック（高優先度）
-                else if (has_closed_four((const int(*)[BOARD_SIZE])board, x, y, opponent)) {
-                    candidates[candidate_count].x = x;
-                    candidates[candidate_count].y = y;
-                    candidates[candidate_count].threat_level = 2;  // 次点
-                    candidate_count++;
-
+                if (has_closed_four((const int(*)[BOARD_SIZE])board, x, y, opponent)) {
+                    if (max_threat < 2) max_threat = 2;
+                    total_threats++;
                     if (g_config.debug_level >= 2) {
-                        printf("[TSS] Defense candidate %d: (%d,%d) blocks CLOSED-FOUR\n",
-                               candidate_count, x, y);
+                        printf("[TSS] Position (%d,%d) blocks CLOSED-FOUR\n", x, y);
                     }
                 }
+
                 // 相手の開いた三をチェック（中優先度）
-                else if (has_open_three((const int(*)[BOARD_SIZE])board, x, y, opponent)) {
+                if (has_open_three((const int(*)[BOARD_SIZE])board, x, y, opponent)) {
+                    if (max_threat < 1) max_threat = 1;
+                    total_threats++;
+                    if (g_config.debug_level >= 2) {
+                        printf("[TSS] Position (%d,%d) blocks OPEN-THREE\n", x, y);
+                    }
+                }
+
+                // この位置が何らかの脅威を防ぐ場合、候補に追加
+                if (max_threat > 0) {
                     candidates[candidate_count].x = x;
                     candidates[candidate_count].y = y;
-                    candidates[candidate_count].threat_level = 1;  // 開いた三
+                    candidates[candidate_count].threat_level = max_threat;
+                    candidates[candidate_count].threat_count = total_threats;
                     candidate_count++;
 
                     if (g_config.debug_level >= 2) {
-                        printf("[TSS] Defense candidate %d: (%d,%d) blocks OPEN-THREE\n",
-                               candidate_count, x, y);
+                        const char *threat_name = (max_threat == 3) ? "OPEN-FOUR" :
+                                                 (max_threat == 2) ? "CLOSED-FOUR" : "OPEN-THREE";
+                        printf("[TSS] Defense candidate %d: (%d,%d) %s (blocks %d threat%s)\n",
+                               candidate_count, x, y, threat_name, total_threats,
+                               total_threats > 1 ? "s" : "");
                     }
                 }
             }
@@ -654,7 +665,7 @@ int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defe
         return candidates[0].threat_level;
     }
 
-    // ステップ3: 複数の候補がある場合、脅威レベル優先で選択
+    // ステップ3: 複数の候補がある場合、脅威レベルと脅威数優先で選択
     if (g_config.debug_level >= 1) {
         printf("[TSS-Defense] Evaluating %d defense candidates...\n", candidate_count);
     }
@@ -667,13 +678,27 @@ int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defe
         }
     }
 
-    // 最高脅威レベルの候補だけを深さ探索で評価
+    // 最高脅威レベルの中で、最も多くの脅威を防ぐ候補を探す
+    int max_threat_count = 0;
+    for (int i = 0; i < candidate_count; i++) {
+        if (candidates[i].threat_level == max_threat_level) {
+            if (candidates[i].threat_count > max_threat_count) {
+                max_threat_count = candidates[i].threat_count;
+            }
+        }
+    }
+
+    // 最高脅威レベル＆最多脅威数の候補だけを深さ探索で評価
     int best_score = -999999;
     int best_idx = 0;
+    int found = 0;
 
     for (int i = 0; i < candidate_count; i++) {
-        // 最高脅威レベルの候補のみ評価
+        // 最高脅威レベル＆最多脅威数の候補のみ評価
         if (candidates[i].threat_level < max_threat_level) {
+            continue;
+        }
+        if (candidates[i].threat_count < max_threat_count) {
             continue;
         }
 
@@ -692,17 +717,21 @@ int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defe
         temp_board[y][x] = opponent;
         int opponent_score = evaluate_position((const int(*)[BOARD_SIZE])temp_board, x, y, opponent);
 
-        // 総合評価: 自分の得点 - 相手の得点（防御を2倍重視）
-        int total_score = score - opponent_score * 2;
+        // 総合評価: 自分の得点 - 相手の得点（防御を3倍重視）
+        // 脅威数が多い場合は、防御をさらに重視
+        int defense_weight = 2 + candidates[i].threat_count;
+        int total_score = score - opponent_score * defense_weight;
 
         if (g_config.debug_level >= 2) {
-            printf("[TSS]   Candidate %d: (%d,%d) threat_level=%d score=%d (self=%d, opp=%d)\n",
-                   i, x, y, candidates[i].threat_level, total_score, score, opponent_score);
+            printf("[TSS]   Candidate %d: (%d,%d) threat_level=%d threats=%d score=%d (self=%d, opp=%d)\n",
+                   i, x, y, candidates[i].threat_level, candidates[i].threat_count,
+                   total_score, score, opponent_score);
         }
 
-        if (total_score > best_score || best_idx == 0) {
+        if (!found || total_score > best_score) {
             best_score = total_score;
             best_idx = i;
+            found = 1;
         }
     }
 
@@ -712,8 +741,9 @@ int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defe
     if (g_config.debug_level >= 1) {
         const char *threat_name = (candidates[best_idx].threat_level == 3) ? "OPEN-FOUR" :
                                  (candidates[best_idx].threat_level == 2) ? "CLOSED-FOUR" : "OPEN-THREE";
-        printf("[TSS-Defense] Best defense selected: (%d,%d) %s score=%d (from %d candidates)\n",
-               *defense_x, *defense_y, threat_name, best_score, candidate_count);
+        printf("[TSS-Defense] Best defense selected: (%d,%d) %s (blocks %d threat%s) score=%d (from %d candidates)\n",
+               *defense_x, *defense_y, threat_name, candidates[best_idx].threat_count,
+               candidates[best_idx].threat_count > 1 ? "s" : "", best_score, candidate_count);
     }
 
     return candidates[best_idx].threat_level;
