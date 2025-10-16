@@ -37,7 +37,7 @@ ITERATIVE_DEEPENING=1
 # 1: 基本情報（探索開始・終了、最善手）
 # 2: 詳細情報（各深さの結果、置換表統計）
 # 3: 超詳細（全候補手の評価値、枝刈り情報）
-DEBUG_LEVEL=2
+DEBUG_LEVEL=1
 
 # Iterative Deepening 時間制限閾値（0.0～1.0）
 # この値 × TIMEOUT_MS の時間までに深度探索を開始します
@@ -77,4 +77,4 @@ STRICT_TIME_LIMIT_MS=0
 # 推奨設定:
 #   - 序盤・中盤: 0.5～0.7（時間を有効活用）
 #   - 終盤: 0.2～0.4（高スコアなら早期終了）
-EARLY_CUTOFF_TIME_THRESHOLD=0.5
+EARLY_CUTOFF_TIME_THRESHOLD=1.0
