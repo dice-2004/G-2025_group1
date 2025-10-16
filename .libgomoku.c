@@ -57,6 +57,16 @@ int gameEndProcess(int board[][BOARD_SIZE],int c33Board[][BOARD_SIZE],int c44Boa
             if((check & CHOLEN) && board[i][j] == STONE_BLACK &&
                (isRoku(board, j, i) == true)) {
                 printf("長連の禁じ手です。%sの勝ちです\n", "○");
+
+                // 学習データを保存（黒が禁じ手 → 白の勝ち）
+                int ai_color = get_ai_color();
+                if (ai_color != 0) {
+                    int result = (ai_color == STONE_WHITE) ? 1 : -1;
+                    printf("[GameEnd-Forbidden] Recording result: %d (AI=%d, Winner=WHITE by forbidden move)\n", result, ai_color);
+                    finish_game_record(result);
+                    start_game_record();
+                }
+
                 return 1;
             }
         }}
@@ -95,6 +105,16 @@ int gameEndProcess(int board[][BOARD_SIZE],int c33Board[][BOARD_SIZE],int c44Boa
                 if((num>0)&&(c33Board[i][j]==0)&&(num!=LEFT)&&(num!=TATE)&&(num!=YOKO)&&(num!=RIGT)){
                     //printf("33 i=%d j=%d c33Board[i][j]=%d\n", i,j,c33Board[i][j]);
                     printf("三三の禁じ手です。%sの勝ちです\n", "○");
+
+                    // 学習データを保存（黒が禁じ手 → 白の勝ち）
+                    int ai_color = get_ai_color();
+                    if (ai_color != 0) {
+                        int result = (ai_color == STONE_WHITE) ? 1 : -1;
+                        printf("[GameEnd-Forbidden] Recording result: %d (AI=%d, Winner=WHITE by 3-3)\n", result, ai_color);
+                        finish_game_record(result);
+                        start_game_record();
+                    }
+
                     return 1;}
                 if((num > 0)&&(c33Board[i][j]!=num)&&(n_san == 0)){
                     tmp_x=j;tmp_y=i;
@@ -110,6 +130,16 @@ int gameEndProcess(int board[][BOARD_SIZE],int c33Board[][BOARD_SIZE],int c44Boa
                     c33Board[i][j]=num;
                     if (c33Board[tmp_y][tmp_x]!=c33Board[i][j]){
                      printf("三三の禁じ手です。%sの勝ちです\n", "○");
+
+                     // 学習データを保存（黒が禁じ手 → 白の勝ち）
+                     int ai_color = get_ai_color();
+                     if (ai_color != 0) {
+                         int result = (ai_color == STONE_WHITE) ? 1 : -1;
+                         printf("[GameEnd-Forbidden] Recording result: %d (AI=%d, Winner=WHITE by 3-3)\n", result, ai_color);
+                         finish_game_record(result);
+                         start_game_record();
+                     }
+
                      return 1;}
                  }
 
@@ -121,6 +151,16 @@ int gameEndProcess(int board[][BOARD_SIZE],int c33Board[][BOARD_SIZE],int c44Boa
                 if((num>0)&&(c44Board[i][j]==0)&&(num!=LEFT)&&(num!=TATE)&&(num!=YOKO)&&(num!=RIGT)){
                     //printf("44num-0:%d\n", num);
                     printf("四四の禁じ手です。%sの勝ちです\n", "○");
+
+                    // 学習データを保存（黒が禁じ手 → 白の勝ち）
+                    int ai_color = get_ai_color();
+                    if (ai_color != 0) {
+                        int result = (ai_color == STONE_WHITE) ? 1 : -1;
+                        printf("[GameEnd-Forbidden] Recording result: %d (AI=%d, Winner=WHITE by 4-4)\n", result, ai_color);
+                        finish_game_record(result);
+                        start_game_record();
+                    }
+
                     return 1;}
                 if((num > 0)&&(c44Board[i][j]!=num)&&(n_shi == 0)){
                     tmp_x=j;tmp_y=i;
@@ -137,8 +177,28 @@ int gameEndProcess(int board[][BOARD_SIZE],int c33Board[][BOARD_SIZE],int c44Boa
                     //printf("44 i=%d j=%d c44Board[i][j]=%d\n", i,j,c44Board[i][j]);
                     if (c44Board[tmp_y][tmp_x]!=c44Board[i][j]){
                      printf("四四の禁じ手です。%sの勝ちです\n", "○");
+
+                     // 学習データを保存（黒が禁じ手 → 白の勝ち）
+                     int ai_color = get_ai_color();
+                     if (ai_color != 0) {
+                         int result = (ai_color == STONE_WHITE) ? 1 : -1;
+                         printf("[GameEnd-Forbidden] Recording result: %d (AI=%d, Winner=WHITE by 4-4)\n", result, ai_color);
+                         finish_game_record(result);
+                         start_game_record();
+                     }
+
                      return 1;} else if (distance(tmp_y,tmp_x,i,j)>2){
                      printf("四四の禁じ手です。%sの勝ちです\n", "○");
+
+                     // 学習データを保存（黒が禁じ手 → 白の勝ち）
+                     int ai_color = get_ai_color();
+                     if (ai_color != 0) {
+                         int result = (ai_color == STONE_WHITE) ? 1 : -1;
+                         printf("[GameEnd-Forbidden] Recording result: %d (AI=%d, Winner=WHITE by 4-4)\n", result, ai_color);
+                         finish_game_record(result);
+                         start_game_record();
+                     }
+
                      return 1;}
                  }
             }
