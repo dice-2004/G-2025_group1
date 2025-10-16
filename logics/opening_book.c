@@ -9,10 +9,14 @@ static int g_book_size = 0;
 static int g_selected_game_id = -1;  // 選択されたゲームID
 static int g_last_move_count = -1;   // 前回の手数
 
-// コメントからゲームIDを抽出
+// コメントからゲームIDを抽出（未使用だが将来用）
 // "Learned from win (game 123)" → 123
 // "初手は中央" → -1 (ゲームIDなし)
+#ifdef __GNUC__
 static __attribute__((unused)) int extract_game_id(const char *comment) {
+#else
+static int extract_game_id(const char *comment) {
+#endif
     const char *marker = "game ";
     const char *pos = strstr(comment, marker);
 
@@ -23,6 +27,10 @@ static __attribute__((unused)) int extract_game_id(const char *comment) {
     pos += strlen(marker);
     return atoi(pos);
 }
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4505) // 未参照のローカル関数を削除しました
+#endif
 
 // ゲームID統計を表示
 static void print_game_id_stats(void) {
@@ -387,20 +395,31 @@ int update_opening_win_rate(int game_id, int win) {
     int updated_count = 0;
 
     // 該当ゲームIDのすべての手を更新
+    double old_win_rate = 0.0;
+    double new_win_rate = 0.0;
     for (int i = 0; i < g_book_size; i++) {
         if (g_book[i].game_id == game_id) {
             // 移動平均による勝率更新（学習率0.1）
             double learning_rate = 0.1;
             double target = win ? 1.0 : 0.0;
+
+            if (updated_count == 0) {
+                old_win_rate = g_book[i].win_rate;  // 最初の手の旧勝率を記録
+            }
+
             g_book[i].win_rate = g_book[i].win_rate * (1.0 - learning_rate) + target * learning_rate;
+
+            if (updated_count == 0) {
+                new_win_rate = g_book[i].win_rate;  // 最初の手の新勝率を記録
+            }
 
             updated_count++;
         }
     }
 
     if (updated_count > 0 && g_config.debug_level >= 1) {
-        printf("[OpeningBook] Updated win_rate for game %d: %d moves, result=%s\n",
-               game_id, updated_count, win ? "WIN" : "LOSS");
+        printf("[OpeningBook] Updated win_rate for game %d: %d moves, result=%s (%.2f → %.2f)\n",
+               game_id, updated_count, win ? "WIN" : "LOSS", old_win_rate, new_win_rate);
     }
 
     return updated_count;
@@ -419,17 +438,23 @@ int save_opening_book(const char *filename) {
         return 0;
     }
 
-    // ヘッダー出力
-    fprintf(fp, "# Gomoku Opening Book v3.0\n");
-    fprintf(fp, "# Format: move_number,x,y,win_rate,comment\n");
+    // ヘッダー出力（現在のフォーマットに合わせる）
+    fprintf(fp, "# Gomoku Opening Book v4.0\n");
+    fprintf(fp, "# Format: game_id,move_number,player_color,x,y,win_rate,comment\n");
     fprintf(fp, "# 中央を(7,7)として座標を指定（15x15盤）\n");
+    fprintf(fp, "# player_color: BLACK=先手, WHITE=後手\n");
+    fprintf(fp, "# move_number: ゲーム全体での手数（1-10）\n");
     fprintf(fp, "# win_rate: 0.0～1.0（0.5=初期値、学習で更新される）\n");
     fprintf(fp, "#\n");
     fprintf(fp, "# ========================================\n");
-    fprintf(fp, "# ゲームID規則:\n");
-    fprintf(fp, "#   game 1～999: 学習定石（自動生成）\n");
-    fprintf(fp, "#   game 101～199: 手動定石（基本パターン）\n");
-    fprintf(fp, "#   game 201～299: プロの定石（標準パターン）\n");
+    fprintf(fp, "# ゲームID規則（重複なし設計）:\n");
+    fprintf(fp, "#   game 1～49:     手動定石（基本パターン）- 黒番用【保護対象】\n");
+    fprintf(fp, "#   game 51～99:    手動定石（基本パターン）- 白番用【保護対象】\n");
+    fprintf(fp, "#   game 101～149:  プロの定石（標準パターン）- 黒番用【保護対象】\n");
+    fprintf(fp, "#   game 151～199:  プロの定石（標準パターン）- 白番用【保護対象】\n");
+    fprintf(fp, "#   game 200～599:  学習定石（自動生成）- 黒番用【400スロット】\n");
+    fprintf(fp, "#   game 600～999:  学習定石（自動生成）- 白番用【400スロット】\n");
+    fprintf(fp, "#   ※手動・プロ定石は削除対象外、学習定石は勝率の低いものから自動削除\n");
     fprintf(fp, "# ========================================\n\n");
 
     // ゲームIDごとに整理して出力
@@ -439,15 +464,32 @@ int save_opening_book(const char *filename) {
         if (g_book[i].game_id != current_game_id) {
             current_game_id = g_book[i].game_id;
             if (current_game_id >= 0) {
-                fprintf(fp, "\n# ========================================\n");
-                fprintf(fp, "# Game %d\n", current_game_id);
-                fprintf(fp, "# ========================================\n");
+                fprintf(fp, "\n# Game %d: ", current_game_id);
+                // game_idに応じた説明を追加
+                if (current_game_id >= 1 && current_game_id <= 49) {
+                    fprintf(fp, "手動定石 - 黒番用\n");
+                } else if (current_game_id >= 51 && current_game_id <= 99) {
+                    fprintf(fp, "手動定石 - 白番用\n");
+                } else if (current_game_id >= 101 && current_game_id <= 149) {
+                    fprintf(fp, "プロ定石 - 黒番用\n");
+                } else if (current_game_id >= 151 && current_game_id <= 199) {
+                    fprintf(fp, "プロ定石 - 白番用\n");
+                } else if (current_game_id >= 200 && current_game_id <= 599) {
+                    fprintf(fp, "学習定石 - 黒番用\n");
+                } else if (current_game_id >= 600 && current_game_id <= 999) {
+                    fprintf(fp, "学習定石 - 白番用\n");
+                } else {
+                    fprintf(fp, "\n");
+                }
             }
         }
 
-        // データ出力
-        fprintf(fp, "%d,%d,%d,%.2f,%s\n",
+        // データ出力（正しいフォーマット：game_id,move_number,player_color,x,y,win_rate,comment）
+        const char *color_str = (g_book[i].player_color == STONE_BLACK) ? "BLACK" : "WHITE";
+        fprintf(fp, "%d,%d,%s,%d,%d,%.2f,%s\n",
+                g_book[i].game_id,
                 g_book[i].move_number,
+                color_str,
                 g_book[i].x,
                 g_book[i].y,
                 g_book[i].win_rate,
@@ -455,7 +497,16 @@ int save_opening_book(const char *filename) {
     }
 
     fclose(fp);
-    printf("[OpeningBook] Saved %d moves to %s\n", g_book_size, filename);
+
+    if (g_config.debug_level >= 1) {
+        printf("[OpeningBook] ========================================\n");
+        printf("[OpeningBook] Successfully saved %d moves to %s\n", g_book_size, filename);
+        printf("[OpeningBook] File updated with latest win rates\n");
+        printf("[OpeningBook] ========================================\n");
+    } else {
+        printf("[OpeningBook] Saved %d moves to %s\n", g_book_size, filename);
+    }
+
     return g_book_size;
 }
 
@@ -463,3 +514,7 @@ int save_opening_book(const char *filename) {
 int get_selected_game_id(void) {
     return g_selected_game_id;
 }
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
