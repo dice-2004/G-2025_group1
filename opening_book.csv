@@ -161,3 +161,13 @@
 153,10,WHITE,9,9,0.50,Pro: 峡月(白) - 10手目
 
 # 学習定石はこの下に自動的に追記されます（game 200-599: 黒番用、game 600-999: 白番用）
+201,1,BLACK,7,8,0.50,Learned from BLACK opening opponent (game 1)
+201,2,WHITE,7,7,0.50,Learned from BLACK opening opponent (game 1)
+201,3,BLACK,8,7,0.50,Learned from BLACK opening opponent (game 1)
+201,4,WHITE,7,6,0.50,Learned from BLACK opening opponent (game 1)
+201,5,BLACK,7,6,0.50,Learned from BLACK opening opponent (game 1)
+201,6,WHITE,6,7,0.50,Learned from BLACK opening opponent (game 1)
+201,7,BLACK,9,8,0.50,Learned from BLACK opening opponent (game 1)
+201,8,WHITE,6,5,0.50,Learned from BLACK opening opponent (game 1)
+201,9,BLACK,9,8,0.50,Learned from BLACK opening opponent (game 1)
+201,10,WHITE,10,9,0.50,Learned from BLACK opening opponent (game 1)

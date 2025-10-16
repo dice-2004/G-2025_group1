@@ -310,20 +310,22 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *pos_x, int *pos_y){
         }
     }
 
-    // 相手の開いた四を防ぐ（最優先防御）
+    // 相手の脅威を防ぐ（開いた四、片側空き四、開いた三）
     int defense_level = find_strong_defense_move(board, com, &win_x, &win_y);
-    if (defense_level == 2) {
+    if (defense_level >= 1) {  // 1=開いた三, 2=片側空き四, 3=開いた四
         // 禁じ手チェック（黒の場合）
         if (com == STONE_BLACK && is_forbidden(board, win_x, win_y, com)) {
             if (g_config.debug_level >= 1) {
-                printf("[AI-TSS] Defense of open four at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
+                printf("[AI-TSS] Defense at (%d,%d) is forbidden! Skipping...\n", win_x, win_y);
             }
             defense_level = 0;  // レベルをリセット
         } else {
             *pos_x = win_x;
             *pos_y = win_y;
             if (g_config.debug_level >= 1) {
-                printf("[AI-TSS] Selected method: Open Four Defense\n");
+                const char *defense_type = (defense_level == 3) ? "Open Four" :
+                                          (defense_level == 2) ? "Closed Four" : "Open Three";
+                printf("[AI-TSS] Selected method: %s Defense\n", defense_type);
                 printf("[AI] Decision: (%d, %d)\n", *pos_x, *pos_y);
             }
             return 0;
@@ -793,8 +795,24 @@ int is_forbidden(const int board[][BOARD_SIZE], int x, int y, int color) {
     // check変数で有効な禁じ手をチェック（gomoku.hで定義）
 
     // 長連チェック (check & CHOLEN)
-    if ((check & CHOLEN) && isRoku_to(temp_board, x, y)) {
-        return 1;
+    if (check & CHOLEN) {
+        // 独自実装のcheck_choren関数を使用（より正確）
+        int is_long_chain_custom = check_choren(board, x, y);
+        // オリジナルのisRoku_toも試す
+        int is_long_chain_original = isRoku_to(temp_board, x, y);
+
+        if (g_config.debug_level >= 3) {
+            printf("[Forbidden-Check] Position (%d,%d): check=%d, check_choren=%d, isRoku_to=%d\n",
+                   x, y, check, is_long_chain_custom, is_long_chain_original);
+        }
+
+        if (is_long_chain_custom || is_long_chain_original) {
+            if (g_config.debug_level >= 2) {
+                printf("[Forbidden] Long-chain detected at (%d,%d) [custom=%d, original=%d]\n",
+                       x, y, is_long_chain_custom, is_long_chain_original);
+            }
+            return 1;
+        }
     }
 
     // 三三チェック (check & SANSAN)

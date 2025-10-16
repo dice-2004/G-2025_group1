@@ -190,6 +190,72 @@ static int has_open_four(const int board[][BOARD_SIZE], int x, int y, int color)
     return 0;
 }
 
+// 片側空き四連（_●●●● や ●●●●_）を検出
+// board[y][x]は空きマス。ここに石を置いたら片側空き四連ができるかチェック
+static int has_closed_four(const int board[][BOARD_SIZE], int x, int y, int color) {
+    if (board[y][x] != STONE_SPACE) {
+        return 0;
+    }
+
+    int directions[4][2] = {{1, 0}, {0, 1}, {1, 1}, {1, -1}};
+
+    for (int d = 0; d < 4; d++) {
+        int dx = directions[d][0];
+        int dy = directions[d][1];
+
+        // 左右の連続する同色の石をカウント
+        int left_count = 0;
+        for (int i = 1; i <= 3; i++) {
+            int nx = x - dx * i;
+            int ny = y - dy * i;
+            if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == color) {
+                left_count++;
+            } else {
+                break;
+            }
+        }
+
+        int right_count = 0;
+        for (int i = 1; i <= 3; i++) {
+            int nx = x + dx * i;
+            int ny = y + dy * i;
+            if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == color) {
+                right_count++;
+            } else {
+                break;
+            }
+        }
+
+        // この位置を含めて4連になるか？（左+1+右 == 4）
+        if (left_count + right_count == 3) {
+            // 両端の状態をチェック
+            int left_end_x = x - dx * (left_count + 1);
+            int left_end_y = y - dy * (left_count + 1);
+            int right_end_x = x + dx * (right_count + 1);
+            int right_end_y = y + dy * (right_count + 1);
+
+            int left_open = (left_end_x >= 0 && left_end_x < BOARD_SIZE &&
+                           left_end_y >= 0 && left_end_y < BOARD_SIZE &&
+                           board[left_end_y][left_end_x] == STONE_SPACE);
+
+            int right_open = (right_end_x >= 0 && right_end_x < BOARD_SIZE &&
+                            right_end_y >= 0 && right_end_y < BOARD_SIZE &&
+                            board[right_end_y][right_end_x] == STONE_SPACE);
+
+            // 片側だけが空いている場合（両端空きは除外）
+            if ((left_open && !right_open) || (!left_open && right_open)) {
+                if (g_config.debug_level >= 2) {
+                    printf("[TSS] Closed-four detected at (%d,%d) direction=(%d,%d) left_open=%d right_open=%d\n",
+                           x, y, dx, dy, left_open, right_open);
+                }
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
 // 開いた三（両端が空いている3連で、4連にできる）を検出
 // board[y][x]は空きマス。ここに石を置いたら3連両空きができるかチェック
 // パターン: _●●●_ (●が3つ連続、両端が空き、この位置がその一部または端)
@@ -509,30 +575,57 @@ int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defe
     // ステップ1: 相手の脅威をすべて収集
     typedef struct {
         int x, y;
-        int threat_level;  // 2=開いた四, 3=開いた三
+        int threat_level;  // 1=開いた三, 2=片側空き四, 3=開いた四
     } DefenseCandidate;
 
     DefenseCandidate candidates[BOARD_SIZE * BOARD_SIZE];
     int candidate_count = 0;
 
-    // 相手の開いた四をすべて探す
+    // 相手の開いた四と片側空き四と開いた三をすべて探す
     for (int y = 0; y < BOARD_SIZE; y++) {
         for (int x = 0; x < BOARD_SIZE; x++) {
             if (board[y][x] == STONE_SPACE) {
                 // 禁じ手チェック（自分が黒の場合）
                 if (color == STONE_BLACK && is_forbidden(board, x, y, color)) {
+                    if (g_config.debug_level >= 2) {
+                        printf("[TSS-Defense] Position (%d,%d) is forbidden, skipping\n", x, y);
+                    }
                     continue;
                 }
 
-                // 相手の開いた四をチェック
+                // 相手の開いた四をチェック（最優先）
                 if (has_open_four((const int(*)[BOARD_SIZE])board, x, y, opponent)) {
                     candidates[candidate_count].x = x;
                     candidates[candidate_count].y = y;
-                    candidates[candidate_count].threat_level = 2;
+                    candidates[candidate_count].threat_level = 3;  // 最優先
                     candidate_count++;
 
                     if (g_config.debug_level >= 2) {
                         printf("[TSS] Defense candidate %d: (%d,%d) blocks OPEN-FOUR\n",
+                               candidate_count, x, y);
+                    }
+                }
+                // 相手の片側空き四をチェック（高優先度）
+                else if (has_closed_four((const int(*)[BOARD_SIZE])board, x, y, opponent)) {
+                    candidates[candidate_count].x = x;
+                    candidates[candidate_count].y = y;
+                    candidates[candidate_count].threat_level = 2;  // 次点
+                    candidate_count++;
+
+                    if (g_config.debug_level >= 2) {
+                        printf("[TSS] Defense candidate %d: (%d,%d) blocks CLOSED-FOUR\n",
+                               candidate_count, x, y);
+                    }
+                }
+                // 相手の開いた三をチェック（中優先度）
+                else if (has_open_three((const int(*)[BOARD_SIZE])board, x, y, opponent)) {
+                    candidates[candidate_count].x = x;
+                    candidates[candidate_count].y = y;
+                    candidates[candidate_count].threat_level = 1;  // 開いた三
+                    candidate_count++;
+
+                    if (g_config.debug_level >= 2) {
+                        printf("[TSS] Defense candidate %d: (%d,%d) blocks OPEN-THREE\n",
                                candidate_count, x, y);
                     }
                 }
@@ -553,21 +646,37 @@ int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defe
         *defense_x = candidates[0].x;
         *defense_y = candidates[0].y;
         if (g_config.debug_level >= 1) {
-            printf("[TSS-Defense] Single defense candidate at (%d,%d)\n",
-                   *defense_x, *defense_y);
+            const char *threat_name = (candidates[0].threat_level == 3) ? "OPEN-FOUR" :
+                                     (candidates[0].threat_level == 2) ? "CLOSED-FOUR" : "OPEN-THREE";
+            printf("[TSS-Defense] Single defense candidate at (%d,%d) - %s\n",
+                   *defense_x, *defense_y, threat_name);
         }
         return candidates[0].threat_level;
     }
 
-    // ステップ3: 複数の候補がある場合、深さ探索で最善手を選択
+    // ステップ3: 複数の候補がある場合、脅威レベル優先で選択
     if (g_config.debug_level >= 1) {
-        printf("[TSS-Defense] Evaluating %d defense candidates with depth search...\n", candidate_count);
+        printf("[TSS-Defense] Evaluating %d defense candidates...\n", candidate_count);
     }
 
+    // まず最高脅威レベルを探す
+    int max_threat_level = 0;
+    for (int i = 0; i < candidate_count; i++) {
+        if (candidates[i].threat_level > max_threat_level) {
+            max_threat_level = candidates[i].threat_level;
+        }
+    }
+
+    // 最高脅威レベルの候補だけを深さ探索で評価
     int best_score = -999999;
     int best_idx = 0;
 
     for (int i = 0; i < candidate_count; i++) {
+        // 最高脅威レベルの候補のみ評価
+        if (candidates[i].threat_level < max_threat_level) {
+            continue;
+        }
+
         int x = candidates[i].x;
         int y = candidates[i].y;
 
@@ -583,15 +692,15 @@ int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defe
         temp_board[y][x] = opponent;
         int opponent_score = evaluate_position((const int(*)[BOARD_SIZE])temp_board, x, y, opponent);
 
-        // 総合評価: 自分の得点 - 相手の得点（防御の質を重視）
-        int total_score = score - opponent_score * 2;  // 防御を2倍重視
+        // 総合評価: 自分の得点 - 相手の得点（防御を2倍重視）
+        int total_score = score - opponent_score * 2;
 
         if (g_config.debug_level >= 2) {
-            printf("[TSS]   Candidate %d: (%d,%d) score=%d (self=%d, opp=%d)\n",
-                   i, x, y, total_score, score, opponent_score);
+            printf("[TSS]   Candidate %d: (%d,%d) threat_level=%d score=%d (self=%d, opp=%d)\n",
+                   i, x, y, candidates[i].threat_level, total_score, score, opponent_score);
         }
 
-        if (total_score > best_score) {
+        if (total_score > best_score || best_idx == 0) {
             best_score = total_score;
             best_idx = i;
         }
@@ -601,9 +710,96 @@ int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defe
     *defense_y = candidates[best_idx].y;
 
     if (g_config.debug_level >= 1) {
-        printf("[TSS-Defense] Best defense selected: (%d,%d) score=%d (from %d candidates)\n",
-               *defense_x, *defense_y, best_score, candidate_count);
+        const char *threat_name = (candidates[best_idx].threat_level == 3) ? "OPEN-FOUR" :
+                                 (candidates[best_idx].threat_level == 2) ? "CLOSED-FOUR" : "OPEN-THREE";
+        printf("[TSS-Defense] Best defense selected: (%d,%d) %s score=%d (from %d candidates)\n",
+               *defense_x, *defense_y, threat_name, best_score, candidate_count);
     }
 
     return candidates[best_idx].threat_level;
+}
+
+// ========================================
+// 四連防御（開いた四と片側空き四の統合検出）
+// ========================================
+
+// 相手の四連（開いた四または片側空き四）を防ぐ手を探す
+// 戻り値: 0=見つからず, 1=片側空き四を防御, 2=開いた四を防御
+int find_four_defense_move(const int board[][BOARD_SIZE], int color, int *defense_x, int *defense_y) {
+    int opponent = (color == STONE_BLACK) ? STONE_WHITE : STONE_BLACK;
+
+    if (g_config.debug_level >= 2) {
+        printf("[TSS-FourDefense] Searching for four-threats (opponent=%d)\n", opponent);
+    }
+
+    typedef struct {
+        int x, y;
+        int threat_type;  // 1=片側空き四, 2=開いた四
+    } FourCandidate;
+
+    FourCandidate candidates[BOARD_SIZE * BOARD_SIZE];
+    int candidate_count = 0;
+
+    // 相手の四連をすべて探す
+    for (int y = 0; y < BOARD_SIZE; y++) {
+        for (int x = 0; x < BOARD_SIZE; x++) {
+            if (board[y][x] == STONE_SPACE) {
+                // 禁じ手チェック（自分が黒の場合）
+                if (color == STONE_BLACK && is_forbidden(board, x, y, color)) {
+                    continue;
+                }
+
+                // 開いた四をチェック（最優先）
+                if (has_open_four((const int(*)[BOARD_SIZE])board, x, y, opponent)) {
+                    candidates[candidate_count].x = x;
+                    candidates[candidate_count].y = y;
+                    candidates[candidate_count].threat_type = 2;
+                    candidate_count++;
+
+                    if (g_config.debug_level >= 1) {
+                        printf("[TSS-FourDefense] OPEN-FOUR threat at (%d,%d)\n", x, y);
+                    }
+                }
+                // 片側空き四をチェック
+                else if (has_closed_four((const int(*)[BOARD_SIZE])board, x, y, opponent)) {
+                    candidates[candidate_count].x = x;
+                    candidates[candidate_count].y = y;
+                    candidates[candidate_count].threat_type = 1;
+                    candidate_count++;
+
+                    if (g_config.debug_level >= 1) {
+                        printf("[TSS-FourDefense] CLOSED-FOUR threat at (%d,%d)\n", x, y);
+                    }
+                }
+            }
+        }
+    }
+
+    if (candidate_count == 0) {
+        if (g_config.debug_level >= 2) {
+            printf("[TSS-FourDefense] No four-threats found\n");
+        }
+        return 0;
+    }
+
+    // 複数の脅威がある場合は、開いた四を優先
+    int best_idx = 0;
+    int best_threat = candidates[0].threat_type;
+
+    for (int i = 1; i < candidate_count; i++) {
+        if (candidates[i].threat_type > best_threat) {
+            best_threat = candidates[i].threat_type;
+            best_idx = i;
+        }
+    }
+
+    *defense_x = candidates[best_idx].x;
+    *defense_y = candidates[best_idx].y;
+
+    if (g_config.debug_level >= 1) {
+        const char *type_str = (candidates[best_idx].threat_type == 2) ? "OPEN-FOUR" : "CLOSED-FOUR";
+        printf("[TSS-FourDefense] Defending %s at (%d,%d)\n", type_str, *defense_x, *defense_y);
+    }
+
+    return candidates[best_idx].threat_type;
 }
