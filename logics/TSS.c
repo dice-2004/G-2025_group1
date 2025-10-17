@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdbool.h>
+#include <limits.h>
 #include "TSS.h"
 #include "evaluation.h"
 #include "../gomoku_ai.h"
@@ -665,61 +667,82 @@ int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defe
         return candidates[0].threat_level;
     }
 
-    // ステップ3: 複数の候補がある場合、脅威数と脅威レベルで選択
-    if (g_config.debug_level >= 1) {
-        printf("[TSS-Defense] Evaluating %d defense candidates...\n", candidate_count);
+// ステップ3: 複数の候補がある場合、脅威数と脅威レベルで選択
+if (g_config.debug_level >= 1) {
+    printf("[TSS-Defense] Evaluating %d defense candidates...\n", candidate_count);
+}
+
+// 【重要な修正】複数のOPEN-THREEを検出
+int open_three_count = 0;
+for (int i = 0; i < candidate_count; i++) {
+    if (candidates[i].threat_level == 1) {  // OPEN-THREE
+        open_three_count++;
     }
+}
 
-    // 優先順位の方針:
-    // 1. 複数脅威を防ぐ位置を最優先（threat_count >= 2）
-    // 2. その中で脅威レベルが高い方を優先
-    // 3. 単一脅威の場合は、脅威レベルで判断
+// 優先順位の方針:
+// 1. 複数のOPEN-THREE（次ターンで確実に負ける）→ 最優先
+// 2. OPEN-FOUR（次ターンで確実に負ける）→ 最優先
+// 3. 複数脅威を防ぐ位置（threat_count >= 2）→ 高優先
+// 4. CLOSED-FOUR → 中優先
+// 5. 単一OPEN-THREE → 低優先
 
-    // まず最多脅威数を探す
-    int max_threat_count = 0;
-    for (int i = 0; i < candidate_count; i++) {
-        if (candidates[i].threat_count > max_threat_count) {
-            max_threat_count = candidates[i].threat_count;
+// まず最多脅威数を探す
+int max_threat_count = 0;
+for (int i = 0; i < candidate_count; i++) {
+    if (candidates[i].threat_count > max_threat_count) {
+        max_threat_count = candidates[i].threat_count;
+    }
+}
+
+// 【修正】複数のOPEN-THREEがある場合は緊急事態
+bool multiple_open_three_crisis = (open_three_count >= 2);
+
+if (multiple_open_three_crisis && g_config.debug_level >= 1) {
+    printf("[TSS-Defense] ⚠️  CRITICAL: Multiple OPEN-THREE detected (%d)! Immediate defense required!\n",
+           open_three_count);
+}
+
+// 評価対象を決定
+int best_score = -999999;
+int best_idx = 0;
+int found = 0;
+
+if (g_config.debug_level >= 2) {
+    printf("[TSS-Defense] Priority: max_threats=%d, open_three_count=%d, crisis=%d\n",
+           max_threat_count, open_three_count, multiple_open_three_crisis);
+}
+
+for (int i = 0; i < candidate_count; i++) {
+    // 【修正】複数OPEN-THREE危機の場合
+    if (multiple_open_three_crisis) {
+        // OPEN-THREEを防ぐ手のみを評価対象にする
+        if (candidates[i].threat_level != 1) {
+            continue;
         }
     }
-
-    // 複数脅威を防ぐ候補がある場合は、それらを最優先
-    int priority_threshold = (max_threat_count >= 2) ? max_threat_count : 0;
-
-    // 評価対象を決定
-    int best_score = -999999;
-    int best_idx = 0;
-    int found = 0;
-
-    if (g_config.debug_level >= 2) {
-        printf("[TSS-Defense] Priority: max_threats=%d, threshold=%d\n",
-               max_threat_count, priority_threshold);
-    }
-
-    for (int i = 0; i < candidate_count; i++) {
-        // 優先度チェック
-        if (priority_threshold >= 2) {
-            // 複数脅威を防ぐ候補がある場合は、それらのみ評価
-            if (candidates[i].threat_count < priority_threshold) {
+    // 優先度チェック（通常時）
+    else if (max_threat_count >= 2) {
+        // 複数脅威を防ぐ候補がある場合は、それらのみ評価
+        if (candidates[i].threat_count < max_threat_count) {
+            continue;
+        }
+    } else {
+        // 単一脅威の場合は、開いた四（レベル3）を優先
+        if (candidates[i].threat_level < 3) {
+            // 開いた四がない場合は全候補を評価
+            int has_open_four = 0;
+            for (int j = 0; j < candidate_count; j++) {
+                if (candidates[j].threat_level == 3) {
+                    has_open_four = 1;
+                    break;
+                }
+            }
+            if (has_open_four) {
                 continue;
             }
-        } else {
-            // 単一脅威の場合は、開いた四（レベル3）を優先
-            if (candidates[i].threat_level < 3) {
-                // 開いた四がない場合は全候補を評価
-                int has_open_four = 0;
-                for (int j = 0; j < candidate_count; j++) {
-                    if (candidates[j].threat_level == 3) {
-                        has_open_four = 1;
-                        break;
-                    }
-                }
-                if (has_open_four) {
-                    continue;
-                }
-            }
         }
-
+    }
         int x = candidates[i].x;
         int y = candidates[i].y;
 
