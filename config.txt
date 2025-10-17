@@ -12,7 +12,7 @@ SEAR7H_DEPTH=5
 # 置換表のサイズ（エントリ数、2のべき乗推奨）
 # 大きいほど探索が速くなるが、メモリを消費
 # 例: 65536 = 約1MB, 262144 = 約4MB, 1048576 = 約16MB
-TRANSPOSITION_TABLE_SIZE=262144
+TRANSPOSITION_TABLE_SIZE=2097152
 
 # デバッグモード（0=OFF, 1=ON）
 # ONにすると詳細なログが出力されます
