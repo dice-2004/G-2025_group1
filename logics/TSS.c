@@ -756,6 +756,15 @@ int find_strong_defense_move(const int board[][BOARD_SIZE], int color, int *defe
     *defense_x = candidates[best_idx].x;
     *defense_y = candidates[best_idx].y;
 
+    // 【最終確認】選ばれた手が禁じ手でないことを再確認（長連チェック）
+    if (color == STONE_BLACK && is_forbidden(board, *defense_x, *defense_y, color)) {
+        if (g_config.debug_level >= 1) {
+            printf("[TSS-Defense] ERROR: Best candidate at (%d,%d) is FORBIDDEN!\n",
+                   *defense_x, *defense_y);
+        }
+        return 0;  // 禁じ手なので防御手なしとして返す
+    }
+
     if (g_config.debug_level >= 1) {
         const char *threat_name = (candidates[best_idx].threat_level == 3) ? "OPEN-FOUR" :
                                  (candidates[best_idx].threat_level == 2) ? "CLOSED-FOUR" : "OPEN-THREE";
@@ -843,6 +852,15 @@ int find_four_defense_move(const int board[][BOARD_SIZE], int color, int *defens
 
     *defense_x = candidates[best_idx].x;
     *defense_y = candidates[best_idx].y;
+
+    // 【最終確認】選ばれた手が禁じ手でないことを再確認
+    if (color == STONE_BLACK && is_forbidden(board, *defense_x, *defense_y, color)) {
+        if (g_config.debug_level >= 1) {
+            printf("[TSS-FourDefense] ERROR: Best candidate at (%d,%d) is FORBIDDEN!\n",
+                   *defense_x, *defense_y);
+        }
+        return 0;  // 禁じ手なので防御手なしとして返す
+    }
 
     if (g_config.debug_level >= 1) {
         const char *type_str = (candidates[best_idx].threat_type == 2) ? "OPEN-FOUR" : "CLOSED-FOUR";
