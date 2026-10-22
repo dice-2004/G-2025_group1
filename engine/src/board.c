@@ -98,6 +98,12 @@ void board_move(Board *b, int pos) {
     b->moves[b->nmoves++] = pos;
 }
 
+// 色を指定して置く (VCF/VCT のパス = 相手番の攻めの検討用)。board_undo で戻せる
+void board_move_color(Board *b, int pos, int color) {
+    put_stone(b, pos, color);
+    b->moves[b->nmoves++] = pos;
+}
+
 void board_undo(Board *b) {
     int pos = b->moves[--b->nmoves];
     remove_stone(b, pos);

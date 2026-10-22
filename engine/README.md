@@ -19,11 +19,17 @@ python3 bench/match.py g2 legacy --rule renju    # 対局 (bench/README.md)
 | `src/rule.c` | Gomocup のルール番号 (0/1/4) と授業審判の `check` (1..7) から `Rule` を作る |
 | `src/pattern.c/.h` | 線パターン表。中心 ±5 マスの並び (20 ビット) → 五/達四/四/活三/… を色別に表引き。ルールが変わったら作り直す (約 0.12 秒) |
 | `src/board.c/.h` | 盤面。着手/戻しで周囲 40 マスのキーとパターンを差分更新。Zobrist ハッシュ。連珠の禁じ手判定 (偽の三三を再帰で除外) |
+| `src/vcf.c/.h` | VCF (四の連続) / VCT (四と活三の連続) 詰み探索。連珠の禁じ手を両側で考慮。置換表つき。API は `vcf_solve` / `vct_solve` / `tss_solve` (パス時の相手の詰み) / `vcf_defenses` (相手の VCF の受け) |
 | `src/think.c/.h` | 指し手選択 (暫定): 五 → 五止め → 達四 → 相手の活三への対応 → パターン点の 1 手読み |
 | `src/gomocup.c` | Gomocup プロトコル (START/RESTART/INFO/BEGIN/TURN/BOARD/TAKEBACK/ABOUT/END) |
 | `src/class_entry.c` | 授業の `calcPutPos` 入口 |
 | `tests/g2_test.c` | `selftest` (差分更新 = 作り直し の検証)、`forbid` (禁じ手の一覧出力)、`bench` (速度) |
 | `tests/compare_forbidden.py` | 禁じ手判定を `bench/rules.py` と照合 |
+| `tests/tss_test.c` | `g2-tss`: VCF/VCT を局面列に対して解く (`solve`/`opp`/`defend`)、問題集 (`puzzles`) |
+| `tests/puzzles/tactics.txt` | 詰み問題集 (手作りの禁じ手問題 + 実戦から収集した 95 問)。`make test` で解く |
+| `tests/tss_verify.py` | VCF の勝ち手順を別実装のレフェリー (`bench/rules.py`) で検証 |
+| `tests/vcf_brute.py` | 遅いが単純な VCF 全探索 (C 版との照合用) |
+| `tests/rapfi_label.py` / `tss_compare.py` | Rapfi の詰み評価を正解ラベルにして VCT の再現率・矛盾を数える |
 
 ## パターンの定義
 

@@ -27,6 +27,7 @@ static inline int board_on(const Board *b, int x, int y) { return x >= 0 && y >=
 
 void board_move(Board *b, int pos);     // 手番側の石を置く
 void board_undo(Board *b);
+void board_move_color(Board *b, int pos, int color);   // 手番に関係なく color を置く (board_undo で戻る)
 
 // pos に color が打ったら勝ち (五) になるか
 static inline int board_is_five(const Board *b, int pos, int color) { return b->pat4[color][pos] == P4_FIVE; }
