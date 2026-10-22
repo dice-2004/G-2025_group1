@@ -14,6 +14,7 @@
 #include <time.h>
 
 #include "eval.h"
+#include "vcf.h"
 
 // ---------------------------------------------------------------- 置換表
 
@@ -143,85 +144,29 @@ int evaluate(const Board *b) {
     return (int)v;
 }
 
-// ---------------------------------------------------------------- 簡易 VCF
+// 調整できる探索の値 (INFO p_<名前> <値> で変えられる。search_set_param)
+static struct {
+    int qdepth;     // 静止探索の深さの限度 (四と防ぎの手数)
+    int q_min_p4;   // 静止探索で読む自分の四の最低の形 (P4_BLOCK4 / P4_BLOCK4_PLUS / P4_BLOCK4_FLEX3)
+    int soft_pct;   // 上限時間の何 % を過ぎたら次の反復を始めないか (think.c が使う)
+    int vct_pct;    // ルートの VCT に使う時間 (上限時間の %)。0 = 使わない
+    int vct_depth;  // ルートの VCT の深さ (攻めの手数)
+} sp = {0, P4_BLOCK4_PLUS, 40, 15, 10};
 
-static int vcf_rec(Board *b, int depth, long *budget);
+int search_soft_pct(void) { return sp.soft_pct; }
 
-// 手番側が q に四を打ち、相手が止めた後を調べる
-static int vcf_after_four(Board *b, int q, int depth, long *budget) {
-    int me = board_side(b), op = opp_color(me);
-    board_move(b, q);
-    int r;
-    if (b->p4cnt[me][P4_FIVE] >= 2) {
-        r = 1;
-    } else {
-        int f = find_cell(b, me, P4_FIVE);
-        if (f < 0) {
-            r = 0;
-        } else if (restricted(b, op) && board_is_forbidden(b, f)) {
-            r = 1;      // 黒は止める点が禁じ手で止められない
-        } else {
-            board_move(b, f);
-            r = vcf_rec(b, depth - 1, budget);
-            board_undo(b);
-        }
-    }
-    board_undo(b);
-    return r;
-}
-
-static int vcf_rec(Board *b, int depth, long *budget) {
-    int me = board_side(b), op = opp_color(me);
-    if (b->p4cnt[me][P4_FIVE]) return 1;
-    if (depth <= 0 || --*budget < 0) return 0;
-    if (b->p4cnt[op][P4_FIVE]) {
-        // 相手の四を止める手が自分の四になっていれば続けられる
-        if (b->p4cnt[op][P4_FIVE] >= 2) return 0;
-        int q = find_cell(b, op, P4_FIVE);
-        if (b->pat4[me][q] < P4_BLOCK4 || !legal(b, me, q)) return 0;
-        return vcf_after_four(b, q, depth, budget);
-    }
-    if (legal_flex4(b, me) >= 0) return 1;
-    for (int y = 0; y < b->size; y++) {
-        int q = to_pos(0, y);
-        for (int x = 0; x < b->size; x++, q++) {
-            if (b->cell[q] != EMPTY) continue;
-            int p4 = b->pat4[me][q];
-            if (p4 < P4_BLOCK4 || p4 > P4_BLOCK4_FLEX3) continue;
-            if (!legal(b, me, q)) continue;
-            if (vcf_after_four(b, q, depth, budget)) return 1;
-            if (*budget < 0) return 0;
-        }
-    }
-    return 0;
-}
-
-int quick_vcf(Board *b, int max_depth, long max_nodes, int *win_move) {
-    int me = board_side(b), op = opp_color(me);
-    long budget = max_nodes;
-    *win_move = -1;
-    int f = find_cell(b, me, P4_FIVE);
-    if (f >= 0) { *win_move = f; return 1; }
-    if (b->p4cnt[op][P4_FIVE]) {
-        if (b->p4cnt[op][P4_FIVE] >= 2) return 0;
-        int q = find_cell(b, op, P4_FIVE);
-        if (b->pat4[me][q] < P4_BLOCK4 || !legal(b, me, q)) return 0;
-        if (vcf_after_four(b, q, max_depth, &budget)) { *win_move = q; return 1; }
-        return 0;
-    }
-    int q = legal_flex4(b, me);
-    if (q >= 0) { *win_move = q; return 1; }
-    for (int y = 0; y < b->size; y++) {
-        q = to_pos(0, y);
-        for (int x = 0; x < b->size; x++, q++) {
-            if (b->cell[q] != EMPTY) continue;
-            int p4 = b->pat4[me][q];
-            if (p4 < P4_BLOCK4 || p4 > P4_BLOCK4_FLEX3 || !legal(b, me, q)) continue;
-            if (vcf_after_four(b, q, max_depth, &budget)) { *win_move = q; return 1; }
-            if (budget < 0) return 0;
-        }
-    }
-    return 0;
+int search_set_param(const char *name, long v) {
+    if (!strcmp(name, "qdepth")) sp.qdepth = (int)v;
+    else if (!strcmp(name, "q_min_p4")) sp.q_min_p4 = (int)v;
+    else if (!strcmp(name, "soft_pct")) sp.soft_pct = (int)v;
+    else if (!strcmp(name, "vct_pct")) sp.vct_pct = (int)v;
+    else if (!strcmp(name, "vct_depth")) sp.vct_depth = (int)v;
+    else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
+    else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
+    else if (!strncmp(name, "line", 4) && atoi(name + 4) >= 0 && atoi(name + 4) < P_COUNT) g_eval_params.line[atoi(name + 4)] = (int)v;
+    else if (!strncmp(name, "combo", 5) && atoi(name + 5) >= 0 && atoi(name + 5) < P4_COUNT) g_eval_params.combo[atoi(name + 5)] = (int)v;
+    else return 0;
+    return 1;
 }
 
 // ---------------------------------------------------------------- 手生成
@@ -271,7 +216,7 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
         for (int x = 0; x < b->size; x++, q++) {
             if (b->cell[q] != EMPTY || !b->near[q]) continue;
             int a = b->pat4[me][q], d = b->pat4[op][q];
-            if (mode == 1 && (a < P4_BLOCK4 || a > P4_BLOCK4_FLEX3)) continue;
+            if (mode == 1 && (a < sp.q_min_p4 || a > P4_BLOCK4_FLEX3)) continue;
             if (op_threat && a < P4_BLOCK4 && !blocks_threat(b, op, q)) continue;
             int s = g_cell_value[me][board_pidx(b, me, q)] + g_cell_value[op][board_pidx(b, op, q)] * DEF_SCALE / 64;
             s = s * 16 + history[me][q] / 64;
@@ -304,7 +249,7 @@ static inline void check_time(Ctx *c) {
 
 // 浅い深さで、戦術的でない手を何手まで調べるか
 static const int LMP_COUNT[5] = {0, 6, 10, 16, 24};
-#define QDEPTH 12   // 静止探索の深さの限度 (四と防ぎの手数)
+
 
 static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     Board *b = c->b;
@@ -347,7 +292,7 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     // 静止探索: 深さが尽きたら、相手の活三への防ぎ (脅威がある時) か自分の四だけを読む
     int qmode = depth <= 0, stand = -SCORE_INF;
     if (qmode) {
-        if (depth <= -QDEPTH) return evaluate(b);
+        if (depth <= -sp.qdepth) return evaluate(b);
         if (!op_threat) {
             stand = evaluate(b);
             if (stand >= beta) return stand;
@@ -442,6 +387,8 @@ typedef struct {
     int score;      // 前の反復の点 (並べ替え用)
 } RootMove;
 
+#define ASPIRATION 60
+
 static void log_info(const Ctx *c, int depth, int score, const int *pv, int pvlen, int verbose) {
     if (!verbose) return;
     double ms = now_ms() - c->t0;
@@ -492,15 +439,25 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     q = legal_flex4(b, me);
     if (q >= 0) { res->move = q; res->score = SCORE_WIN - 2; res->reason = "flex4"; return; }
 
-    // 自分の VCF
+    // 詰み探索 (vcf.c): 自分の VCF → 相手の VCF への受け → 自分の VCT
+    // ノード数は持ち時間に比例させる (VCF・VCT の 1 ノードはおよそ 1.5us)
+    long hard = lim->hard_ms > 0 ? lim->hard_ms : 1000;
     int vmove;
-    if (quick_vcf(b, 40, 200000, &vmove)) {
+    if (vcf_solve(b, 40, hard * 60, &vmove)) {
         res->move = vmove;
         res->score = SCORE_WIN - 10;
         res->reason = "vcf";
-        if (lim->verbose) fprintf(stderr, "vcf found %d,%d\n", pos_x(vmove), pos_y(vmove));
         return;
     }
+    static int defs[MAX_MOVES];
+    int ndefs = vcf_defenses(b, hard * 60, defs);   // -1 = 相手に VCF なし
+    if (ndefs < 0 && sp.vct_pct > 0 && vct_solve(b, sp.vct_depth, hard * sp.vct_pct * 6, &vmove)) {
+        res->move = vmove;
+        res->score = SCORE_WIN - 20;
+        res->reason = "vct";
+        return;
+    }
+    if (lim->verbose && ndefs >= 0) fprintf(stderr, "opponent has VCF: %d defenses\n", ndefs);
 
     // ルートの候補
     int op_threat = legal_flex4(b, op) >= 0;
@@ -509,8 +466,16 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     int n = gen_moves(c, list, me, op, op_threat, e ? e->move : -1, 0, 0);
     RootMove root[MAX_MOVES];
     int nr = 0;
-    for (int i = 0; i < n; i++)
-        if (legal(b, me, list[i].pos)) root[nr++] = (RootMove){list[i].pos, 0};
+    for (int i = 0; i < n; i++) {
+        int p = list[i].pos, ok = ndefs <= 0;
+        for (int k = 0; k < ndefs && !ok; k++) ok = defs[k] == p;
+        if (ok && legal(b, me, p)) root[nr++] = (RootMove){p, 0};
+    }
+    if (nr == 0 && ndefs > 0) {
+        // 相手の VCF を崩す手が候補の外にある (遠い点など): それを使う
+        for (int k = 0; k < ndefs; k++)
+            if (legal(b, me, defs[k])) root[nr++] = (RootMove){defs[k], 0};
+    }
     if (nr == 0) {
         // 防ぎ手がない (相手の活三を止められない) か全部禁じ手: 何でもよいので合法手
         n = gen_moves(c, list, me, op, 0, -1, 0, 0);
@@ -536,45 +501,65 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     int max_depth = lim->max_depth > 0 ? lim->max_depth : MAX_PLY - 10;
     int prev_score = 0;
     for (int depth = 1; depth <= max_depth; depth++) {
-        int alpha = -SCORE_INF, beta = SCORE_INF, best = -SCORE_INF, bestmove = -1;
-        int searched = 0;
-        int bestpv[MAX_PLY], bestpvlen = 0;
-        for (int i = 0; i < nr; i++) {
-            int p = root[i].pos;
-            board_move(b, p);
-            int v;
-            if (searched == 0) {
-                v = -pvs(c, -beta, -alpha, depth - 1, 1, 1);
-            } else {
-                v = -pvs(c, -alpha - 1, -alpha, depth - 1, 1, 0);
-                if (v > alpha && !c->stop) v = -pvs(c, -beta, -alpha, depth - 1, 1, 1);
+        // aspiration window: 前の反復の点の周りの狭い窓で調べ、外れたら広げてやり直す
+        int lo = -SCORE_INF, hi = SCORE_INF, best, bestmove, searched;
+        int bestpv[MAX_PLY], bestpvlen;
+        if (depth >= 4 && prev_score > -SCORE_WIN_MIN && prev_score < SCORE_WIN_MIN) {
+            lo = prev_score - ASPIRATION;
+            hi = prev_score + ASPIRATION;
+        }
+        for (;;) {
+            int alpha = lo, beta = hi;
+            best = -SCORE_INF, bestmove = -1, searched = 0, bestpvlen = 0;
+            for (int i = 0; i < nr; i++) {
+                int p = root[i].pos;
+                board_move(b, p);
+                int v;
+                if (searched == 0) {
+                    v = -pvs(c, -beta, -alpha, depth - 1, 1, 1);
+                } else {
+                    v = -pvs(c, -alpha - 1, -alpha, depth - 1, 1, 0);
+                    if (v > alpha && v < beta && !c->stop) v = -pvs(c, -beta, -alpha, depth - 1, 1, 1);
+                }
+                board_undo(b);
+                if (c->stop) break;
+                searched++;
+                root[i].score = v;
+                if (v > best) {
+                    best = v;
+                    bestmove = p;
+                    if (v > alpha) alpha = v;
+                    bestpv[0] = p;
+                    memcpy(&bestpv[1], c->pv[1], sizeof(int) * c->pvlen[1]);
+                    bestpvlen = c->pvlen[1] + 1;
+                    if (v > lo || searched == 1) {
+                        // 反復の途中で打ち切られても、全幅で調べてより良かった手は使える
+                        res->move = p;
+                        res->score = v;
+                        res->pvlen = bestpvlen;
+                        memcpy(res->pv, bestpv, sizeof(int) * bestpvlen);
+                    }
+                    if (v >= beta) break;
+                } else {
+                    root[i].score = -SCORE_INF - i;   // null window で落ちた手は順位だけ
+                }
             }
-            board_undo(b);
             if (c->stop) break;
-            searched++;
-            root[i].score = v;
-            if (v > best) {
-                best = v;
-                bestmove = p;
-                if (v > alpha) alpha = v;
-                bestpv[0] = p;
-                memcpy(&bestpv[1], c->pv[1], sizeof(int) * c->pvlen[1]);
-                bestpvlen = c->pvlen[1] + 1;
-                // 反復の途中で打ち切られても、全幅で調べてより良かった手は使える
-                res->move = p;
-                res->score = v;
-                res->pvlen = bestpvlen;
-                memcpy(res->pv, bestpv, sizeof(int) * bestpvlen);
-            } else {
-                root[i].score = -SCORE_INF + i;   // null window で落ちた手は順位だけ
-            }
+            if (best <= lo && lo > -SCORE_INF) { lo = -SCORE_INF; continue; }
+            if (best >= hi && hi < SCORE_INF) { hi = SCORE_INF; continue; }
+            break;
+        }
+        (void)bestmove;
+        if (c->stop && searched > 0 && best < -SCORE_WIN_MIN && searched < nr) {
+            // 打ち切り時に、調べ終えた手が全部負けと分かっただけなら、まだ調べていない次の候補を打つ
+            res->move = root[searched].pos;
+            res->score = prev_score;
         }
         if (c->stop && searched == 0) break;
         if (!c->stop) {
             res->depth = depth;
             prev_score = best;
             log_info(c, depth, best, bestpv, bestpvlen, lim->verbose);
-            (void)bestmove;
         }
         // 次の反復のために並べ替え (最善手を先頭、他は点の順。安定ソート)
         for (int i = 1; i < nr; i++) {

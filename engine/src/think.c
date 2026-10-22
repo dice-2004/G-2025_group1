@@ -25,8 +25,8 @@ static void plan_time(const Board *b, const ThinkLimits *lim, SearchLimits *sl) 
     }
     if (hard < 20) hard = 20;
     sl->hard_ms = hard;
-    // 反復が 1 段深くなると数倍かかるので、上限の 4 割を過ぎたら次を始めない
-    sl->soft_ms = hard * 2 / 5;
+    // 反復が 1 段深くなると数倍かかるので、上限の soft_pct % を過ぎたら次を始めない
+    sl->soft_ms = hard * search_soft_pct() / 100;
 }
 
 int think_move(Board *b, const ThinkLimits *lim) {

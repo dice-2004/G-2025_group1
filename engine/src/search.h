@@ -33,11 +33,12 @@ void search_set_tt_size(int mb);   // 置換表の大きさ (既定 32MB)
 void search_new_game(void);        // 置換表・履歴をクリア
 void search_root(Board *b, const SearchLimits *lim, SearchResult *res);
 
+// 調整用の値を名前で設定 (qdepth, q_min_p4, soft_pct, opp_scale, tempo, line<N>, combo<N>)。
+// 評価の重みを変えたら pattern_init (eval_init) で表を作り直すこと。知らない名前なら 0
+int search_set_param(const char *name, long value);
+int search_soft_pct(void);
+
 // 手番側から見た静的評価
 int evaluate(const Board *b);
-
-// 簡易 VCF (四追い)。VCF・VCT スレッドの vcf_solve が入るまでのつなぎ。
-// 手番側が四の連続で勝てれば 1 と初手。盤は元に戻す
-int quick_vcf(Board *b, int max_depth, long max_nodes, int *win_move);
 
 #endif

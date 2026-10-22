@@ -7,6 +7,7 @@
 
 #include "board.h"
 #include "search.h"
+#include "vcf.h"
 #include "think.h"
 
 static Board board;
@@ -16,11 +17,14 @@ static int tables_rule = -1;    // パターン表を作ったときのルール
 static int size = 15;
 static ThinkLimits limits = {5000, 0, 0, 0, 0};
 
-static void ensure_tables(void) {
-    if (tables_rule == rule_code) return;
+// 表を (必要なら) 作り直す。作り直したら 1
+static int ensure_tables(void) {
+    if (tables_rule == rule_code) return 0;
     rule = rule_from_gomocup(rule_code);
     pattern_init(&rule);
+    tss_clear();
     tables_rule = rule_code;
+    return 1;
 }
 
 static void new_game(void) {
@@ -30,9 +34,8 @@ static void new_game(void) {
 }
 
 static void reply_move(void) {
-    ensure_tables();
-    if (board.rule.gomocup_rule != rule_code) {
-        // ルールが対局途中で変わった: 盤を作り直す
+    if (ensure_tables() || board.rule.gomocup_rule != rule_code) {
+        // ルールや評価の表が変わった: 盤を作り直す
         int moves[MAX_MOVES], n = board.nmoves;
         memcpy(moves, board.moves, sizeof(int) * n);
         board_init(&board, size, &rule);
@@ -90,6 +93,7 @@ int main(void) {
                 else if (!strcasecmp(key, "max_depth")) limits.max_depth = (int)val;
                 else if (!strcasecmp(key, "max_node")) limits.max_nodes = val;
                 else if (!strcasecmp(key, "verbose")) limits.verbose = (int)val;
+                else if (!strncasecmp(key, "p_", 2) && search_set_param(key + 2, val)) tables_rule = -1;  // 評価の表を作り直す
                 else if (!strcasecmp(key, "rule")) rule_code = (int)val & 5;  // 1=ちょうど五, 4=連珠
             }
         } else if (!strcasecmp(line, "BEGIN")) {

@@ -38,7 +38,17 @@ def load_registry():
 
 
 def resolve_engine(spec, registry):
-    """'name' か 'cmd:<コマンド>' からエンジン定義を返す。"""
+    """'name' か 'cmd:<コマンド>' からエンジン定義を返す。
+    末尾に '+key=value' を付けると INFO を追加で送る (例: g2+p_qdepth=4。名前もそのまま残る)。"""
+    if "+" in spec and "=" in spec.split("+", 1)[1]:
+        base, *extra = spec.split("+")
+        e = resolve_engine(base, registry)
+        e["info"] = dict(e.get("info", {}))
+        for kv in extra:
+            k, v = kv.split("=", 1)
+            e["info"][k] = v
+        e["name"] = e["name"] + "+" + "+".join(extra)
+        return e
     if spec.startswith("cmd:"):
         return {"name": os.path.basename(spec[4:].split()[0]), "cmd": spec[4:], "cwd": REPO}
     if spec not in registry:
