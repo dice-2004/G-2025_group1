@@ -104,7 +104,7 @@ static void put_stone(Board *b, int p, int color) {
         int off = DIR_OFFSET[d];
         for (int k = 1; k <= 5; k++) {
             int q = p + k * off;   // q から見て p は -k
-            if (b->cell[q] != WALL) {
+            if (b->cell[q] != WALL) {   // (盤外は番兵で埋まっているので、壁の先も壁)
                 b->key[q][d] |= (uint32_t)color << (2 * key_slot(-k));
                 refresh_dir(b, q, d);
             }

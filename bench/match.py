@@ -39,7 +39,14 @@ def load_registry():
 
 def resolve_engine(spec, registry):
     """'name' か 'cmd:<コマンド>' からエンジン定義を返す。
-    末尾に '+key=value' を付けると INFO を追加で送る (例: g2+p_qdepth=4。名前もそのまま残る)。"""
+    末尾に '+key=value' を付けると INFO を追加で送る (例: g2+p_qdepth=4。名前もそのまま残る)。
+    さらに末尾に '@別名' を付けると表示名を変える (例: g2+p_tempo=0+p_line3=5@g2-tuned)。"""
+    if "@" in spec:
+        # 'spec@別名': 表示名 (結果のディレクトリ名) を付け替える
+        spec, alias = spec.rsplit("@", 1)
+        e = resolve_engine(spec, registry)
+        e["name"] = alias
+        return e
     if "+" in spec and "=" in spec.split("+", 1)[1]:
         base, *extra = spec.split("+")
         e = resolve_engine(base, registry)

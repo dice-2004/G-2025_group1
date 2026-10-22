@@ -151,7 +151,8 @@ static struct {
     int soft_pct;   // 上限時間の何 % を過ぎたら次の反復を始めないか (think.c が使う)
     int vct_pct;    // ルートの VCT に使う時間 (上限時間の %)。0 = 使わない
     int vct_depth;  // ルートの VCT の深さ (攻めの手数)
-} sp = {0, P4_BLOCK4_PLUS, 40, 15, 10};
+    int def_restrict;   // 1 = 相手に VCF があればルートの候補を vcf_defenses の手 (受けの上位集合) に絞る
+} sp = {0, P4_BLOCK4_PLUS, 40, 15, 10, 1};
 
 int search_soft_pct(void) { return sp.soft_pct; }
 
@@ -161,6 +162,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "soft_pct")) sp.soft_pct = (int)v;
     else if (!strcmp(name, "vct_pct")) sp.vct_pct = (int)v;
     else if (!strcmp(name, "vct_depth")) sp.vct_depth = (int)v;
+    else if (!strcmp(name, "def_restrict")) sp.def_restrict = (int)v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strncmp(name, "line", 4) && atoi(name + 4) >= 0 && atoi(name + 4) < P_COUNT) g_eval_params.line[atoi(name + 4)] = (int)v;
@@ -211,15 +213,28 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
         return 1;
     }
     const int *k = ply < MAX_PLY ? c->killer[ply] : NULL;
-    for (int y = 0; y < b->size; y++) {
-        int q = to_pos(0, y);
-        for (int x = 0; x < b->size; x++, q++) {
+    // 石のある範囲 ±2 だけを見る
+    int x0 = b->size, x1 = -1, y0 = b->size, y1 = -1;
+    for (int i = 0; i < b->nmoves; i++) {
+        int x = pos_x(b->moves[i]), y = pos_y(b->moves[i]);
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+    }
+    x0 = x0 > 2 ? x0 - 2 : 0, y0 = y0 > 2 ? y0 - 2 : 0;
+    x1 = x1 + 2 < b->size ? x1 + 2 : b->size - 1, y1 = y1 + 2 < b->size ? y1 + 2 : b->size - 1;
+    const int16_t *vme = g_cell_value[me], *vop = g_cell_value[op];
+    const int *hist = history[me];
+    for (int y = y0; y <= y1; y++) {
+        int q = to_pos(x0, y);
+        for (int x = x0; x <= x1; x++, q++) {
             if (b->cell[q] != EMPTY || !b->near[q]) continue;
             int a = b->pat4[me][q], d = b->pat4[op][q];
             if (mode == 1 && (a < sp.q_min_p4 || a > P4_BLOCK4_FLEX3)) continue;
             if (op_threat && a < P4_BLOCK4 && !blocks_threat(b, op, q)) continue;
-            int s = g_cell_value[me][board_pidx(b, me, q)] + g_cell_value[op][board_pidx(b, op, q)] * DEF_SCALE / 64;
-            s = s * 16 + history[me][q] / 64;
+            int s = vme[board_pidx(b, me, q)] + vop[board_pidx(b, op, q)] * DEF_SCALE / 64;
+            s = s * 16 + hist[q] / 64;
             if (q == ttmove) s += 1 << 28;
             else if (k && (q == k[0] || q == k[1])) s += 1 << 12;
             out[n].pos = q;
@@ -228,14 +243,25 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
             n++;
         }
     }
-    // 挿入ソート (降順)
-    for (int i = 1; i < n; i++) {
-        Move m = out[i];
-        int j = i - 1;
-        while (j >= 0 && out[j].score < m.score) { out[j + 1] = out[j]; j--; }
-        out[j + 1] = m;
-    }
     return n;
+}
+
+// 挿入ソート (降順)。ルート用
+static void sort_moves(Move *m, int n) {
+    for (int i = 1; i < n; i++) {
+        Move t = m[i];
+        int j = i - 1;
+        while (j >= 0 && m[j].score < t.score) { m[j + 1] = m[j]; j--; }
+        m[j + 1] = t;
+    }
+}
+
+// i 番目以降で最も点の高い手を i 番目に持ってくる (枝刈りで早く打ち切ることが多いので全部は並べない)
+static inline void pick_move(Move *m, int i, int n) {
+    int bi = i;
+    for (int j = i + 1; j < n; j++)
+        if (m[j].score > m[bi].score) bi = j;
+    if (bi != i) { Move t = m[i]; m[i] = m[bi]; m[bi] = t; }
 }
 
 // ---------------------------------------------------------------- PVS
@@ -317,6 +343,7 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     int best = stand, bestmove = -1, alpha0 = alpha, searched = 0;
 
     for (int i = 0; i < n; i++) {
+        pick_move(list, i, n);
         int q = list[i].pos, tactical = list[i].tactical || op_threat;
         if (searched > 0 && !is_pv && !tactical && depth >= 1 && depth <= 4 && searched >= LMP_COUNT[depth] &&
             best > -SCORE_WIN_MIN)
@@ -464,20 +491,27 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     Move list[MAX_MOVES];
     TTEntry *e = tt_probe(b->hash);
     int n = gen_moves(c, list, me, op, op_threat, e ? e->move : -1, 0, 0);
+    sort_moves(list, n);
     RootMove root[MAX_MOVES];
     int nr = 0;
-    // 相手の VCF への受け (vcf_defenses) は先に調べる。受けの検証は打ち切りで漏れることがあるので候補は絞らない
+    // 相手の VCF への受け (vcf_defenses、受けになり得る手の上位集合) を先に調べる。def_restrict なら受けだけに絞る
     for (int pass = 0; pass < 2; pass++) {
         for (int i = 0; i < n; i++) {
             int p = list[i].pos, isdef = 0;
             for (int k = 0; k < ndefs && !isdef; k++) isdef = defs[k] == p;
-            if (isdef == (pass == 0) && legal(b, me, p)) root[nr++] = (RootMove){p, 0};
+            if ((ndefs <= 0 || isdef == (pass == 0)) && legal(b, me, p)) root[nr++] = (RootMove){p, 0};
         }
-        if (ndefs <= 0) break;
+        if (ndefs <= 0 || sp.def_restrict) break;
+    }
+    if (nr == 0 && ndefs > 0) {
+        // 受けが候補の外 (遠い点) にしかない
+        for (int k = 0; k < ndefs; k++)
+            if (legal(b, me, defs[k])) root[nr++] = (RootMove){defs[k], 0};
     }
     if (nr == 0) {
         // 防ぎ手がない (相手の活三を止められない) か全部禁じ手: 何でもよいので合法手
         n = gen_moves(c, list, me, op, 0, -1, 0, 0);
+        sort_moves(list, n);
         for (int i = 0; i < n; i++)
             if (legal(b, me, list[i].pos)) root[nr++] = (RootMove){list[i].pos, 0};
         if (nr == 0) {
