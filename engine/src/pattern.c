@@ -1,8 +1,11 @@
 #include "pattern.h"
 
+#include "eval.h"
+
 #include <string.h>
 
 uint8_t g_pattern_table[3][KEY_COUNT];
+uint8_t g_p4_table[PIDX_COUNT];
 
 static const Rule *cur_rule;
 static int cur_color;
@@ -88,6 +91,12 @@ void pattern_init(const Rule *rule) {
         memset(memo, 0xFF, KEY_COUNT);
         for (uint32_t key = 0; key < KEY_COUNT; key++) classify(key);
     }
+    for (int i = 0; i < PIDX_COUNT; i++) {
+        uint8_t pats[4] = {(uint8_t)(i / (P_COUNT * P_COUNT * P_COUNT)), (uint8_t)(i / (P_COUNT * P_COUNT) % P_COUNT),
+                           (uint8_t)(i / P_COUNT % P_COUNT), (uint8_t)(i % P_COUNT)};
+        g_p4_table[i] = (uint8_t)combine_pattern4(pats);
+    }
+    eval_init(rule);   // 評価の表もルールごとに作り直す
 }
 
 int combine_pattern4(const uint8_t pats[4]) {

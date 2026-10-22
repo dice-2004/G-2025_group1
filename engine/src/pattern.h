@@ -57,6 +57,13 @@ static inline int pattern_of(int color, uint32_t key) { return g_pattern_table[c
 static inline int key_slot(int offset) { return offset < 0 ? offset + 5 : offset + 4; }
 
 int combine_pattern4(const uint8_t pats[4]);
+
+// 4 方向のパターンの組 → 表の添字 (12^4 = 20736 通り)
+#define PIDX_COUNT (P_COUNT * P_COUNT * P_COUNT * P_COUNT)
+static inline int pattern_index(const uint8_t pats[4]) {
+    return ((pats[0] * P_COUNT + pats[1]) * P_COUNT + pats[2]) * P_COUNT + pats[3];
+}
+extern uint8_t g_p4_table[PIDX_COUNT];   // pattern_index → combine_pattern4 の結果
 const char *pattern_name(int p);
 const char *pattern4_name(int p4);
 

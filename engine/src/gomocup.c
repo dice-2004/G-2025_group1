@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "board.h"
+#include "search.h"
 #include "think.h"
 
 static Board board;
@@ -13,7 +14,7 @@ static Rule rule;
 static int rule_code = 0;       // 現在の Gomocup ルール
 static int tables_rule = -1;    // パターン表を作ったときのルール
 static int size = 15;
-static ThinkLimits limits = {1000, 0};
+static ThinkLimits limits = {5000, 0, 0, 0, 0};
 
 static void ensure_tables(void) {
     if (tables_rule == rule_code) return;
@@ -25,6 +26,7 @@ static void ensure_tables(void) {
 static void new_game(void) {
     ensure_tables();
     board_init(&board, size, &rule);
+    search_new_game();
 }
 
 static void reply_move(void) {
@@ -79,6 +81,15 @@ int main(void) {
             long val;
             if (sscanf(arg, "%63s %ld", key, &val) == 2) {
                 if (!strcasecmp(key, "timeout_turn")) limits.time_ms = (int)val;
+                else if (!strcasecmp(key, "time_left")) limits.time_left_ms = val > 1000000000 ? 1000000000 : (int)val;
+                else if (!strcasecmp(key, "max_memory") && val > 0) {
+                    // 置換表は max_memory の 1/4 まで (上限 256MB)
+                    long mb = val / 4 / (1 << 20);
+                    search_set_tt_size((int)(mb < 4 ? 4 : mb > 256 ? 256 : mb));
+                }
+                else if (!strcasecmp(key, "max_depth")) limits.max_depth = (int)val;
+                else if (!strcasecmp(key, "max_node")) limits.max_nodes = val;
+                else if (!strcasecmp(key, "verbose")) limits.verbose = (int)val;
                 else if (!strcasecmp(key, "rule")) rule_code = (int)val & 5;  // 1=ちょうど五, 4=連珠
             }
         } else if (!strcasecmp(line, "BEGIN")) {
@@ -124,7 +135,7 @@ int main(void) {
                 printf("ERROR bad TAKEBACK\n");
             }
         } else if (!strcasecmp(line, "ABOUT")) {
-            printf("name=\"G2\", version=\"0.1\", author=\"G-2025 group1\", country=\"Japan\"\n");
+            printf("name=\"G2\", version=\"0.2\", author=\"G-2025 group1\", country=\"Japan\"\n");
         } else if (!strcasecmp(line, "END")) {
             break;
         } else if (line[0]) {

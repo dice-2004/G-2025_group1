@@ -269,7 +269,7 @@ def main():
             jobs.append((eb, ea, op))
 
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    out = args.out or os.path.join(HERE, "results", "%s_%s_vs_%s" % (stamp, ea["name"], eb["name"]).replace("/", "-"))
+    out = args.out or os.path.join(HERE, "results", ("%s_%s_vs_%s" % (stamp, ea["name"], eb["name"])).replace("/", "-"))
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, "config.json"), "w") as f:
         json.dump({"args": vars(args), "A": ea, "B": eb}, f, ensure_ascii=False, indent=1)

@@ -15,6 +15,10 @@ typedef struct {
     uint8_t pat[3][NCELL][4];       // [color][pos][dir] その色がそこに打ったときの線パターン
     uint8_t pat4[3][NCELL];         // [color][pos] 4 方向合成
     uint64_t hash;
+    // 以下は空点についての集計 (差分更新)。探索・評価用
+    int32_t vsum[3];                // [color] 空点の g_cell_value の和
+    int16_t p4cnt[3][P4_COUNT];     // [color][Pattern4] その形になる空点の数
+    uint8_t near[NCELL];            // 周囲 5x5 にある石の数 (候補手の範囲)
     int moves[MAX_MOVES];           // 着手履歴
     int nmoves;
 } Board;
@@ -28,6 +32,8 @@ static inline int board_on(const Board *b, int x, int y) { return x >= 0 && y >=
 void board_move(Board *b, int pos);     // 手番側の石を置く
 void board_undo(Board *b);
 void board_move_color(Board *b, int pos, int color);   // 手番に関係なく color を置く (board_undo で戻る)
+
+static inline int board_pidx(const Board *b, int color, int pos) { return pattern_index(b->pat[color][pos]); }
 
 // pos に color が打ったら勝ち (五) になるか
 static inline int board_is_five(const Board *b, int pos, int color) { return b->pat4[color][pos] == P4_FIVE; }

@@ -1,5 +1,7 @@
 #include "board.h"
 
+#include "eval.h"
+
 #include <string.h>
 
 static uint64_t zobrist[3][NCELL];
@@ -17,11 +19,28 @@ void board_global_init(void) {
         for (int p = 0; p < NCELL; p++) zobrist[c][p] = splitmix64(&s);
 }
 
-static void refresh_cell(Board *b, int q) {
+// 空点 q の集計 (vsum, p4cnt) への寄与を足す (sign=+1) / 引く (sign=-1)
+static inline void account_cell(Board *b, int q, int sign) {
     for (int c = BLACK; c <= WHITE; c++) {
-        for (int d = 0; d < 4; d++) b->pat[c][q][d] = (uint8_t)pattern_of(c, b->key[q][d]);
-        b->pat4[c][q] = (uint8_t)combine_pattern4(b->pat[c][q]);
+        b->vsum[c] += sign * g_cell_value[c][pattern_index(b->pat[c][q])];
+        b->p4cnt[c][b->pat4[c][q]] += (int16_t)sign;
     }
+}
+
+static void refresh_cell(Board *b, int q) {
+    int empty = b->cell[q] == EMPTY;
+    if (empty) account_cell(b, q, -1);
+    for (int c = BLACK; c <= WHITE; c++) {
+        uint8_t *pt = b->pat[c][q];
+        for (int d = 0; d < 4; d++) pt[d] = g_pattern_table[c][b->key[q][d]];
+        b->pat4[c][q] = g_p4_table[pattern_index(pt)];
+    }
+    if (empty) account_cell(b, q, +1);
+}
+
+static inline void add_near(Board *b, int p, int delta) {
+    for (int dy = -2; dy <= 2; dy++)
+        for (int dx = -2; dx <= 2; dx++) b->near[p + dy * STRIDE + dx] += (uint8_t)delta;
 }
 
 static uint32_t compute_key(const Board *b, int q, int d) {
@@ -46,13 +65,18 @@ void board_init(Board *b, int size, const Rule *rule) {
         for (int x = 0; x < size; x++) {
             int q = to_pos(x, y);
             for (int d = 0; d < 4; d++) b->key[q][d] = compute_key(b, q, d);
+            b->cell[q] = WALL;      // 集計に入れずにパターンだけ作る
             refresh_cell(b, q);
+            b->cell[q] = EMPTY;
+            account_cell(b, q, +1);
         }
     }
 }
 
 // 色を指定して石を置く/取る (履歴は触らない)
 static void put_stone(Board *b, int p, int color) {
+    account_cell(b, p, -1);
+    add_near(b, p, +1);
     b->cell[p] = (uint8_t)color;
     b->hash ^= zobrist[color][p];
     for (int d = 0; d < 4; d++) {
@@ -75,6 +99,8 @@ static void put_stone(Board *b, int p, int color) {
 static void remove_stone(Board *b, int p) {
     int color = b->cell[p];
     b->cell[p] = EMPTY;
+    account_cell(b, p, +1);
+    add_near(b, p, -1);
     b->hash ^= zobrist[color][p];
     for (int d = 0; d < 4; d++) {
         int off = DIR_OFFSET[d];
@@ -188,7 +214,32 @@ int board_verify(const Board *b) {
     uint64_t h = 0;
     for (int p = 0; p < NCELL; p++)
         if (b->cell[p] == BLACK || b->cell[p] == WHITE) h ^= zobrist[b->cell[p]][p];
-    return h == b->hash;
+    if (h != b->hash) return 0;
+    // 空点の集計と近傍の石数
+    int32_t vsum[3] = {0};
+    int16_t cnt[3][P4_COUNT] = {{0}};
+    for (int y = 0; y < b->size; y++) {
+        for (int x = 0; x < b->size; x++) {
+            int q = to_pos(x, y), n = 0;
+            for (int dy = -2; dy <= 2; dy++)
+                for (int dx = -2; dx <= 2; dx++) {
+                    int c = b->cell[q + dy * STRIDE + dx];
+                    n += (c == BLACK || c == WHITE);
+                }
+            if (b->near[q] != n) return 0;
+            if (b->cell[q] != EMPTY) continue;
+            for (int c = BLACK; c <= WHITE; c++) {
+                vsum[c] += g_cell_value[c][pattern_index(b->pat[c][q])];
+                cnt[c][b->pat4[c][q]]++;
+            }
+        }
+    }
+    for (int c = BLACK; c <= WHITE; c++) {
+        if (vsum[c] != b->vsum[c]) return 0;
+        for (int k = 0; k < P4_COUNT; k++)
+            if (cnt[c][k] != b->p4cnt[c][k]) return 0;
+    }
+    return 1;
 }
 
 void board_print(const Board *b, FILE *fp) {

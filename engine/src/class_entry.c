@@ -33,7 +33,7 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *out_x, int *out_y) {
         if (i < nw) board_move(&g_board, wh[i]);
     }
     (void)com;  // 手番は石数の偶奇で決まる (枠組みでは常に com と一致)
-    ThinkLimits lim = {1000, 0};
+    ThinkLimits lim = {1000, 0, 0, 0, 0};
     int p = think_move(&g_board, &lim);
     *out_x = pos_x(p);
     *out_y = pos_y(p);

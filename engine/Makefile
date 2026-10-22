@@ -5,7 +5,7 @@ CC ?= gcc
 CFLAGS ?= -O2 -std=c11 -Wall -Wextra -D_POSIX_C_SOURCE=200809L
 BUILD = build
 
-CORE = src/rule.c src/pattern.c src/board.c src/vcf.c src/think.c
+CORE = $(filter-out src/gomocup.c src/class_entry.c,$(wildcard src/*.c))
 HDRS = $(wildcard src/*.h)
 
 all: $(BUILD)/pbrain-g2 $(BUILD)/g2-test $(BUILD)/g2-tss
