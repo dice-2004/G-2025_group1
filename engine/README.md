@@ -29,6 +29,7 @@ python3 bench/match.py g2 legacy --rule renju    # 対局 (bench/README.md)
 | `tests/puzzles/tactics.txt` | 詰み問題集 (手作りの禁じ手問題 + 実戦から収集した 95 問)。`make test` で解く |
 | `tests/tss_verify.py` | VCF の勝ち手順を別実装のレフェリー (`bench/rules.py`) で検証 |
 | `tests/vcf_brute.py` | 遅いが単純な VCF 全探索 (C 版との照合用) |
+| `tests/check_defenses.py` | `vcf_defenses` が相手の VCF を消す手を全部返すかを総当たりで確認 |
 | `tests/rapfi_label.py` / `tss_compare.py` | Rapfi の詰み評価を正解ラベルにして VCT の再現率・矛盾を数える |
 
 ## パターンの定義

@@ -243,6 +243,56 @@ static int three_defenses(const int *t, int nt, int *out) {
     return n;
 }
 
+// 受け側の手番で、受け側がパスすれば攻め側に VCF がある (置換表に勝ちが入っている) とき、
+// その VCF 手順を崩し得る点をすべて out に入れる: 手順上の点、最後の五の点、
+// 受けた点の 4 方向 ±4 (受け側の逆四の準備)。止め点が黒の禁じ手で勝つ手順なら空点すべて。
+// ここに入らない手 (四でもない) を受け側が打っても同じ手順で攻め側が勝つ。手順をたどれなければ -1
+static int vcf_threat_cells(int *out) {
+    static int stamp[NCELL];
+    static int gen = 0;
+    Board *b = C.b;
+    int n = 0, played = 0, ok = 0;
+    gen++;
+#define ADD_CELL(q) do { int q_ = (q); \
+        if (q_ >= 0 && q_ < NCELL && b->cell[q_] == EMPTY && stamp[q_] != gen) { stamp[q_] = gen; out[n++] = q_; } } while (0)
+#define ADD_LINES(c) do { for (int d_ = 0; d_ < 4; d_++) for (int k_ = -4; k_ <= 4; k_++) ADD_CELL((c) + k_ * DIR_OFFSET[d_]); } while (0)
+    for (int step = 0; step < 64; step++) {
+        int f[2], a;
+        int nd = find_fives(C.def, f, 2);
+        if (nd >= 2) break;
+        if (nd == 1) {
+            a = f[0];
+        } else {
+            uint64_t key = b->hash ^ SALT[TSS_VCF][C.att];
+            TTEntry *e = &tt[key & (TT_SIZE - 1)];
+            if (e->key != key || e->result != TT_WIN || e->best < 0) break;
+            a = e->best;
+        }
+        if (b->cell[a] != EMPTY) break;
+        ADD_CELL(a);
+        if (b->pat4[C.att][a] == P4_FIVE) { ok = 1; break; }
+        board_move_color(b, a, C.att);
+        played++;
+        int na = fives_near(C.att, a, f, 2);
+        if (na == 0) break;
+        if (na >= 2) { ADD_CELL(f[0]); ADD_CELL(f[1]); ok = 1; break; }
+        if (!legal(C.def, f[0])) {
+            // 止め点が黒の禁じ手で勝つ: 禁じ手かどうかは偽の三の再帰で遠くの石にも左右されるので空点すべて
+            for (int i = 0; i < C.npos; i++) ADD_CELL(C.pos[i]);
+            ok = 1;
+            break;
+        }
+        ADD_CELL(f[0]);
+        ADD_LINES(f[0]);
+        board_move_color(b, f[0], C.def);
+        played++;
+    }
+#undef ADD_CELL
+#undef ADD_LINES
+    while (played--) board_undo(b);
+    return ok ? n : -1;
+}
+
 // 受け側の手番 (直前に攻め側が脅威を打った)。攻め側の勝ちを証明できれば 1
 static int defender_node(int mode, int depth) {
     Board *b = C.b;
@@ -270,7 +320,16 @@ static int defender_node(int mode, int depth) {
         if (b->pat4[C.att][p] == P4_FLEX4 && nt < MAX_CAND && legal(C.att, p)) t[nt++] = p;
         if (b->pat4[C.def][p] >= P4_BLOCK4 && nf < MAX_CAND) fours[nf++] = p;
     }
-    if (nt == 0) return 0;      // 脅威になっていない
+    int cand[MAX_MOVES], score[MAX_MOVES];
+    int nc;
+    if (nt > 0) {
+        nc = three_defenses(t, nt, cand);
+    } else {
+        // 活三ではないが、受け側がパスすれば攻め側に VCF がある (四を止めた手が脅威を残した場合など)
+        if (!attacker_node(TSS_VCF, VCF_INNER_DEPTH)) return 0;
+        nc = vcf_threat_cells(cand);
+        if (nc < 0) return 0;
+    }
 
     // 受け側が先に VCF で勝てるなら脅威は通らない (攻守を入れ替えて調べる)
     {
@@ -283,8 +342,6 @@ static int defender_node(int mode, int depth) {
         if (r || C.aborted) return 0;
     }
 
-    int cand[MAX_MOVES], score[MAX_MOVES];
-    int nc = three_defenses(t, nt, cand);
     static uint8_t seen[NCELL];
     for (int i = 0; i < nc; i++) seen[cand[i]] = 1;
     for (int i = 0; i < nf; i++)
@@ -339,8 +396,14 @@ static int walk_line(int mode, int first, int *line, int max) {
                 int p = C.pos[i];
                 if (b->cell[p] == EMPTY && b->pat4[C.att][p] == P4_FLEX4 && legal(C.att, p)) t[nt++] = p;
             }
-            if (nt == 0) break;
-            int nc = three_defenses(t, nt, cand);
+            int nc;
+            if (nt > 0) {
+                nc = three_defenses(t, nt, cand);
+            } else {
+                C.max_nodes = C.nodes + 100000;
+                if (!attacker_node(TSS_VCF, VCF_INNER_DEPTH)) break;
+                nc = vcf_threat_cells(cand);
+            }
             q = -1;
             for (int i = 0; i < nc && q < 0; i++)
                 if (legal(C.def, cand[i])) q = cand[i];
@@ -425,19 +488,20 @@ int vcf_defenses(Board *b, long max_nodes, int *moves) {
         }
         return n;
     }
-    // 候補: 相手の手順上の点、受けた点の 4 方向 ±4 (逆四の準備)、自分の四
+    // 候補: 相手の VCF を崩し得る点 (vcf_threat_cells: 手順上の点・最後の五の点・受けた点の周り) と自分の四。
+    // 手順をたどれなければ盤上の空点すべて
     static uint8_t mark[NCELL];
     int cand[MAX_MOVES], nc = 0;
-    for (int i = 0; i < r.nline; i++) {
-        int p = r.line[i];
-        if (b->cell[p] == EMPTY && !mark[p]) { mark[p] = 1; cand[nc++] = p; }
-        if (i % 2 == 1) {
-            for (int d = 0; d < 4; d++)
-                for (int k = -4; k <= 4; k++) {
-                    int q = p + k * DIR_OFFSET[d];
-                    if (q >= 0 && q < NCELL && b->cell[q] == EMPTY && !mark[q]) { mark[q] = 1; cand[nc++] = q; }
-                }
-        }
+    C.max_nodes = C.nodes + max_nodes;
+    C.aborted = 0;
+    int nt = attacker_node(TSS_VCF, 30) ? vcf_threat_cells(cand) : -1;
+    if (nt < 0) {
+        nt = 0;
+        for (int i = 0; i < C.npos; i++)
+            if (b->cell[C.pos[i]] == EMPTY) cand[nt++] = C.pos[i];
+    }
+    for (int i = 0; i < nt; i++) {
+        if (!mark[cand[i]]) { mark[cand[i]] = 1; cand[nc++] = cand[i]; }
     }
     int npos = C.npos;
     for (int i = 0; i < npos; i++) {
