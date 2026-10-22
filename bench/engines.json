@@ -1,4 +1,8 @@
 {
+  "g2": {
+    "cmd": "{repo}/engine/build/pbrain-g2",
+    "note": "新エンジン G2 (engine/)。make -C engine でビルド"
+  },
   "legacy": {
     "cmd": "{bench}/build/pbrain-legacy --data {repo}",
     "note": "授業版 v3.4 (gomoku_ai.c + logics/) を Gomocup アダプタで包んだもの"
