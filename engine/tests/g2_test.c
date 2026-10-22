@@ -190,6 +190,10 @@ static int features(Rule rule) {
                     printf("%d,%d,%d,%d", game, i, me, rs);
                     for (int c = 0; c < 2; c++)
                         for (int j = 0; j < P_COUNT + P4_COUNT; j++) printf(",%d", f[c][j]);
+                    // 脅威のビット (手番側, 相手側)
+                    int bits[2] = {eval_threat_bits(b.p4cnt[me]), eval_threat_bits(b.p4cnt[op])};
+                    for (int c = 0; c < 2; c++)
+                        for (int k = 0; k < THREAT_COUNT; k++) printf(",%d", bits[c] >> k & 1);
                     printf("\n");
                 }
             }

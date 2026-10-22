@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "board.h"
+#include "eval.h"
 #include "search.h"
 #include "vcf.h"
 #include "think.h"
@@ -14,6 +15,7 @@ static Board board;
 static Rule rule;
 static int rule_code = 0;       // 現在の Gomocup ルール
 static int tables_rule = -1;    // パターン表を作ったときのルール
+static int eval_dirty = 0;      // 評価の重みが INFO で変わった
 static int size = 15;
 static ThinkLimits limits = {5000, 0, 0, 0, 0};
 
@@ -99,8 +101,14 @@ int main(void) {
                 else if (!strcasecmp(key, "max_depth")) limits.max_depth = (int)val;
                 else if (!strcasecmp(key, "max_node")) limits.max_nodes = val;
                 else if (!strcasecmp(key, "verbose")) limits.verbose = (int)val;
-                else if (!strncasecmp(key, "p_", 2) && search_set_param(key + 2, val)) tables_rule = -1;  // 評価の表を作り直す
+                else if (!strncasecmp(key, "p_", 2) && search_set_param(key + 2, val)) eval_dirty = 1;
                 else if (!strcasecmp(key, "rule")) rule_code = (int)val & 5;  // 1=ちょうど五, 4=連珠
+                if (eval_dirty && tables_rule >= 0) {
+                    // 評価の重みが変わった: 評価の表だけ作り直し (パターン表はそのまま)、盤の集計を作り直す
+                    eval_init(&rule);
+                    board.rule.gomocup_rule = -1;
+                }
+                eval_dirty = 0;
                 if (board.size) sync_tables();
             }
         } else if (!strcasecmp(line, "BEGIN")) {

@@ -138,7 +138,14 @@ static int legal_flex4(Board *b, int color) {
 
 int evaluate(const Board *b) {
     int me = board_side(b), op = opp_color(me);
-    long v = b->vsum[me] - (long)b->vsum[op] * g_eval_params.opp_scale / 64 + g_eval_params.tempo;
+    const EvalParams *w = &g_eval_params;
+    long v = b->vsum[me] - (long)b->vsum[op] * w->opp_scale / 64 + w->tempo;
+    const int (*th)[THREAT_COUNT] = w->threat[me == BLACK ? 0 : 1];
+    int bm = eval_threat_bits(b->p4cnt[me]), bo = eval_threat_bits(b->p4cnt[op]);
+    for (int k = 0; k < THREAT_COUNT; k++) {
+        if (bm >> k & 1) v += th[0][k];
+        if (bo >> k & 1) v += th[1][k];
+    }
     if (v > 20000) v = 20000;
     if (v < -20000) v = -20000;
     return (int)v;
@@ -152,7 +159,11 @@ static struct {
     int vct_pct;    // ルートの VCT に使う時間 (上限時間の %)。0 = 使わない
     int vct_depth;  // ルートの VCT の深さ (攻めの手数)
     int def_restrict;   // 1 = 相手に VCF があればルートの候補を vcf_defenses の手 (受けの上位集合) に絞る
-} sp = {0, P4_BLOCK4_PLUS, 40, 0, 10, 1};
+    int lmp_mul;        // 浅い所の手数打ち切りの手数の倍率 (%)
+    int lmr_moves;      // 何手目から深さを削るか
+    int cand_min;       // ルート以外で、点 (攻め+守り) がこれ未満の戦術的でない手は 2 手目以降読まない
+    int ext_three;      // 1 = 活三 (相手に受けを強いる手) は深さを減らさない (延長)。延長はルートの深さの 2 倍まで
+} sp = {0, P4_BLOCK4_PLUS, 40, 0, 10, 1, 100, 3, 0, 0};
 
 int search_soft_pct(void) { return sp.soft_pct; }
 
@@ -163,8 +174,18 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "vct_pct")) sp.vct_pct = (int)v;
     else if (!strcmp(name, "vct_depth")) sp.vct_depth = (int)v;
     else if (!strcmp(name, "def_restrict")) sp.def_restrict = (int)v;
+    else if (!strcmp(name, "lmp_mul")) sp.lmp_mul = (int)v;
+    else if (!strcmp(name, "lmr_moves")) sp.lmr_moves = (int)v;
+    else if (!strcmp(name, "cand_min")) sp.cand_min = (int)v;
+    else if (!strcmp(name, "ext_three")) sp.ext_three = (int)v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
+    else if (!strncmp(name, "threat", 6) && strlen(name) == 9) {
+        // threat<手番 0=黒 1=白><0=手番側 1=相手側><種類>  例: threat010
+        int a = name[6] - '0', s2 = name[7] - '0', k = name[8] - '0';
+        if (a < 0 || a > 1 || s2 < 0 || s2 > 1 || k < 0 || k >= THREAT_COUNT) return 0;
+        g_eval_params.threat[a][s2][k] = (int)v;
+    }
     else if (!strncmp(name, "line", 4) && atoi(name + 4) >= 0 && atoi(name + 4) < P_COUNT) g_eval_params.line[atoi(name + 4)] = (int)v;
     else if (!strncmp(name, "combo", 5) && atoi(name + 5) >= 0 && atoi(name + 5) < P4_COUNT) g_eval_params.combo[atoi(name + 5)] = (int)v;
     else return 0;
@@ -176,6 +197,7 @@ int search_set_param(const char *name, long v) {
 typedef struct {
     int pos;
     int score;
+    int value;      // パターン点 (攻め + 守り)。history などを含まない
     int tactical;   // 三・四を作る、または相手の三・四の点をふさぐ
 } Move;
 
@@ -187,6 +209,7 @@ typedef struct {
     double t0;
     int hard_ms;
     int seldepth;
+    int root_depth;
     int killer[MAX_PLY][2];
     int pv[MAX_PLY][MAX_PLY];
     int pvlen[MAX_PLY];
@@ -210,6 +233,7 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
         out[0].pos = to_pos(b->size / 2, b->size / 2);
         out[0].score = 0;
         out[0].tactical = 0;
+        out[0].value = 0;
         return 1;
     }
     const int *k = ply < MAX_PLY ? c->killer[ply] : NULL;
@@ -234,6 +258,7 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
             if (mode == 1 && (a < sp.q_min_p4 || a > P4_BLOCK4_FLEX3)) continue;
             if (op_threat && a < P4_BLOCK4 && !blocks_threat(b, op, q)) continue;
             int s = vme[board_pidx(b, me, q)] + vop[board_pidx(b, op, q)] * DEF_SCALE / 64;
+            out[n].value = s;
             s = s * 16 + hist[q] / 64;
             if (q == ttmove) s += 1 << 28;
             else if (k && (q == k[0] || q == k[1])) s += 1 << 12;
@@ -345,18 +370,22 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     for (int i = 0; i < n; i++) {
         pick_move(list, i, n);
         int q = list[i].pos, tactical = list[i].tactical || op_threat;
-        if (searched > 0 && !is_pv && !tactical && depth >= 1 && depth <= 4 && searched >= LMP_COUNT[depth] &&
-            best > -SCORE_WIN_MIN)
-            continue;
+        if (searched > 0 && !is_pv && !tactical && best > -SCORE_WIN_MIN) {
+            if (depth >= 1 && depth <= 4 && searched * 100 >= LMP_COUNT[depth] * sp.lmp_mul) continue;
+            if (list[i].value < sp.cand_min) continue;
+        }
         if (restricted(b, me) && board_is_forbidden(b, q)) continue;
 
+        int a4 = b->pat4[me][q];
         board_move(b, q);
         int v, nd = depth - 1;
+        // 活三を作る手 (相手は受けるしかない) の延長
+        if (sp.ext_three && !qmode && a4 >= P4_FLEX3 && a4 <= P4_FLEX3_2X && ply + depth < 2 * c->root_depth) nd = depth;
         if (searched == 0) {
             v = -pvs(c, -beta, -alpha, nd, ply + 1, is_pv);
         } else {
             int r = 0;
-            if (!qmode && depth >= 3 && searched >= 3 && !tactical) {
+            if (!qmode && depth >= 3 && searched >= sp.lmr_moves && !tactical) {
                 r = 1 + (searched >= 10) + (depth >= 8 && searched >= 20);
                 if (r > nd - 1) r = nd - 1 > 0 ? nd - 1 : 0;
             }
@@ -534,6 +563,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     int max_depth = lim->max_depth > 0 ? lim->max_depth : MAX_PLY - 10;
     int prev_score = 0;
     for (int depth = 1; depth <= max_depth; depth++) {
+        c->root_depth = depth;
         // aspiration window: 前の反復の点の周りの狭い窓で調べ、外れたら広げてやり直す
         int lo = -SCORE_INF, hi = SCORE_INF, best, bestmove, searched;
         int bestpv[MAX_PLY], bestpvlen;

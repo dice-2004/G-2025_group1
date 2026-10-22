@@ -2,14 +2,17 @@
 
 int16_t g_cell_value[3][PIDX_COUNT];
 
-// 重みは tests/tune_eval.py (Texel 法、自己対局と rapfi-d2 戦の約 8000 局面) で調整した値 (2026-10-22)
+// 重みは tests/tune_eval.py で調整した値 (2026-10-22)。
+// 6000 局面に Rapfi (古典評価、2 万ノード) の評価を付けて合わせた (--rapfi 6000)。自己対戦で +117 Elo
 EvalParams g_eval_params = {
-    //        DEAD OL B1 F1  B2 F2  B3 F3  B4   F4   D4   F5
-    .line = {1, 0, 0, 13, 33, 0, 38, 0, 170, 200, 200, 600},
-    //         NONE F2 B3 F2x2 B3+  F3  F3+  F3x2 B4  B4+  B4F3  F4   FIVE
-    .combo = {16, 0, 0, 4, 130, 32, 172, 191, 0, 383, 1246, 800, 1500},
-    .opp_scale = 58,
-    .tempo = -16,
+    //        DEAD OL B1 F1 B2 F2 B3  F3  B4   F4   D4   F5
+    .line = {1, 0, 2, 2, 5, 6, 28, 16, 293, 200, 200, 600},
+    //         NONE F2  B3 F2x2 B3+ F3  F3+  F3x2 B4  B4+  B4F3  F4   FIVE
+    .combo = {4, 11, 0, 1, 66, 92, 185, 255, 0, 454, 1923, 800, 1500},
+    .opp_scale = 48,
+    .tempo = -144,
+    //           黒番: 手番側 {B4F3, F3x2, F3, B4+, B4x2}, 相手側       白番: 手番側, 相手側
+    .threat = {{{355, 110, 316, -120, -70}, {-44, -62, -38, 152, -124}}, {{101, 176, 383, 4, 14}, {-10, 312, -68, -89, -9}}},
 };
 
 int eval_cell_class(const Rule *rule, int color, const uint8_t pats[4]) {
