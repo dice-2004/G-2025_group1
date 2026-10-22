@@ -31,7 +31,7 @@ python3 bench/web/summary.py --write docs/benchmarks/web/RESULTS.md
 **並列に走らせるときは CPU を食い合う (サイトの WASM/JS AI もこちらの CPU で動く) ので 2 並列までにする。**
 
 棋譜は `docs/benchmarks/web/games/<site>_<level>_<rule>.jsonl` に追記 (`bench/show.py` で盤面表示、
-`engine/tests/analyze.py` で局面を再検討できる `bench/match.py` と同じ形式)。独自項目: `site`, `level`,
+`engine/tests/analyze.py` で局面を再検討できる。`bench/match.py` の棋譜と同じ形式)。独自項目: `site`, `level`,
 `engine_color`, `times` (エンジンの 1 手の秒)、`site_times` (サイトが返すまでの秒)、`ref_check` (自前の審判と
 サイトの勝敗判定の一致。`mismatch` なら要調査)。
 

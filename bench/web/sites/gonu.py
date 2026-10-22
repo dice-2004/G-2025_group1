@@ -55,6 +55,9 @@ class Site:
             p.click(".win-banner.is-visible button.btn-primary")
         else:
             p.select_option("[data-ai-difficulty]", level)
+            # 設定変更ごとに新規対局が走り、サイト AI (黒) の予約済みの着手が後から発火して二重に打つので、
+            # 予約が消えるのを待ってから新規対局する
+            p.wait_for_timeout(900)
             p.click("[data-new-game]")
         p.wait_for_timeout(300)
         # 盤をクリックで打つには sideSelect=A(自分が黒)。エンジンが白ならサイト AI が先に打つ
