@@ -13,8 +13,21 @@ CC = gcc
 CFLAGS = -Wall -O2 -std=c99
 LDFLAGS = -lm
 
+# AI 本体 (審判 .libgomoku.c / gomoku.c を除いた部分)。ベンチ用アダプタと共有する
+AI_OBJS = gomoku_ai.o config.o .libgomoku_to.o \
+       logics/evaluation.o logics/transposition.o logics/opening_book.o \
+       logics/learning.o logics/main_engine.o logics/TSS.o logics/debug_utils.o
+
 # デフォルトターゲット
 all: $(PROGRAM)
+
+# ベンチマーク用 Gomocup エンジン (bench/README.md 参照)
+.PHONY: bench
+bench: bench/build/pbrain-legacy
+
+bench/build/pbrain-legacy: bench/pbrain_adapter.c gomoku.h $(AI_OBJS)
+	@mkdir -p bench/build
+	$(CC) $(CFLAGS) bench/pbrain_adapter.c $(AI_OBJS) $(LDFLAGS) -o $@
 
 # 実行ファイル生成
 $(PROGRAM): $(OBJS)
@@ -79,6 +92,7 @@ clean:
 	$(RM) $(PROGRAM) $(OBJS)
 	$(RM) gomoku.exe *.o
 	$(RM) logics/*.o
+	$(RM) -r bench/build
 	@echo "Clean completed."
 
 # 完全クリーン（学習データも削除）
@@ -102,6 +116,7 @@ help:
 	@echo "  make clean     - Remove all build artifacts"
 	@echo "  make distclean - Remove build artifacts and learning data"
 	@echo "  make rebuild   - Clean and rebuild"
+	@echo "  make bench     - Build Gomocup adapter for bench/ (bench/build/pbrain-legacy)"
 	@echo "  make help      - Show this help message"
 	@echo ""
 	@echo "Features:"

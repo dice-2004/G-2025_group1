@@ -53,3 +53,9 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# ベンチマーク成果物
+bench/build/
+bench/results/
+__pycache__/
+/gomoku

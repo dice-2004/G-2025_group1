@@ -359,7 +359,7 @@ int evaluate_board(const int board[][BOARD_SIZE], int my_color) {
 // 特定位置の評価（その位置に石を置いた場合のスコア）
 int evaluate_position(const int board[][BOARD_SIZE], int x, int y, int color) {
     int score = 0;
-    int line[9];
+    int line[11];  // extract_line は 11 マス書き込む
     int length;
 
     // 4方向を評価

@@ -1,0 +1,56 @@
+{
+  "legacy": {
+    "cmd": "{bench}/build/pbrain-legacy --data {repo}",
+    "note": "授業版 v3.4 (gomoku_ai.c + logics/) を Gomocup アダプタで包んだもの"
+  },
+  "random": {
+    "cmd": "python3 {bench}/bots/simple_bot.py --mode random --renju",
+    "note": "近傍ランダム (下限の目安)"
+  },
+  "greedy": {
+    "cmd": "python3 {bench}/bots/simple_bot.py --mode greedy --renju",
+    "note": "1手読み貪欲 (初心者レベル)"
+  },
+  "rapfi": {
+    "cmd": "{rapfi}/pbrain-rapfi",
+    "cwd": "{rapfi}",
+    "note": "Rapfi 古典評価 (内蔵設定)。tc で強さが変わる。最上位級",
+    "pre_delay": 0.05
+  },
+  "rapfi-n1k": {
+    "cmd": "{rapfi}/pbrain-rapfi",
+    "cwd": "{rapfi}",
+    "info": {
+      "max_node": 1000
+    },
+    "note": "Rapfi 古典評価、1手1000ノード制限 (弱め)",
+    "pre_delay": 0.05
+  },
+  "rapfi-n10k": {
+    "cmd": "{rapfi}/pbrain-rapfi",
+    "cwd": "{rapfi}",
+    "info": {
+      "max_node": 10000
+    },
+    "note": "Rapfi 古典評価、1手1万ノード制限",
+    "pre_delay": 0.05
+  },
+  "rapfi-n100k": {
+    "cmd": "{rapfi}/pbrain-rapfi",
+    "cwd": "{rapfi}",
+    "info": {
+      "max_node": 100000
+    },
+    "note": "Rapfi 古典評価、1手10万ノード制限",
+    "pre_delay": 0.05
+  },
+  "rapfi-d2": {
+    "cmd": "{rapfi}/pbrain-rapfi",
+    "cwd": "{rapfi}",
+    "info": {
+      "max_depth": 2
+    },
+    "note": "Rapfi 古典評価、深さ2制限",
+    "pre_delay": 0.05
+  }
+}

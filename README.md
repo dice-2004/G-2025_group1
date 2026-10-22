@@ -15,6 +15,15 @@
 
 ---
 
+## 🚀 強化プロジェクト (2026-10〜)
+
+世界の五目並べサイト・アプリの最高難易度に勝つための強化を進めています。
+
+- 計画: [docs/ROADMAP.md](./docs/ROADMAP.md) / 進捗: [docs/PROGRESS.md](./docs/PROGRESS.md) / 目標調査: [docs/TARGETS.md](./docs/TARGETS.md)
+- 強さ測定ハーネス: [bench/README.md](./bench/README.md) (`make bench` → `python3 bench/match.py ...`)
+
+---
+
 ## 🎯 プロジェクト概要
 
 このプロジェクトは、C言語で実装された高性能な五目並べAIです。Alpha-Beta枝刈り、反復深化探索、置換表、学習機能など、コンピュータ将棋で使われる先進的な技術を採用しています。
