@@ -9,8 +9,35 @@
 |---|---|
 | フェーズ | Phase 2 (本格探索) 項目 1 完了、評価の調整中 |
 | 最強の自作エンジン | G2 v0.2 (engine/)。連珠・1秒/手で rapfi-n1k に 76勝4敗、rapfi-n10k に 49勝31敗 (Elo 約 +2500) |
+| サイト AI との実戦 | T1 サイト (trygomoku/gomokuonline/playgomokuonline) は全勝。playgonu Pro は白番で負け、Rapfi NNUE 5 秒 (Champion/gomocalc) は 1-16。[結果](./benchmarks/web/RESULTS.md) |
 | legacy の強さ | 連珠・1秒/手で Elo +883 (random=0)。1手読み貪欲ボットに 29.5/80、Rapfi 深さ2制限に 0/80 |
 | 次の目標 | rapfi-n100k に勝ち越す (評価の再調整・探索の枝刈り・VCT の使い方) |
+
+## 2026-10-22 サイト・アプリ AI との実戦ハーネス
+
+**やったこと** (詳細は [bench/web/README.md](../bench/web/README.md)、結果は [benchmarks/web/RESULTS.md](./benchmarks/web/RESULTS.md))
+- クラウド環境のネットワーク許可で対象サイト (playgonu / gomocalc / trygomoku / gomokuonline / playgomokuonline) に到達できることを確認
+- `bench/web/play.py` + `sites/*.py`: Playwright (同梱 Chromium) で G2 をサイトの AI と自動対局。サイトごとのアダプタ (`new_game/place/wait_move/result`)
+  で、盤は SVG / canvas / ページ内 JS の状態 / Vuex ストアから読む。サイトの勝敗は自前の審判 (`bench/rules.py`) とも照合する。
+  棋譜は `docs/benchmarks/web/games/*.jsonl` (負け局を含む全局、`bench/show.py` と `engine/tests/analyze.py` で使える)
+- gomocalc (Rapfi NNUE の Web 版) は「AI が黒/白」「1 手の持ち時間」を設定できる。T3 相手を持ち時間つきで指定できるので、強さの物差しに使える
+
+**結果** (G2 v0.2、1 手 3〜5 秒)
+| 対象 | 成績 (勝-分-敗) |
+|---|---|
+| trygomoku Master / gomokuonline Expert / playgomokuonline Lv10 | 全勝 (20-0-0) |
+| playgonu Pro | 自由 6-0-2、連珠 2-0-4 (黒番 4-0、白番 4-6) |
+| playgonu Champion (Rapfi NNUE 5 秒) | 0-0-7 (黒のみ) |
+| gomocalc (Rapfi NNUE 5 秒) | 1-0-9 (自由・黒番の 1 勝のみ) |
+
+- **G2 の白番が弱い**: 黒 7,7 への 2 手目が 5,5 (遠い斜め) で評価が -700〜-1700、17〜31 手で負ける局が多い
+- G2 は `tc=5000` でも平均 2.7〜3.0 秒しか使わない。Champion は平均 3.3 秒 (最大 5 秒)
+- アプリ (T2) はクラウドからは自動化不可 (KVM 無し、ストア入手不可)。代替案は [TARGETS.md](./TARGETS.md)
+
+**次にやること**
+- 白番の序盤 (開局 DB / 近接応手の優先)、持ち時間の使い切り、連珠の受けを探索スレッドで改善
+- gomocalc の `--level` (持ち時間) を変えて「G2 が勝てる最大の時間」を測り、進捗の物差しにする
+- 改善のたびに `bench/web/play.py` で Pro 白番・Champion・gomocalc を再測定
 
 ## 2026-10-22 Phase 2-1: 本探索と評価関数 (G2 v0.2)
 

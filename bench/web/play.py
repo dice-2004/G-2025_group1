@@ -29,6 +29,15 @@ from rules import BLACK, WHITE, RULE_GOMOCUP_CODE, Referee  # noqa: E402
 
 CHROME = os.environ.get("CHROME_PATH") or next(
     (p for p in ("/opt/pw-browsers/chromium-1194/chrome-linux/chrome",) if os.path.exists(p)), None)
+def _rev():
+    try:
+        import subprocess
+        return subprocess.run(["git", "-C", REPO, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+    except Exception:
+        return "?"
+
+
+ENGINE_REV = _rev()  # 注意: ビルド後に HEAD が進んでいる場合は実際のバイナリより新しい (make -C engine 直後に走らせる)
 OUT_DIR = os.path.join(REPO, "docs", "benchmarks", "web", "games")
 
 
@@ -45,7 +54,7 @@ def play_game(site, edef, args, game_id, engine_color):
     ref = Referee(rule, 7)  # サイトとは別にこちらでも判定する (食い違いの検出用)
     rec = {"id": game_id, "black": None, "white": None, "rule": rule, "tc": args.tc, "opening": [],
            "moves": [], "times": [], "site": args.site, "level": args.level,
-           "engine": edef["name"], "engine_color": "black" if engine_color == BLACK else "white",
+           "engine": edef["name"], "engine_rev": ENGINE_REV, "engine_color": "black" if engine_color == BLACK else "white",
            "site_times": [], "date": dt.datetime.now(dt.timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds") + "Z"}
     names = {engine_color: edef["name"], 3 - engine_color: "%s:%s" % (args.site, args.level)}
     rec["black"], rec["white"] = names[BLACK], names[WHITE]
