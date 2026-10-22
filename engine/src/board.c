@@ -38,6 +38,27 @@ static void refresh_cell(Board *b, int q) {
     if (empty) account_cell(b, q, +1);
 }
 
+// q の方向 d の線パターンだけを作り直す (石の出入りで変わるのはその方向だけ)。変わらなければ何もしない
+static inline void refresh_dir(Board *b, int q, int d) {
+    int empty = b->cell[q] == EMPTY;
+    for (int c = BLACK; c <= WHITE; c++) {
+        uint8_t np = g_pattern_table[c][b->key[q][d]];
+        uint8_t *pt = b->pat[c][q];
+        if (np == pt[d]) continue;
+        if (empty) {
+            b->vsum[c] -= g_cell_value[c][pattern_index(pt)];
+            b->p4cnt[c][b->pat4[c][q]]--;
+        }
+        pt[d] = np;
+        int idx = pattern_index(pt);
+        b->pat4[c][q] = g_p4_table[idx];
+        if (empty) {
+            b->vsum[c] += g_cell_value[c][idx];
+            b->p4cnt[c][b->pat4[c][q]]++;
+        }
+    }
+}
+
 static inline void add_near(Board *b, int p, int delta) {
     for (int dy = -2; dy <= 2; dy++)
         for (int dx = -2; dx <= 2; dx++) b->near[p + dy * STRIDE + dx] += (uint8_t)delta;
@@ -85,12 +106,12 @@ static void put_stone(Board *b, int p, int color) {
             int q = p + k * off;   // q から見て p は -k
             if (b->cell[q] != WALL) {
                 b->key[q][d] |= (uint32_t)color << (2 * key_slot(-k));
-                refresh_cell(b, q);
+                refresh_dir(b, q, d);
             }
             q = p - k * off;       // q から見て p は +k
             if (b->cell[q] != WALL) {
                 b->key[q][d] |= (uint32_t)color << (2 * key_slot(k));
-                refresh_cell(b, q);
+                refresh_dir(b, q, d);
             }
         }
     }
@@ -108,12 +129,12 @@ static void remove_stone(Board *b, int p) {
             int q = p + k * off;
             if (b->cell[q] != WALL) {
                 b->key[q][d] &= ~(3u << (2 * key_slot(-k)));
-                refresh_cell(b, q);
+                refresh_dir(b, q, d);
             }
             q = p - k * off;
             if (b->cell[q] != WALL) {
                 b->key[q][d] &= ~(3u << (2 * key_slot(k)));
-                refresh_cell(b, q);
+                refresh_dir(b, q, d);
             }
         }
     }

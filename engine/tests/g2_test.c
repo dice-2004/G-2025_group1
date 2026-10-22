@@ -4,6 +4,9 @@
 //   g2-test forbid <rule>        標準入力の各行 (黒から順の手 "x,y x,y ...") について、
 //                                黒が打つと禁じ手になる空点を "x,y:F" 形式で出力 (Python 照合用)
 //   g2-test bench [rule]         パターン表生成と着手/戻しの速度
+//   g2-test speed <rule> <depth> 標準入力の各行 (手順 "x,y x,y ...") を固定深さで探索し、ノード数・時間・nps を出す
+//   g2-test features <rule>      標準入力の各行 "結果 x,y x,y ..." (結果は黒から見て 1/0/-1) の静かな局面ごとに
+//                                評価の特徴量 (空点の線パターン数・Pattern4 数を手番側/相手側) を CSV で出す (tune_eval.py 用)
 // rule は Gomocup 番号 (0/1/4) か class<check> (例 class7)
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +14,8 @@
 #include <time.h>
 
 #include "../src/board.h"
+#include "../src/eval.h"
+#include "../src/search.h"
 
 static Rule parse_rule(const char *s) {
     if (!s) return rule_from_gomocup(4);
@@ -115,6 +120,86 @@ static int bench(Rule rule) {
     return 0;
 }
 
+// 固定深さの探索速度 (詰み探索は使わずに本探索だけを測る)
+static int speed(Rule rule, int depth) {
+    static Board b;
+    char line[8192];
+    long total_nodes = 0;
+    double total_ms = 0;
+    int npos = 0;
+    pattern_init(&rule);
+    search_set_param("vct_pct", 0);
+    while (fgets(line, sizeof line, stdin)) {
+        board_init(&b, 15, &rule);
+        char *s = line;
+        int x, y, k;
+        while (sscanf(s, " %d,%d%n", &x, &y, &k) == 2) { board_move(&b, to_pos(x, y)); s += k; }
+        search_new_game();
+        SearchLimits lim = {0};
+        lim.max_depth = depth;
+        SearchResult r;
+        double t0 = now_sec();
+        search_root(&b, &lim, &r);
+        double ms = (now_sec() - t0) * 1000;
+        printf("pos %2d: move %d,%d score %6d depth %d nodes %9ld time %7.1f ms (%s)\n", npos, pos_x(r.move), pos_y(r.move),
+               r.score, r.depth, r.nodes, ms, r.reason);
+        total_nodes += r.nodes;
+        total_ms += ms;
+        npos++;
+    }
+    printf("total: %d positions, nodes %ld, time %.1f ms, nps %.0f\n", npos, total_nodes, total_ms,
+           total_ms > 0 ? total_nodes / total_ms * 1000 : 0);
+    return 0;
+}
+
+static void cell_features(const Board *b, int color, int *f) {
+    // f[0..P_COUNT-1]: 線パターンの数、f[P_COUNT..]: Pattern4 の数 (評価と同じ補正)
+    memset(f, 0, sizeof(int) * (P_COUNT + P4_COUNT));
+    for (int y = 0; y < b->size; y++)
+        for (int x = 0; x < b->size; x++) {
+            int q = to_pos(x, y);
+            if (b->cell[q] != EMPTY) continue;
+            int p4 = eval_cell_class(&b->rule, color, b->pat[color][q]);
+            if (p4 < 0) continue;
+            f[P_COUNT + p4]++;
+            for (int d = 0; d < 4; d++) f[b->pat[color][q][d]]++;
+        }
+}
+
+static int features(Rule rule) {
+    static Board b;
+    char line[8192];
+    int game = 0;
+    pattern_init(&rule);
+    while (fgets(line, sizeof line, stdin)) {
+        int moves[MAX_MOVES], n = 0, result, off;
+        if (sscanf(line, "%d%n", &result, &off) != 1) continue;
+        char *s = line + off;
+        int x, y, k;
+        while (n < MAX_MOVES && sscanf(s, " %d,%d%n", &x, &y, &k) == 2) { moves[n++] = to_pos(x, y); s += k; }
+        board_init(&b, 15, &rule);
+        for (int i = 0; i < n; i++) {
+            if (i >= 8 && i < n - 2) {
+                int me = board_side(&b), op = opp_color(me);
+                int quiet = !b.p4cnt[me][P4_FIVE] && !b.p4cnt[op][P4_FIVE] && !b.p4cnt[me][P4_FLEX4] && !b.p4cnt[op][P4_FLEX4];
+                if (quiet) {
+                    int f[2][P_COUNT + P4_COUNT];
+                    cell_features(&b, me, f[0]);
+                    cell_features(&b, op, f[1]);
+                    int rs = me == BLACK ? result : -result;
+                    printf("%d,%d,%d,%d", game, i, me, rs);
+                    for (int c = 0; c < 2; c++)
+                        for (int j = 0; j < P_COUNT + P4_COUNT; j++) printf(",%d", f[c][j]);
+                    printf("\n");
+                }
+            }
+            board_move(&b, moves[i]);
+        }
+        game++;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     board_global_init();
     srand(12345);
@@ -126,6 +211,8 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "selftest")) return selftest(rule);
     if (!strcmp(argv[1], "forbid")) return forbid(rule);
     if (!strcmp(argv[1], "bench")) return bench(rule);
+    if (!strcmp(argv[1], "features")) return features(rule);
+    if (!strcmp(argv[1], "speed")) return speed(rule, argc > 3 ? atoi(argv[3]) : 8);
     fprintf(stderr, "unknown command\n");
     return 2;
 }

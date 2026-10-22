@@ -466,15 +466,14 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     int n = gen_moves(c, list, me, op, op_threat, e ? e->move : -1, 0, 0);
     RootMove root[MAX_MOVES];
     int nr = 0;
-    for (int i = 0; i < n; i++) {
-        int p = list[i].pos, ok = ndefs <= 0;
-        for (int k = 0; k < ndefs && !ok; k++) ok = defs[k] == p;
-        if (ok && legal(b, me, p)) root[nr++] = (RootMove){p, 0};
-    }
-    if (nr == 0 && ndefs > 0) {
-        // 相手の VCF を崩す手が候補の外にある (遠い点など): それを使う
-        for (int k = 0; k < ndefs; k++)
-            if (legal(b, me, defs[k])) root[nr++] = (RootMove){defs[k], 0};
+    // 相手の VCF への受け (vcf_defenses) は先に調べる。受けの検証は打ち切りで漏れることがあるので候補は絞らない
+    for (int pass = 0; pass < 2; pass++) {
+        for (int i = 0; i < n; i++) {
+            int p = list[i].pos, isdef = 0;
+            for (int k = 0; k < ndefs && !isdef; k++) isdef = defs[k] == p;
+            if (isdef == (pass == 0) && legal(b, me, p)) root[nr++] = (RootMove){p, 0};
+        }
+        if (ndefs <= 0) break;
     }
     if (nr == 0) {
         // 防ぎ手がない (相手の活三を止められない) か全部禁じ手: 何でもよいので合法手

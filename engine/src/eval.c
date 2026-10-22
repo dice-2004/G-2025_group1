@@ -11,21 +11,26 @@ EvalParams g_eval_params = {
     .tempo = 20,
 };
 
-static int cell_value(const Rule *rule, int color, const uint8_t pats[4]) {
-    const EvalParams *w = &g_eval_params;
+int eval_cell_class(const Rule *rule, int color, const uint8_t pats[4]) {
     int p4 = combine_pattern4(pats);
     if (color == BLACK && rule_has_forbidden(rule) && p4 != P4_FIVE) {
-        int fours = 0, f3 = 0, ol = 0;
+        int fours = 0, ol = 0;
         for (int d = 0; d < 4; d++) {
             fours += (pats[d] == P_B4 || pats[d] == P_F4) + 2 * (pats[d] == P_D4);
-            f3 += pats[d] == P_F3;
             ol += pats[d] == P_OL;
         }
         // 黒の禁じ手 (長連・四四) の点は打てないので価値なし。三三は再帰判定しないと
-        // 本物か分からないが、多くは禁じ手なので低く見る
-        if ((rule->forbid_overline && ol) || (rule->forbid_44 && fours >= 2)) return 0;
+        // 本物か分からないが、多くは禁じ手なので活三 1 つと同じに見る
+        if ((rule->forbid_overline && ol) || (rule->forbid_44 && fours >= 2)) return -1;
         if (rule->forbid_33 && p4 == P4_FLEX3_2X) p4 = P4_FLEX3;
     }
+    return p4;
+}
+
+static int cell_value(const Rule *rule, int color, const uint8_t pats[4]) {
+    const EvalParams *w = &g_eval_params;
+    int p4 = eval_cell_class(rule, color, pats);
+    if (p4 < 0) return 0;
     int v = w->combo[p4];
     for (int d = 0; d < 4; d++) v += w->line[pats[d]];
     return v > 32767 ? 32767 : v;

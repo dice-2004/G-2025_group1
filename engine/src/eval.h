@@ -20,6 +20,9 @@ typedef struct {
 
 extern EvalParams g_eval_params;
 
-void eval_init(const Rule *rule);   // pattern_init から呼ばれる。g_eval_params から表を作る
+void eval_init(const Rule *rule);
+
+// 点数の計算に使う Pattern4 (黒の禁じ手の補正込み)。-1 = 価値なし (黒の四四・長連の点)
+int eval_cell_class(const Rule *rule, int color, const uint8_t pats[4]);   // pattern_init から呼ばれる。g_eval_params から表を作る
 
 #endif
