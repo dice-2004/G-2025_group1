@@ -163,7 +163,8 @@ static struct {
     int lmr_moves;      // 何手目から深さを削るか
     int cand_min;       // ルート以外で、点 (攻め+守り) がこれ未満の戦術的でない手は 2 手目以降読まない
     int ext_three;      // 1 = 活三 (相手に受けを強いる手) は深さを減らさない (延長)。延長はルートの深さの 2 倍まで
-} sp = {0, P4_BLOCK4_PLUS, 40, 0, 10, 1, 100, 3, 0, 0};
+    int vctdef_pct;     // 相手の VCT への受け (vct_defenses) に使う時間 (上限時間の %)。0 = 使わない
+} sp = {0, P4_BLOCK4_PLUS, 40, 0, 10, 1, 100, 3, 0, 1, 0};
 
 int search_soft_pct(void) { return sp.soft_pct; }
 
@@ -178,6 +179,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "lmr_moves")) sp.lmr_moves = (int)v;
     else if (!strcmp(name, "cand_min")) sp.cand_min = (int)v;
     else if (!strcmp(name, "ext_three")) sp.ext_three = (int)v;
+    else if (!strcmp(name, "vctdef_pct")) sp.vctdef_pct = (int)v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strncmp(name, "threat", 6) && strlen(name) == 9) {
@@ -512,6 +514,11 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         res->score = SCORE_WIN - 20;
         res->reason = "vct";
         return;
+    }
+    if (ndefs < 0 && sp.vctdef_pct > 0) {
+        // 相手に VCT があれば、それを崩し得る手 (返されなかった手は負けと証明済み) に絞る
+        ndefs = vct_defenses(b, sp.vct_depth, hard * sp.vctdef_pct * 6, defs);
+        if (lim->verbose && ndefs >= 0) fprintf(stderr, "opponent has VCT: %d defenses\n", ndefs);
     }
     if (lim->verbose && ndefs >= 0) fprintf(stderr, "opponent has VCF: %d defenses\n", ndefs);
 
