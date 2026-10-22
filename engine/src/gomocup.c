@@ -33,14 +33,19 @@ static void new_game(void) {
     search_new_game();
 }
 
-static void reply_move(void) {
+// ルールや評価の表が変わっていたら表と盤を作り直す。
+// INFO を受けた時点で呼び、持ち時間の中 (TURN の後) で表を作らないようにする
+static void sync_tables(void) {
     if (ensure_tables() || board.rule.gomocup_rule != rule_code) {
-        // ルールや評価の表が変わった: 盤を作り直す
         int moves[MAX_MOVES], n = board.nmoves;
         memcpy(moves, board.moves, sizeof(int) * n);
         board_init(&board, size, &rule);
         for (int i = 0; i < n; i++) board_move(&board, moves[i]);
     }
+}
+
+static void reply_move(void) {
+    sync_tables();
     int p = think_move(&board, &limits);
     if (p < 0) {
         printf("ERROR no move\n");
@@ -89,12 +94,14 @@ int main(void) {
                     // 置換表は max_memory の 1/4 まで (上限 256MB)
                     long mb = val / 4 / (1 << 20);
                     search_set_tt_size((int)(mb < 4 ? 4 : mb > 256 ? 256 : mb));
+                    search_new_game();   // ここで確保して、最初の手で時間を使わない
                 }
                 else if (!strcasecmp(key, "max_depth")) limits.max_depth = (int)val;
                 else if (!strcasecmp(key, "max_node")) limits.max_nodes = val;
                 else if (!strcasecmp(key, "verbose")) limits.verbose = (int)val;
                 else if (!strncasecmp(key, "p_", 2) && search_set_param(key + 2, val)) tables_rule = -1;  // 評価の表を作り直す
                 else if (!strcasecmp(key, "rule")) rule_code = (int)val & 5;  // 1=ちょうど五, 4=連珠
+                if (board.size) sync_tables();
             }
         } else if (!strcasecmp(line, "BEGIN")) {
             reply_move();
