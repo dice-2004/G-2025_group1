@@ -12,6 +12,26 @@
 | legacy の強さ | 連珠・1秒/手で Elo +883 (random=0)。1手読み貪欲ボットに 29.5/80、Rapfi 深さ2制限に 0/80 |
 | 次の目標 | VCF/VCT ソルバと PVS 探索で rapfi-d2 → rapfi-n1k に勝ち越す |
 
+## 2026-10-22 Phase 1-2: VCF / VCT 詰み探索
+
+**やったこと** (詳細は [engine/README.md](../engine/README.md)、測定は [benchmarks/2026-10-22_tss.md](./benchmarks/2026-10-22_tss.md))
+- `engine/src/vcf.c/.h`: VCF (四の連続) と VCT (四・活三の連続) の詰み探索
+  - 連珠の禁じ手を攻守両側で考慮 (黒は禁じ手で四・三を作れない / 白の四の止め点が黒の禁じ手なら白の勝ち)
+  - VCT は活三の受け (三の線上の点と逆四) を全部試す健全な証明。受け側に VCF があれば先に打ち切る
+  - 置換表 (100 万エントリ)、VCT は深さ 1 からの反復深化
+  - API: `vcf_solve` / `vct_solve` (手番側)、`tss_solve` (パスした場合の相手の詰みも)、`vcf_defenses` (相手の VCF を崩す手)
+- テスト: 詰み問題集 `engine/tests/puzzles/tactics.txt` 99 問 (`make -C engine test` で実行)、
+  Python 全探索・別実装レフェリー・Rapfi の詰み評価による照合ツール
+
+**結果**
+- VCF: Python 全探索と 3734 件で完全一致、手順 1135 本すべて正しい。1 局面 0.07ms
+- VCT: Rapfi が詰みと評価した 581 局面のうち 88% (VCF だけなら 27%) を証明。誤った勝ち 0
+- VCT は裾が重い (平均 97ms、100 万ノードで打ち切り 17/1507 局面)
+
+**次にやること**
+- 探索スレッドの PVS に組み込み (根と静止探索での VCF、相手 VCF の受けの絞り込み) → 対局で効果測定
+- VCT の高速化 (着手・戻しのパターン更新が時間の 7 割。探索スレッドの表引き化に乗る) と長い詰み (M21+) の再現率改善
+
 ## 2026-10-22 Phase 1-1: 新エンジン G2 の土台
 
 **やったこと** (詳細は [engine/README.md](../engine/README.md))
