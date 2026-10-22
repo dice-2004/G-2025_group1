@@ -11,7 +11,8 @@
 
 #define TT_BITS 20
 #define TT_SIZE (1u << TT_BITS)
-#define VCF_INNER_DEPTH 24      // VCT の各局面で先に試す VCF の深さ
+int g_vcf_inner = 24;     // VCT の各局面で先に試す VCF の深さ
+#define VCF_INNER_DEPTH g_vcf_inner
 #define MAX_CAND 128
 
 enum { TT_NONE = 0, TT_WIN = 1, TT_FAIL = 2 };
@@ -188,11 +189,17 @@ static int attacker_node(int mode, int depth) {
     }
 
     // 達四 (止められない四) が打てれば勝ち
+    // 盤の集計 (形ごとの空点の数) で、探す形の点を全部見つけたら走査をやめる
     int cand[MAX_CAND], score[MAX_CAND], nc = 0;
-    for (int i = 0; i < C.npos; i++) {
+    const int16_t *cnt = b->p4cnt[C.att];
+    int want = cnt[P4_BLOCK4] + cnt[P4_BLOCK4_PLUS] + cnt[P4_BLOCK4_FLEX3] + cnt[P4_FLEX4];
+    if (mode == TSS_VCT) want += cnt[P4_FLEX3] + cnt[P4_FLEX3_PLUS] + cnt[P4_FLEX3_2X];
+    for (int i = 0; i < C.npos && want > 0; i++) {
         int p = C.pos[i];
         if (b->cell[p] != EMPTY) continue;
         int p4 = b->pat4[C.att][p];
+        if (p4 < P4_FLEX3 || p4 == P4_FIVE || (mode == TSS_VCF && p4 < P4_BLOCK4)) continue;
+        want--;
         if (p4 == P4_FLEX4) {
             if (legal(C.att, p)) return win_at(key, depth, p);
             continue;
@@ -201,6 +208,7 @@ static int attacker_node(int mode, int depth) {
             if (nc < MAX_CAND) {
                 cand[nc] = p;
                 score[nc] = p4 * 32 + near_bonus(p) + (p4 >= P4_BLOCK4 ? 512 : 0);
+
                 nc++;
             }
         }

@@ -159,11 +159,10 @@ static int cmd_puzzles(const char *file, long nodes) {
     return pass == total ? 0 : 1;
 }
 
-extern int g_zone_k;
-
 int main(int argc, char **argv) {
     board_global_init();
     if (getenv("TSS_ZONE")) g_zone_k = atoi(getenv("TSS_ZONE"));
+    if (getenv("TSS_INNER")) g_vcf_inner = atoi(getenv("TSS_INNER"));
     if (argc < 3) {
         fprintf(stderr, "usage: g2-tss solve|opp <rule> <vcf|vct> [depth] [nodes] | defend <rule> [nodes] | puzzles <file> [nodes]\n");
         return 2;

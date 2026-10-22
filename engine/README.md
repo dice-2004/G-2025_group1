@@ -31,6 +31,7 @@ python3 bench/match.py g2 legacy --rule renju    # 対局 (bench/README.md)
 | `tests/vcf_brute.py` | 遅いが単純な VCF 全探索 (C 版との照合用) |
 | `tests/check_defenses.py` | `vcf_defenses` が相手の VCF を消す手を全部返すかを総当たりで確認 |
 | `tests/rapfi_label.py` / `tss_compare.py` | Rapfi の詰み評価を正解ラベルにして VCT の再現率・矛盾を数える |
+| `tests/tss_bench.sh` | VCF/VCT の速度と再現率 (連珠の終盤 1507 局面 `puzzles/renju_endgames.*`、正解は Rapfi の詰み評価) |
 
 ## パターンの定義
 

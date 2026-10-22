@@ -37,6 +37,11 @@ int tss_solve(Board *b, int attacker, int mode, int max_depth, long max_nodes, T
 // 相手に VCF がなければ -1。moves は MAX_MOVES 個分の領域
 int vcf_defenses(Board *b, long max_nodes, int *moves);
 
+// 調整用: VCT の三を探す範囲 (探索中の攻め側の直近何手の周りか、0 = 盤全体。既定 2) と、
+// VCT の各局面で先に試す VCF の深さ (既定 24)
+extern int g_zone_k;
+extern int g_vcf_inner;
+
 // 置換表を空にする (ルールや盤サイズを変えたとき。pattern_init の後に呼ぶ)
 void tss_clear(void);
 
