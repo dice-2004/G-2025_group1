@@ -16,6 +16,8 @@
 
 enum { TT_NONE = 0, TT_WIN = 1, TT_FAIL = 2 };
 
+int g_zone_k = 2;   // VCT の三を探す範囲: 探索中の攻め側の直近何手の周りか (0 = 盤全体)
+
 typedef struct {
     uint64_t key;
     int16_t depth;      // TT_FAIL: この深さまでは勝ちなし
@@ -165,6 +167,26 @@ static int attacker_node(int mode, int depth) {
         return 0;
     }
 
+    // VCT の三は、探索中に打った攻め側の直近の手の近く (4 方向 ±4 と周囲 2 マス) だけ
+    static int zone[NCELL], zgen = 0;
+    int zoned = mode == TSS_VCT && g_zone_k > 0 && b->nmoves - C.root_nmoves >= 2;
+    if (zoned) {
+        zgen++;
+        for (int k = 0, i = b->nmoves - 2; k < g_zone_k && i >= C.root_nmoves; k++, i -= 2) {
+            int m = b->moves[i];
+            for (int d = 0; d < 4; d++)
+                for (int j = -4; j <= 4; j++) {
+                    int q = m + j * DIR_OFFSET[d];
+                    if (q >= 0 && q < NCELL) zone[q] = zgen;
+                }
+            for (int dy = -2; dy <= 2; dy++)
+                for (int dx = -2; dx <= 2; dx++) {
+                    int q = m + dy * STRIDE + dx;
+                    if (q >= 0 && q < NCELL) zone[q] = zgen;
+                }
+        }
+    }
+
     // 達四 (止められない四) が打てれば勝ち
     int cand[MAX_CAND], score[MAX_CAND], nc = 0;
     for (int i = 0; i < C.npos; i++) {
@@ -175,7 +197,7 @@ static int attacker_node(int mode, int depth) {
             if (legal(C.att, p)) return win_at(key, depth, p);
             continue;
         }
-        if (p4 >= P4_BLOCK4 || (mode == TSS_VCT && is_three4(p4))) {
+        if (p4 >= P4_BLOCK4 || (mode == TSS_VCT && is_three4(p4) && (!zoned || zone[p] == zgen))) {
             if (nc < MAX_CAND) {
                 cand[nc] = p;
                 score[nc] = p4 * 32 + near_bonus(p) + (p4 >= P4_BLOCK4 ? 512 : 0);
