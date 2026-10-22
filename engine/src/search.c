@@ -152,7 +152,7 @@ static struct {
     int vct_pct;    // ルートの VCT に使う時間 (上限時間の %)。0 = 使わない
     int vct_depth;  // ルートの VCT の深さ (攻めの手数)
     int def_restrict;   // 1 = 相手に VCF があればルートの候補を vcf_defenses の手 (受けの上位集合) に絞る
-} sp = {0, P4_BLOCK4_PLUS, 40, 15, 10, 1};
+} sp = {0, P4_BLOCK4_PLUS, 40, 0, 10, 1};
 
 int search_soft_pct(void) { return sp.soft_pct; }
 

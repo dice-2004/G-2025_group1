@@ -86,7 +86,7 @@ vm = np.array([g in val_games for g in gid])
 
 # K: 今の重みで損失が最小になる尺度
 best = None
-for K in [50, 100, 150, 200, 300, 400, 600, 800, 1200]:
+for K in [50, 100, 150, 200, 300, 400, 600, 800, 1200, 1600, 2400, 3200]:
     l, _ = loss_grad(theta0, fm[~vm], fo[~vm], y[~vm], K, 0)
     if best is None or l < best[0]:
         best = (l, K)
