@@ -120,7 +120,6 @@ static void sort_desc(int *mv, int *sc, int n) {
     }
 }
 
-static int is_three4(int p4) { return p4 >= P4_FLEX3 && p4 <= P4_FLEX3_2X; }
 
 static int attacker_node(int mode, int depth);
 static int defender_node(int mode, int depth);
@@ -194,17 +193,18 @@ static int attacker_node(int mode, int depth) {
     const int16_t *cnt = b->p4cnt[C.att];
     int want = cnt[P4_BLOCK4] + cnt[P4_BLOCK4_PLUS] + cnt[P4_BLOCK4_FLEX3] + cnt[P4_FLEX4];
     if (mode == TSS_VCT) want += cnt[P4_FLEX3] + cnt[P4_FLEX3_PLUS] + cnt[P4_FLEX3_2X];
+    int lowest = mode == TSS_VCF ? P4_BLOCK4 : P4_FLEX3;
     for (int i = 0; i < C.npos && want > 0; i++) {
         int p = C.pos[i];
         if (b->cell[p] != EMPTY) continue;
         int p4 = b->pat4[C.att][p];
-        if (p4 < P4_FLEX3 || p4 == P4_FIVE || (mode == TSS_VCF && p4 < P4_BLOCK4)) continue;
+        if (p4 < lowest || p4 == P4_FIVE) continue;
         want--;
         if (p4 == P4_FLEX4) {
             if (legal(C.att, p)) return win_at(key, depth, p);
             continue;
         }
-        if (p4 >= P4_BLOCK4 || (mode == TSS_VCT && is_three4(p4) && (!zoned || zone[p] == zgen))) {
+        if (p4 >= P4_BLOCK4 || (mode == TSS_VCT && (!zoned || zone[p] == zgen))) {
             if (nc < MAX_CAND) {
                 cand[nc] = p;
                 score[nc] = p4 * 32 + near_bonus(p) + (p4 >= P4_BLOCK4 ? 512 : 0);
@@ -547,6 +547,48 @@ int vcf_defenses(Board *b, long max_nodes, int *moves) {
         TssResult v;
         board_move_color(b, p, me);
         tss_solve(b, op, TSS_VCF, 30, sub, &v);
+        board_undo(b);
+        if (!v.win) moves[n++] = p;    // 打ち切り (不明) も候補に残す
+    }
+    return n;
+}
+
+int vct_defenses(Board *b, int max_depth, long max_nodes, int *moves) {
+    int me = board_side(b), op = opp_color(me);
+    int n = vcf_defenses(b, max_nodes / 4, moves);
+    if (n >= 0) return n;
+    TssResult r;
+    if (!tss_solve(b, op, TSS_VCT, max_depth, max_nodes / 4, &r)) return -1;
+    int restricted = rule_has_forbidden(&b->rule);
+
+    // 候補: 石の周り 2 マス以内の空点、自分か相手の二以上の線上の点 (離れていても逆四や相手の四の元になる)、相手の VCT の初手の 4 方向 ±5。
+    // 自分の四は無検証で含める
+    static uint8_t mark[NCELL];
+    int cand[MAX_MOVES], nc = 0;
+    for (int i = 0; i < C.npos; i++) {
+        int p = C.pos[i];
+        if (b->cell[p] != EMPTY) continue;
+        int take = b->near[p] > 0;
+        for (int d = 0; d < 4 && !take; d++)
+            take = b->pat[me][p][d] >= P_B2 || b->pat[op][p][d] >= P_B2;
+        if (take) { mark[p] = 1; cand[nc++] = p; }
+    }
+    for (int d = 0; d < 4 && r.move >= 0; d++)
+        for (int k = -5; k <= 5; k++) {
+            int q = r.move + k * DIR_OFFSET[d];
+            if (q >= 0 && q < NCELL && b->cell[q] == EMPTY && !mark[q]) { mark[q] = 1; cand[nc++] = q; }
+        }
+    long per = nc ? (max_nodes / 2) / nc : 0;
+    if (per < 1000) per = 1000;
+    n = 0;
+    for (int i = 0; i < nc; i++) {
+        int p = cand[i];
+        mark[p] = 0;
+        if (me == BLACK && restricted && board_is_forbidden(b, p)) continue;
+        if (b->pat4[me][p] >= P4_BLOCK4) { moves[n++] = p; continue; }
+        TssResult v;
+        board_move_color(b, p, me);
+        tss_solve(b, op, TSS_VCT, max_depth, per, &v);
         board_undo(b);
         if (!v.win) moves[n++] = p;    // 打ち切り (不明) も候補に残す
     }

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""vcf_defenses の取りこぼしを調べる (連珠)。
+"""vcf_defenses / vct_defenses の取りこぼしを調べる (連珠)。
 
-各局面で「相手 (手番でない側) に VCF がある」とき、手番側の合法手をすべて打ってみて
-相手の VCF が消える手を総当たりで求め、vcf_defenses がそれを全部返しているかを確かめる。
+各局面で「相手 (手番でない側) に VCF (--vct なら VCF か VCT) がある」とき、手番側の合法手をすべて
+打ってみて相手の詰みが消える手を総当たりで求め、関数がそれを全部返しているかを確かめる。
 
-  python3 engine/tests/check_defenses.py positions.txt
+  python3 engine/tests/check_defenses.py positions.txt [--vct] [--nodes N]
 """
+
+import argparse
 
 import os
 import subprocess
@@ -17,13 +19,18 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "bench"))
 from rules import renju_forbidden_reason  # noqa: E402
 from tss_verify import parse_moves  # noqa: E402
 
-TSS = os.path.join(HERE, "..", "build", "g2-tss")
+TSS = os.environ.get("G2_TSS", os.path.join(HERE, "..", "build", "g2-tss"))
 
 
 def main():
-    pos = [l.split("#")[0].strip() for l in open(sys.argv[1]) if l.split("#")[0].strip()]
-    d = subprocess.run([TSS, "defend", "renju", "200000"], input="\n".join(pos) + "\n",
-                       capture_output=True, text=True).stdout.splitlines()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("positions")
+    ap.add_argument("--vct", action="store_true")
+    ap.add_argument("--nodes", type=int, default=200000, help="総当たり側の 1 手あたりの上限")
+    args = ap.parse_args()
+    pos = [l.split("#")[0].strip() for l in open(args.positions) if l.split("#")[0].strip()]
+    cmd = [TSS, "vctdefend", "renju", "1000000"] if args.vct else [TSS, "defend", "renju", "200000"]
+    d = subprocess.run(cmd, input="\n".join(pos) + "\n", capture_output=True, text=True).stdout.splitlines()
     lines, meta = [], []
     for k, (p, r) in enumerate(zip(pos, d)):
         if r.startswith("none"):
@@ -40,11 +47,15 @@ def main():
                     continue
                 lines.append(p + " %d,%d" % (x, y))
                 meta.append((k, (x, y)))
-    out = subprocess.run([TSS, "solve", "renju", "vcf", "30", "200000"], input="\n".join(lines) + "\n",
+    mode = ["vct", "10"] if args.vct else ["vcf", "30"]
+    out = subprocess.run([TSS, "solve", "renju"] + mode + [str(args.nodes)], input="\n".join(lines) + "\n",
                          capture_output=True, text=True).stdout.splitlines()
     good = {}
+    aborted = 0
     for (k, m), r in zip(meta, out):
-        if not r.startswith("win"):
+        if "aborted" in r:
+            aborted += 1    # 総当たり側が打ち切り: 受けかどうか不明なので数えない
+        elif not r.startswith("win"):
             good.setdefault(k, set()).add(m)
     miss = checked = 0
     for k, (p, r) in enumerate(zip(pos, d)):
@@ -56,7 +67,7 @@ def main():
         if lost:
             miss += 1
             print("MISS line %d: %s | %s" % (k + 1, sorted(lost), p))
-    print("checked %d positions, %d with missed defenses" % (checked, miss))
+    print("checked %d positions, %d with missed defenses (brute-force aborted %d)" % (checked, miss, aborted))
     return 1 if miss else 0
 
 

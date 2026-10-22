@@ -37,6 +37,13 @@ int tss_solve(Board *b, int attacker, int mode, int max_depth, long max_nodes, T
 // 相手に VCF がなければ -1。moves は MAX_MOVES 個分の領域
 int vcf_defenses(Board *b, long max_nodes, int *moves);
 
+// 相手 (手番でない側) に VCF か VCT があるとき、それを崩し得る手番側の手を moves に入れて個数を返す。
+// 相手に VCF があれば vcf_defenses と同じ。VCT だけなら、石の周りの空点などを 1 手ずつ打って相手の VCT が
+// 消えるか (または打ち切りで不明か) を確かめた手と、自分の四 (無検証) を返す。返さなかった手は
+// 「打っても相手に VCT がある (= 負け)」と証明済み。どちらもなければ -1。
+// max_nodes の 1/4 で相手の詰みを探し、残りを候補の検証に等分する
+int vct_defenses(Board *b, int max_depth, long max_nodes, int *moves);
+
 // 調整用: VCT の三を探す範囲 (探索中の攻め側の直近何手の周りか、0 = 盤全体。既定 2) と、
 // VCT の各局面で先に試す VCF の深さ (既定 24)
 extern int g_zone_k;

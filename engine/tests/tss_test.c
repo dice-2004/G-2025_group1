@@ -7,6 +7,8 @@
 //       同様に、手番でない側 (パスしたら) の詰みを調べる
 //   g2-tss defend <rule> [nodes]
 //       相手の VCF を崩す手番側の手 (vcf_defenses) を出力
+//   g2-tss vctdefend <rule> [nodes]
+//       相手の VCF/VCT を崩す手番側の手 (vct_defenses) を出力
 //   g2-tss puzzles <file> [nodes]
 //       問題集を解いて正誤を数える。書式は tests/puzzles/tactics.txt の先頭
 // rule は Gomocup 番号 (0/1/4) か class<check>
@@ -74,19 +76,23 @@ static int cmd_solve(Rule rule, int mode, int depth, long nodes, int opp) {
     return 0;
 }
 
-static int cmd_defend(Rule rule, long nodes) {
+static int cmd_defend(Rule rule, long nodes, int vct) {
     static Board b;
     char line[8192];
+    double total = 0;
     while (fgets(line, sizeof line, stdin)) {
         board_init(&b, 15, &rule);
         if (load_moves(&b, line) < 0) { printf("error\n"); continue; }
         int mv[MAX_MOVES];
-        int n = vcf_defenses(&b, nodes, mv);
+        double t0 = now_sec();
+        int n = vct ? vct_defenses(&b, 10, nodes, mv) : vcf_defenses(&b, nodes, mv);
+        total += now_sec() - t0;
         if (n < 0) { printf("none\n"); continue; }
         printf("%d |", n);
         for (int i = 0; i < n; i++) printf(" %d,%d", pos_x(mv[i]), pos_y(mv[i]));
         printf("\n");
     }
+    fprintf(stderr, "time %.3f s\n", total);
     return 0;
 }
 
@@ -170,7 +176,8 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "puzzles")) return cmd_puzzles(argv[2], argc > 3 ? atol(argv[3]) : 2000000);
     Rule rule = parse_rule(argv[2]);
     pattern_init(&rule);
-    if (!strcmp(argv[1], "defend")) return cmd_defend(rule, argc > 3 ? atol(argv[3]) : 200000);
+    if (!strcmp(argv[1], "defend")) return cmd_defend(rule, argc > 3 ? atol(argv[3]) : 200000, 0);
+    if (!strcmp(argv[1], "vctdefend")) return cmd_defend(rule, argc > 3 ? atol(argv[3]) : 1000000, 1);
     if (argc < 4) return 2;
     int mode = !strcmp(argv[3], "vct") ? TSS_VCT : TSS_VCF;
     int depth = argc > 4 ? atoi(argv[4]) : (mode == TSS_VCF ? 30 : 10);
