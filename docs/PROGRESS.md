@@ -9,7 +9,7 @@
 |---|---|
 | フェーズ | Phase 2 (本格探索) 項目 1 完了、評価の調整中 |
 | 最強の自作エンジン | G2 v0.2 (engine/)。連珠・1秒/手で rapfi-n1k に 76勝4敗、rapfi-n10k に 49勝31敗 (Elo 約 +2500) |
-| サイト AI との実戦 | T1 サイト (trygomoku/gomokuonline/playgomokuonline) は全勝。playgonu Pro は白番で負け、Rapfi NNUE 5 秒 (Champion/gomocalc) は 1-16。[結果](./benchmarks/web/RESULTS.md) |
+| サイト AI との実戦 | T1 サイト (trygomoku/gomokuonline/playgomokuonline) は全勝。playgonu Pro は白番で負け、Rapfi NNUE 5 秒 (Champion/gomocalc) は 1-76 (gomocalc の持ち時間 100〜5000ms の全設定で敗退)。[結果](./benchmarks/web/RESULTS.md) |
 | legacy の強さ | 連珠・1秒/手で Elo +883 (random=0)。1手読み貪欲ボットに 29.5/80、Rapfi 深さ2制限に 0/80 |
 | 次の目標 | rapfi-n100k に勝ち越す (評価の再調整・探索の枝刈り・VCT の使い方) |
 
@@ -33,6 +33,9 @@
 - **G2 の白番が弱い**: 黒 7,7 への 2 手目が 5,5 (遠い斜め) で評価が -700〜-1700、17〜31 手で負ける局が多い
 - G2 は `tc=5000` でも平均 2.7〜3.0 秒しか使わない。Champion は平均 3.3 秒 (最大 5 秒)
 - アプリ (T2) はクラウドからは自動化不可 (KVM 無し、ストア入手不可)。代替案は [TARGETS.md](./TARGETS.md)
+
+**追記 (2026-10-27)** gomocalc 持ち時間ラダー: 100/250/500/1500/5000 ms の全てで G2 は 2 勝 60 敗 (自由 2-0-29、連珠 0-0-34)。
+最弱設定 (100 ms) にも届かないので、次は gomocalc の最大ノード数・最大深さを絞った弱い設定を物差しにする ([RESULTS](./benchmarks/web/RESULTS.md))。
 
 **次にやること**
 - 白番の序盤 (開局 DB / 近接応手の優先)、持ち時間の使い切り、連珠の受けを探索スレッドで改善
