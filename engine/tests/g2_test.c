@@ -205,6 +205,53 @@ static int features(Rule rule) {
     return 0;
 }
 
+// 4 方向のパターンを小さい順に並べた組の添字 (方向によらない「組み合わせ」の番号)
+static int sorted_pidx(const uint8_t pats[4]) {
+    uint8_t s[4] = {pats[0], pats[1], pats[2], pats[3]};
+    for (int i = 1; i < 4; i++)
+        for (int j = i; j > 0 && s[j - 1] > s[j]; j--) { uint8_t t = s[j]; s[j] = s[j - 1]; s[j - 1] = t; }
+    return pattern_index(s);
+}
+
+// 評価の表の調整用: 標準入力の各行 "手順<TAB>ラベル" の局面ごとに
+// "ラベル 手番 静か 評価 | 手番側の組:数 ... | 相手側の組:数 ..." を出す (組 = sorted_pidx、禁じ手の点は除く)
+static int msdump(Rule rule) {
+    static Board b;
+    static char line[16384];
+    g_eval_params.use_table = 0;   // 補正なしの評価に対して補正を合わせる
+    pattern_init(&rule);
+    while (fgets(line, sizeof line, stdin)) {
+        char *tab = strchr(line, '\t');
+        if (!tab) continue;
+        *tab = 0;
+        char label[64];
+        if (sscanf(tab + 1, "%63s", label) != 1) continue;
+        board_init(&b, 15, &rule);
+        char *s = line;
+        int x, y, k;
+        while (sscanf(s, " %d,%d%n", &x, &y, &k) == 2) { board_move(&b, to_pos(x, y)); s += k; }
+        int me = board_side(&b), op = opp_color(me);
+        int quiet = !b.p4cnt[me][P4_FIVE] && !b.p4cnt[op][P4_FIVE] && !b.p4cnt[me][P4_FLEX4] && !b.p4cnt[op][P4_FLEX4];
+        printf("%s %d %d %d", label, me, quiet, evaluate(&b));
+        for (int side = 0; side < 2; side++) {
+            int color = side == 0 ? me : op;
+            static int cnt[PIDX_COUNT];
+            memset(cnt, 0, sizeof cnt);
+            printf(" |");
+            for (int q = 0; q < NCELL; q++) {
+                if (b.cell[q] != EMPTY) continue;
+                if (eval_cell_class(&b.rule, color, b.pat[color][q]) < 0) continue;
+                int id = sorted_pidx(b.pat[color][q]);
+                if (id) cnt[id]++;
+            }
+            for (int i = 1; i < PIDX_COUNT; i++)
+                if (cnt[i]) printf(" %d:%d", i, cnt[i]);
+        }
+        printf("\n");
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     board_global_init();
     srand(12345);
@@ -217,6 +264,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "forbid")) return forbid(rule);
     if (!strcmp(argv[1], "bench")) return bench(rule);
     if (!strcmp(argv[1], "features")) return features(rule);
+    if (!strcmp(argv[1], "msdump")) return msdump(rule);
     if (!strcmp(argv[1], "speed")) return speed(rule, argc > 3 ? atoi(argv[3]) : 8, argc > 4 ? atoi(argv[4]) : 1);
     fprintf(stderr, "unknown command\n");
     return 2;

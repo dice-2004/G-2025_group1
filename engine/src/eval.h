@@ -31,7 +31,16 @@ typedef struct {
     int tempo;                  // 手番の加点
     // 脅威の加点 [手番が黒=0/白=1][手番側=0/相手側=1][脅威の種類 THREAT_*]。空点の形の数 (Board.p4cnt) から O(1) で出す
     int threat[2][2][THREAT_COUNT];
+    int use_table;      // 1 = eval_table.c の補正を使う (連珠のみ)
 } EvalParams;
+
+// 空点の値の補正 (tests/tune_table.py で作る eval_table.c)。pidx は 4 方向のパターンを小さい順に並べた組
+typedef struct {
+    int color, pidx, delta;
+} EvalTableEntry;
+extern const EvalTableEntry g_eval_table[];
+extern const int g_eval_table_count;
+extern const int g_eval_table_rule;
 
 extern EvalParams g_eval_params;
 

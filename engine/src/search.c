@@ -247,6 +247,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "leaf_vcf_depth")) sp.leaf_vcf_depth = (int)v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
+    else if (!strcmp(name, "table")) g_eval_params.use_table = (int)v;
     else if (!strncmp(name, "threat", 6) && strlen(name) == 9) {
         // threat<手番 0=黒 1=白><0=手番側 1=相手側><種類>  例: threat010
         int a = name[6] - '0', s2 = name[7] - '0', k = name[8] - '0';
