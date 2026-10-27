@@ -22,7 +22,7 @@ python3 bench/match.py g2 legacy --rule renju    # 対局 (bench/README.md)
 | `src/vcf.c/.h` | VCF (四の連続) / VCT (四と活三の連続) 詰み探索。連珠の禁じ手を両側で考慮。置換表つき。API は `vcf_solve` / `vct_solve` / `tss_solve` (パス時の相手の詰み) / `vcf_defenses` (相手の VCF の受け) / `vct_defenses` (相手の VCF・VCT の受け) |
 | `src/eval.c/.h` | 評価の表: 4 方向のパターンの組 (12^4) → 点数。盤面の評価は空点の点数の和 (Board.vsum を差分更新) の手番側 − 相手側。重みは `tests/tune_eval.py` で調整 |
 | `src/search.c/.h` | 本探索: 反復深化 + PVS + aspiration、置換表、強制手、killer/history、LMR、ルートで VCF/VCT と相手 VCF への受け。調整用の値は `INFO p_<名前> <値>` (`search_set_param`) |
-| `src/book.c/.h` | 開局ブックの表引き `book_probe` (15 路、序盤 8 手目まで)。8 対称を正規化したキーで `book_data.c` を二分探索。連珠 (禁じ手ありのルール) と自由 (standard も共用) の 2 表。空点でない手・黒の禁じ手・五/達四の点がある局面では使わない。`INFO book 0` で無効 |
+| `src/book.c/.h` | 開局ブックの表引き `book_probe` (15 路、黒 7 手目・白 12 手目まで)。8 対称を正規化したキーで `book_data.c` を二分探索。連珠 (禁じ手ありのルール) と自由 (standard も共用) の 2 表。空点でない手・黒の禁じ手・五/達四の点がある局面では使わない。`INFO book 0` で無効、`INFO book 2` で相手の活三への受けにも使う |
 | `src/book_data.c` | 開局ブックのデータ (自動生成: `book/build_book.py`) |
 | `book/gen_book.py` | 開局ブックの生成: Rapfi (古典評価・1 局面 10〜30 秒) で、G2 の手番は最善手、相手の手番は multi-PV 上位の手とサイト AI の実戦の手を全部たどる。解析は `book/analysis_<rule>.jsonl` に貯める (途中再開可) |
 | `book/build_book.py` / `book/check_book.py` / `tests/book_test.c` | `book_<rule>.txt` → `src/book_data.c`、C の表引きと Python の正規化の照合 (`make test` に含む) |
