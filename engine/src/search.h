@@ -30,7 +30,8 @@ typedef struct {
 } SearchResult;
 
 void search_set_tt_size(int mb);   // 置換表の大きさ (既定 32MB)
-void search_new_game(void);        // 置換表・履歴をクリア
+void search_new_game(void);        // 履歴をクリア (置換表は残す)
+void search_clear_tt(void);        // 置換表をクリア (ルール・評価の重みが変わったとき)
 void search_root(Board *b, const SearchLimits *lim, SearchResult *res);
 
 // 調整用の値を名前で設定 (qdepth, q_min_p4, soft_pct, opp_scale, tempo, line<N>, combo<N>)。

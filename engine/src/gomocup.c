@@ -25,6 +25,7 @@ static int ensure_tables(void) {
     rule = rule_from_gomocup(rule_code);
     pattern_init(&rule);
     tss_clear();
+    search_clear_tt();
     tables_rule = rule_code;
     return 1;
 }
@@ -46,9 +47,25 @@ static void sync_tables(void) {
     }
 }
 
+// INFO や START の処理 (表の作成・置換表の確保) にかかった時間。審判は INFO の直後に TURN/BOARD を
+// 送ってくるので、この時間は次の手の持ち時間から引く
+static double pending_ms = 0;
+
+static double wall_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000.0 + ts.tv_nsec * 1e-6;
+}
+
 static void reply_move(void) {
+    double t0 = wall_ms();
     sync_tables();
-    int p = think_move(&board, &limits);
+    ThinkLimits lim = limits;
+    double used = pending_ms + (wall_ms() - t0);
+    if (lim.time_ms > 0) lim.time_ms -= (int)used;
+    if (lim.time_ms < 0) lim.time_ms = 1;   // 0 は「指定なし」なので最小の 1ms にする
+    pending_ms = 0;
+    int p = think_move(&board, &lim);
     if (p < 0) {
         printf("ERROR no move\n");
     } else {
@@ -70,6 +87,7 @@ int main(void) {
 
     while (fgets(line, sizeof line, stdin)) {
         line[strcspn(line, "\r\n")] = 0;
+        double cmd_t0 = wall_ms();
         char *arg = line;
         while (*arg && *arg != ' ') arg++;
         if (*arg) *arg++ = 0;
@@ -93,10 +111,11 @@ int main(void) {
                 if (!strcasecmp(key, "timeout_turn")) limits.time_ms = (int)val;
                 else if (!strcasecmp(key, "time_left")) limits.time_left_ms = val > 1000000000 ? 1000000000 : (int)val;
                 else if (!strcasecmp(key, "max_memory") && val > 0) {
-                    // 置換表は max_memory の 1/4 まで (上限 256MB)
+                    // 置換表は max_memory の 1/4 まで (上限 64MB。大きいとページの割り当てに時間がかかり、
+                    // 1 手 1 秒程度の探索では 32〜64MB で足りる)
                     long mb = val / 4 / (1 << 20);
-                    search_set_tt_size((int)(mb < 4 ? 4 : mb > 256 ? 256 : mb));
-                    search_new_game();   // ここで確保して、最初の手で時間を使わない
+                    search_set_tt_size((int)(mb < 4 ? 4 : mb > 64 ? 64 : mb));
+                    search_new_game();
                 }
                 else if (!strcasecmp(key, "max_depth")) limits.max_depth = (int)val;
                 else if (!strcasecmp(key, "max_node")) limits.max_nodes = val;
@@ -106,6 +125,7 @@ int main(void) {
                 if (eval_dirty && tables_rule >= 0) {
                     // 評価の重みが変わった: 評価の表だけ作り直し (パターン表はそのまま)、盤の集計を作り直す
                     eval_init(&rule);
+                    search_clear_tt();
                     board.rule.gomocup_rule = -1;
                 }
                 eval_dirty = 0;
@@ -160,6 +180,8 @@ int main(void) {
         } else if (line[0]) {
             printf("UNKNOWN %s\n", line);
         }
+        if (!strcasecmp(line, "INFO") || !strcasecmp(line, "START") || !strcasecmp(line, "RESTART"))
+            pending_ms += wall_ms() - cmd_t0;
         fflush(stdout);
     }
     return 0;

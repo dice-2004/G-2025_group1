@@ -34,6 +34,7 @@ static TTEntry *tt;
 static size_t tt_mask;      // バケット数 - 1 (1 バケット = 2 エントリ)
 static uint8_t tt_gen;
 static int tt_mb = 32;
+static int tt_used;         // 確保してから探索に使ったか
 
 void search_set_tt_size(int mb) {
     if (mb < 1) mb = 1;
@@ -41,6 +42,7 @@ void search_set_tt_size(int mb) {
     tt_mb = mb;
     free(tt);
     tt = NULL;
+    tt_used = 0;
 }
 
 static void tt_alloc(void) {
@@ -94,10 +96,16 @@ static void tt_store(uint64_t key, int value, int move, int depth, int flag, int
 
 static int history[3][NCELL];
 
+// 新しい対局: 置換表は局面のハッシュで引くので前の対局の内容も正しいまま使える (消さない)。
+// 全体を消すと 128MB の確保直後は数百 ms かかる (ページの割り当て) ので、ルールや評価が変わった時だけ消す
 void search_new_game(void) {
     tt_alloc();
-    memset(tt, 0, (tt_mask + 1) * 2 * sizeof(TTEntry));
     memset(history, 0, sizeof history);
+}
+
+void search_clear_tt(void) {
+    if (tt && tt_used) memset(tt, 0, (tt_mask + 1) * 2 * sizeof(TTEntry));   // 確保したばかりなら 0 のまま
+    tt_used = 0;
     tt_gen = 0;
 }
 
@@ -164,7 +172,8 @@ static struct {
     int cand_min;       // ルート以外で、点 (攻め+守り) がこれ未満の戦術的でない手は 2 手目以降読まない
     int ext_three;      // 1 = 活三 (相手に受けを強いる手) は深さを減らさない (延長)。延長はルートの深さの 2 倍まで
     int vctdef_pct;     // 相手の VCT への受け (vct_defenses) に使う時間 (上限時間の %)。0 = 使わない
-} sp = {0, P4_BLOCK4_PLUS, 40, 0, 10, 1, 100, 3, 0, 1, 0};
+    int unstable_pct;   // 直前の反復で最善手が変わったら、次の反復を始めない目安を何 % に延ばすか
+} sp = {0, P4_BLOCK4_PLUS, 40, 0, 10, 1, 100, 3, 0, 1, 0, 100};
 
 int search_soft_pct(void) { return sp.soft_pct; }
 
@@ -180,6 +189,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "cand_min")) sp.cand_min = (int)v;
     else if (!strcmp(name, "ext_three")) sp.ext_three = (int)v;
     else if (!strcmp(name, "vctdef_pct")) sp.vctdef_pct = (int)v;
+    else if (!strcmp(name, "unstable_pct")) sp.unstable_pct = (int)v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strncmp(name, "threat", 6) && strlen(name) == 9) {
@@ -460,6 +470,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     static Ctx ctx;
     Ctx *c = &ctx;
     tt_alloc();
+    tt_used = 1;
     tt_gen++;
     memset(c, 0, sizeof *c);
     c->b = b;
@@ -568,7 +579,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     if (nr == 1) { res->reason = "only-move"; return; }
 
     int max_depth = lim->max_depth > 0 ? lim->max_depth : MAX_PLY - 10;
-    int prev_score = 0;
+    int prev_score = 0, prev_best = -1, unstable = 0;
     for (int depth = 1; depth <= max_depth; depth++) {
         c->root_depth = depth;
         // aspiration window: 前の反復の点の周りの狭い窓で調べ、外れたら広げてやり直す
@@ -619,7 +630,6 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
             if (best >= hi && hi < SCORE_INF) { hi = SCORE_INF; continue; }
             break;
         }
-        (void)bestmove;
         if (c->stop && searched > 0 && best < -SCORE_WIN_MIN && searched < nr) {
             // 打ち切り時に、調べ終えた手が全部負けと分かっただけなら、まだ調べていない次の候補を打つ
             res->move = root[searched].pos;
@@ -627,6 +637,8 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         }
         if (c->stop && searched == 0) break;
         if (!c->stop) {
+            unstable = depth > 1 && bestmove != prev_best;
+            prev_best = bestmove;
             res->depth = depth;
             prev_score = best;
             log_info(c, depth, best, bestpv, bestpvlen, lim->verbose);
@@ -643,7 +655,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
             // 詰みが見えた: 少し深く確かめたら終わる
             if (depth >= 2 + (SCORE_WIN - (best > 0 ? best : -best))) break;
         }
-        if (lim->soft_ms > 0 && now_ms() - c->t0 >= lim->soft_ms) break;
+        if (lim->soft_ms > 0 && now_ms() - c->t0 >= (double)lim->soft_ms * (unstable ? sp.unstable_pct : 100) / 100) break;
     }
     (void)prev_score;
     res->nodes = c->nodes;
