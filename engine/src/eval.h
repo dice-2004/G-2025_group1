@@ -11,13 +11,16 @@
 extern int16_t g_cell_value[3][PIDX_COUNT];
 
 // 盤面の脅威の種類 (その色が次の 1 手で作れる形)
-enum { THREAT_B4F3 = 0, THREAT_F3X2, THREAT_F3, THREAT_B4PLUS, THREAT_B4X2, THREAT_COUNT };
+enum { THREAT_B4F3 = 0, THREAT_F3X2, THREAT_F3, THREAT_B4PLUS, THREAT_B4X2, THREAT_B3PLUS, THREAT_F2X2, THREAT_F3MANY, THREAT_COUNT };
 
 // 空点の Pattern4 の数 → 脅威のビット集合 (THREAT_* の位置)
 static inline int eval_threat_bits(const int16_t *cnt) {
+    int f3 = cnt[P4_FLEX3] + cnt[P4_FLEX3_PLUS];
     return (cnt[P4_BLOCK4_FLEX3] > 0) << THREAT_B4F3 | (cnt[P4_FLEX3_2X] > 0) << THREAT_F3X2 |
-           (cnt[P4_FLEX3] + cnt[P4_FLEX3_PLUS] > 0) << THREAT_F3 | (cnt[P4_BLOCK4_PLUS] > 0) << THREAT_B4PLUS |
-           (cnt[P4_BLOCK4] + cnt[P4_BLOCK4_PLUS] + cnt[P4_BLOCK4_FLEX3] >= 2) << THREAT_B4X2;
+           (f3 > 0) << THREAT_F3 | (cnt[P4_BLOCK4_PLUS] > 0) << THREAT_B4PLUS |
+           (cnt[P4_BLOCK4] + cnt[P4_BLOCK4_PLUS] + cnt[P4_BLOCK4_FLEX3] >= 2) << THREAT_B4X2 |
+           (cnt[P4_BLOCK3_PLUS] > 0) << THREAT_B3PLUS | (cnt[P4_FLEX2_2X] > 0) << THREAT_F2X2 |
+           (f3 >= 4) << THREAT_F3MANY;   // 活三を作れる点が多い (2 本以上の二)
 }
 
 // 調整できる重み (eval.c の既定値。tune 用に書き換え可能)

@@ -19,7 +19,7 @@ NP, NP4 = 12, 13
 RULE = {"renju": 4, "freestyle": 0, "standard": 1}
 LINE_NAMES = ["DEAD", "OL", "B1", "F1", "B2", "F2", "B3", "F3", "B4", "F4", "D4", "F5"]
 P4_NAMES = ["NONE", "F2", "B3", "F2x2", "B3+", "F3", "F3+", "F3x2", "B4", "B4+", "B4F3", "F4", "FIVE"]
-THREAT_NAMES = ["B4F3", "F3x2", "F3", "B4+", "B4x2"]
+THREAT_NAMES = ["B4F3", "F3x2", "F3", "B4+", "B4x2", "B3+", "F2x2", "F3many"]
 NTK = len(THREAT_NAMES)
 NT = 2 * 2 * NTK          # threat[手番の色][手番側/相手側][種類]
 NW = NP + NP4             # 空点の和に掛かる重み
@@ -36,7 +36,7 @@ def current_params():
     thr = [0] * NT
     if ".threat = {" in src:
         i = src.index(".threat = {")
-        body = src[i:src.index("},\n", i)]
+        body = src[i:src.index("}}},", i) + 3]
         thr = [int(v) for v in body.replace("{", " ").replace("}", " ").replace(".threat =", "").replace(",", " ").split()]
     return np.array(arr("line") + arr("combo") + thr, dtype=float), val("opp_scale") / 64.0, float(val("tempo"))
 
@@ -81,16 +81,19 @@ def rapfi_targets(gid, ply, movestr, n, nodes, cache):
             labels[k] = v
     todo = [p for p in pos if p not in labels]
     if todo:
+        # 1 局面ずつキャッシュに追記する (途中で止まっても続きから再開できる)
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
             f.write("\n".join(todo) + "\n")
-        out = subprocess.run([sys.executable, os.path.join(HERE, "rapfi_label.py"), "--nodes", str(nodes), f.name],
-                             capture_output=True, text=True, check=True).stdout.splitlines()
-        for p, r in zip(todo, out):
-            labels[p] = r.split()[0]
-        if cache:
-            with open(cache, "w") as f:
-                for k, v in labels.items():
-                    f.write("%s\t%s\n" % (k, v))
+        proc = subprocess.Popen([sys.executable, os.path.join(HERE, "rapfi_label.py"), "--nodes", str(nodes), f.name],
+                                stdout=subprocess.PIPE, text=True)
+        with open(cache, "a") as out:
+            for k, (p, r) in enumerate(zip(todo, proc.stdout)):
+                labels[p] = r.split()[0] if r.split() else "None"
+                out.write("%s\t%s\n" % (p, labels[p]))
+                out.flush()
+                if (k + 1) % 500 == 0:
+                    print("labeled %d / %d" % (k + 1, len(todo)), flush=True)
+        proc.wait()
     keep, target = [], []
     for i, p in zip(idx, pos):
         ev = labels.get(p)
