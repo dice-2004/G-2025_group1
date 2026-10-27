@@ -165,10 +165,13 @@ class Cache:
                 f.write(json.dumps(rec) + "\n")
 
 
-def site_lines(rule):
-    """サイト AI との実戦の棋譜: [(相手の色 1/2, 着手列)]"""
+def site_lines(rule, extra=()):
+    """サイト AI との実戦の棋譜: [(相手の色 1/2, 着手列)]。extra は追加の棋譜ファイル (glob)"""
     out = []
-    for f in glob.glob(os.path.join(REPO, "docs/benchmarks/web/games/*.jsonl")):
+    files = glob.glob(os.path.join(REPO, "docs/benchmarks/web/games/*.jsonl"))
+    for pat in extra:
+        files += glob.glob(pat)
+    for f in sorted(set(files)):
         for line in open(f):
             try:
                 g = json.loads(line)
@@ -194,6 +197,7 @@ def main():
     ap.add_argument("--ms", default="30000,30000,30000,20000,15000,15000,10000,10000",
                     help="解析の持ち時間 (石数ごと, ms)")
     ap.add_argument("--memory", type=int, default=512, help="Rapfi 1 プロセスの置換表 MB")
+    ap.add_argument("--games", nargs="*", default=[], help="相手の手を拾う追加の棋譜 (bench/web/play.py の jsonl)")
     ap.add_argument("--out-dir", default=HERE, help="解析キャッシュとブックの出力先")
     ap.add_argument("--dry", action="store_true", help="解析せず、キャッシュにある分だけで木を数える")
     args = ap.parse_args()
@@ -201,7 +205,7 @@ def main():
     opp_k = [int(v) for v in args.opp_k.split(",")]
     ms_by_ply = [int(v) for v in args.ms.split(",")]
     cache = Cache(os.path.join(args.out_dir, "analysis_%s.jsonl" % args.rule))
-    sites = site_lines(args.rule)
+    sites = site_lines(args.rule, args.games)
 
     pool = queue.Queue()
     engines = []

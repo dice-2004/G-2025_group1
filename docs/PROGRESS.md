@@ -11,7 +11,29 @@
 | 最強の自作エンジン | G2 v0.3 (engine/)。連珠・1秒/手で rapfi-n10k に 62勝17敗、rapfi-n100k に 38勝42敗 (Elo 約 +2680) |
 | サイト AI との実戦 | T1 サイト (trygomoku/gomokuonline/playgomokuonline) は全勝。playgonu Pro は白番で負け、Rapfi NNUE 5 秒 (Champion/gomocalc) は 3-70 (gomocalc の持ち時間 100〜5000ms の全設定で敗退)。[結果](./benchmarks/web/RESULTS.md) |
 | legacy の強さ | 連珠・1秒/手で Elo +883 (random=0)。1手読み貪欲ボットに 29.5/80、Rapfi 深さ2制限に 0/80 |
+| 開局ブック | 連珠 515・自由 444 局面 (1〜8 手目、先後両方、Rapfi 古典評価で事前計算)。gomocalc 500ms 連珠で初勝利 (ブックあり 2-4 / なし 0-6)。[詳細](./benchmarks/2026-10-27_book.md) |
 | 次の目標 | rapfi-n100k に勝ち越す (評価の再調整・探索の枝刈り・VCT の使い方) |
+
+## 2026-10-27 開局ブック
+
+**やったこと** (詳細は [benchmarks/2026-10-27_book.md](./benchmarks/2026-10-27_book.md)、実装は [engine/README.md](../engine/README.md))
+- `engine/src/book.c`: 序盤 (1〜8 手目) の局面 → 最善手の表を埋め込み、実行時は表引きだけ (1 回 20µs 未満)。15 路、
+  連珠と自由 (standard は自由を流用) の 2 表、8 対称・手順違いを正規化。`think_move` の先頭で引き、`INFO book 0` で無効。
+  空点でない・黒の禁じ手になる手、五・達四の点がある局面では使わない
+- `engine/book/gen_book.py`: Rapfi (古典評価、NNUE なし) で 1 局面 10〜30 秒の解析。G2 の手番は最善手、相手の手番は
+  multi-PV 上位 3〜8 手とサイト AI の実戦の手をたどる (先後両方)。解析は `analysis_<rule>.jsonl` に貯めて再開・追加できる
+- 照合 `check_book.py` (make test)、棋譜でのブックの当たりを数える `book_hits.py`
+
+**結果**
+- 連珠 515 局面、自由 444 局面。生成は 4 並列で計 45 分
+- rapfi-n100k (古典) とブックあり/なし: 連珠 29-47 vs 33-43、自由 29-42 vs 28-43 (誤差内、差なし)
+- サイト AI: gomocalc (NNUE) 500ms 連珠でブックあり 2-0-4 (黒 2 勝)、同じ版のブックなし 0-0-6。playgonu Pro 白番は
+  連珠・自由とも 4-0 (ブックなしの v0.3 も 2-0 なので主に探索の改善)
+- サイト実戦で G2 の 1〜4 手目は全部ブック、8 手目でも 29% が当たる
+
+**次にやること**
+- 白番の線を 10〜12 手目まで深く、相手の候補を広げる。サイト実戦の外れた局面を `gen_book.py --games` で足す
+- gomocalc 連珠のブックあり/なしの標本を増やす
 
 ## 2026-10-22 サイト・アプリ AI との実戦ハーネス
 

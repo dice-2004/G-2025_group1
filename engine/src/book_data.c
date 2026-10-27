@@ -86,6 +86,7 @@ const BookEntry g_book_renju[] = {
     {0x04a9b6cd9a9b9ee4ULL, 5, 7, 19983},
     {0x04bc31cbb4686820ULL, 9, 7, 19979},
     {0x04cc3ba41b05dbeeULL, 7, 5, -106},
+    {0x04d56624319edda7ULL, 8, 5, -66},
     {0x04e0f92105961539ULL, 8, 5, -100},
     {0x04ea4fb9aa889570ULL, 9, 6, 19975},
     {0x04ef117a7f484ac1ULL, 8, 7, 19975},
@@ -98,6 +99,7 @@ const BookEntry g_book_renju[] = {
     {0x05ea19e9dfd767dfULL, 9, 6, 19983},
     {0x05ec9567a54a431fULL, 7, 6, -136},
     {0x05f74a1388ef84f2ULL, 10, 9, 61},
+    {0x0633c006a947a2b6ULL, 5, 8, -63},
     {0x0647c586d608796eULL, 8, 9, -103},
     {0x065936484d490df0ULL, 7, 10, -213},
     {0x065b888205747a12ULL, 8, 5, 19981},
@@ -155,6 +157,7 @@ const BookEntry g_book_renju[] = {
     {0x0baee6ac1681974bULL, 4, 9, -109},
     {0x0bb641fc8b0dcd71ULL, 8, 6, 19979},
     {0x0bb832bbdd28738cULL, 6, 8, 19975},
+    {0x0bbe43179bd73a76ULL, 8, 6, -105},
     {0x0bc36d1fddf121cbULL, 5, 5, -235},
     {0x0c1c2857e0c15504ULL, 8, 7, -117},
     {0x0c5d723e8fa41abeULL, 7, 8, -60},
@@ -167,6 +170,7 @@ const BookEntry g_book_renju[] = {
     {0x0ce1b68b3e6fc10bULL, 8, 6, -291},
     {0x0cf59a28f66bc927ULL, 7, 9, 280},
     {0x0d369f57fd78a65cULL, 7, 4, -85},
+    {0x0d4dc784b9a7950eULL, 6, 6, 19983},
     {0x0d5f2ac29b6521e7ULL, 6, 7, -189},
     {0x0d75cd21a0b42004ULL, 8, 5, -124},
     {0x0d764e5e67478386ULL, 9, 6, 198},
@@ -204,6 +208,7 @@ const BookEntry g_book_renju[] = {
     {0x0ffe02871b0c127cULL, 6, 5, -119},
     {0x100c656c00e34188ULL, 8, 7, -116},
     {0x1025bbdbb5bbd70aULL, 7, 5, 19977},
+    {0x10387ecfec60ea46ULL, 8, 9, 19979},
     {0x10451cf6219a3c48ULL, 4, 7, 19979},
     {0x1055d8cd25f9bdbeULL, 5, 8, 19987},
     {0x1061ba63cbb83c2cULL, 7, 8, 19979},
@@ -213,6 +218,7 @@ const BookEntry g_book_renju[] = {
     {0x10d5e222992a2a85ULL, 8, 6, -62},
     {0x10d73b87dfaafbf0ULL, 9, 9, -117},
     {0x10eac57ed333341aULL, 7, 9, -97},
+    {0x11034dcaa0b0eb9eULL, 7, 5, 19977},
     {0x11325bc9584eb02eULL, 4, 5, -128},
     {0x11385f3ca2dab518ULL, 8, 8, 19957},
     {0x11464177eade93eeULL, 9, 9, -154},
@@ -412,6 +418,7 @@ const BookEntry g_book_renju[] = {
     {0x3090c1caa96b414aULL, 7, 5, -204},
     {0x30b9e8f851190491ULL, 5, 9, 19981},
     {0x30cc8eb44c90a8abULL, 9, 5, 19977},
+    {0x3106db7d425ce70cULL, 8, 8, 19971},
     {0x321a00930f6721e5ULL, 5, 8, -192},
     {0x322eb1524783eccdULL, 8, 8, 19977},
     {0x326208acc8036096ULL, 8, 8, 19983},
@@ -426,6 +433,7 @@ const BookEntry g_book_renju[] = {
     {0x34dfebe355817971ULL, 6, 6, 19983},
     {0x3558af9691a79899ULL, 8, 8, 19983},
     {0x35a6400691d5b54fULL, 6, 8, -247},
+    {0x35d542d575d7ca33ULL, 6, 6, 19971},
     {0x372f26726d7c47b0ULL, 6, 11, -89},
     {0x3758d708abb5892dULL, 8, 7, 19973},
     {0x37baca0707bdac93ULL, 7, 8, 19981},
@@ -450,6 +458,7 @@ const BookEntry g_book_renju[] = {
     {0x3e60afce0843679dULL, 9, 10, -163},
     {0x3e850bd29288ff49ULL, 6, 8, 19971},
     {0x3f13a0ca6fca441aULL, 8, 3, -167},
+    {0x3f13e5cf7956e300ULL, 6, 8, 19975},
     {0x3f1903f273a92197ULL, 6, 10, -98},
     {0x3f970bc267473abaULL, 6, 6, 19977},
     {0x3fa2aead41019dcdULL, 10, 6, -11},
@@ -484,6 +493,7 @@ const BookEntry g_book_renju[] = {
     {0x4ba2b4ba76b1d069ULL, 6, 7, 19975},
     {0x4e8ad155ca30e2a9ULL, 3, 10, -35},
     {0x5027d7bb6beccff2ULL, 5, 7, -83},
+    {0x511220f3e649a7f7ULL, 5, 7, -79},
     {0x523abc60f2d02b5dULL, 10, 8, -97},
     {0x52872f8fa28b388cULL, 8, 8, 19965},
     {0x546f2484b00491fcULL, 10, 7, -103},
@@ -508,7 +518,7 @@ const BookEntry g_book_renju[] = {
     {0x870c45dad68a23e3ULL, 7, 8, -156},
     {0x929c2abf805c0629ULL, 8, 9, -174},
 };
-const int g_book_renju_n = 505;
+const int g_book_renju_n = 515;
 
 const BookEntry g_book_freestyle[] = {
     {0x0000000000000000ULL, 7, 7, 0},
@@ -746,6 +756,7 @@ const BookEntry g_book_freestyle[] = {
     {0x17adab450c29008eULL, 5, 8, -77},
     {0x17d3eae293161308ULL, 7, 9, 201},
     {0x17d87ba382fde970ULL, 6, 6, -160},
+    {0x17da6edec1c9943eULL, 8, 7, -26},
     {0x17e404e5c566bf4dULL, 6, 4, -224},
     {0x1809524589bc90a7ULL, 10, 6, 19985},
     {0x180aad5355061ddaULL, 7, 6, -241},
@@ -955,6 +966,6 @@ const BookEntry g_book_freestyle[] = {
     {0x7c4c3099af87b903ULL, 6, 8, -19952},
     {0x8e7c3e5969779699ULL, 9, 7, 19973},
 };
-const int g_book_freestyle_n = 443;
+const int g_book_freestyle_n = 444;
 
 const int g_book_max_stones = 7;
