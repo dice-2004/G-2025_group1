@@ -240,6 +240,7 @@ def main():
     for g2 in (1, 2):
         level[(key_str([]), g2)] = []
     book = {}       # 正規形 key -> (move, eval, depth)
+    tree = []       # (石数, G2 の色, 正規形 key): 木の全節 (検証用の開局に使う)
     seen = set()
     for ply in range(args.max_ply):
         if not level:
@@ -248,11 +249,15 @@ def main():
         need = set()
         for (k, g2), moves in level.items():
             tomove = 1 if ply % 2 == 0 else 2
+            if tomove != g2 and ply == args.max_ply - 1:
+                continue    # 最後の深さの相手の候補は使わない
             need.add((k, 1 if tomove == g2 else max(2, opp_k[min(ply, len(opp_k) - 1)])))
         movesof = {k: m for (k, _), m in level.items()}
         with cf.ThreadPoolExecutor(max_workers=max(1, args.j)) as ex:
             futs = {(k, npv == 1): ex.submit(analyze, movesof[k], npv) for k, npv in sorted(need)}
             recs = {kk: f.result() for kk, f in futs.items()}
+        for (k, g2) in level:
+            tree.append((ply, g2, k))
         nxt = {}
         n_our = n_opp = 0
         for (k, g2), moves in level.items():
@@ -300,6 +305,10 @@ def main():
             m, ev, d = book[k]
             f.write("%s\t%d,%d\t%d\t%d\n" % (k if k else "-", m[0], m[1], ev, d))
     print("wrote %s (%d entries)" % (out, len(book)))
+    with open(os.path.join(args.out_dir, "tree_%s.txt" % args.rule), "w") as f:
+        f.write("# 石数 <TAB> G2 の色 (1=黒 2=白) <TAB> 正規形の着手列\n")
+        for ply, g2, k in tree:
+            f.write("%d\t%d\t%s\n" % (ply, g2, k if k else "-"))
 
 
 if __name__ == "__main__":
