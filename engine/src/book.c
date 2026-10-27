@@ -80,9 +80,10 @@ static const BookEntry *lookup(const BookEntry *tab, int n, uint64_t key) {
 
 int book_probe(Board *b, int *move) {
     if (!g_enabled || b->size != BSIZE || b->nmoves > g_book_max_stones) return 0;
-    // 五や達四の点がある局面は探索に任せる
+    // 五や達四の点がある局面は探索に任せる。g_enabled >= 2 なら相手の達四の点 (相手の活三) にはブックの受けを使う
+    int me = board_side(b);
     for (int c = BLACK; c <= WHITE; c++)
-        if (b->p4cnt[c][P4_FIVE] || b->p4cnt[c][P4_FLEX4]) return 0;
+        if (b->p4cnt[c][P4_FIVE] || (b->p4cnt[c][P4_FLEX4] && (c == me || g_enabled < 2))) return 0;
     // 石数が手番と合わない盤 (BOARD で置き石など) は使わない
     int nb = 0, nw = 0;
     for (int y = 0; y < BSIZE; y++)

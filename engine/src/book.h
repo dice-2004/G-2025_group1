@@ -15,7 +15,7 @@ typedef struct {
 // 手番側の手をブックから引く。ヒットしたら 1 を返して *move に盤上の pos を入れる。
 // 15 路だけ。空点でない手・黒の禁じ手、どちらかに五・達四の点がある局面では使わない (0)
 int book_probe(Board *b, int *move);
-void book_set_enabled(int on);      // 既定は有効 (Gomocup の INFO book 0 で無効)
+void book_set_enabled(int on);      // 0=無効 1=有効 (既定) 2=相手の活三への受けにも使う。Gomocup の INFO book <n>
 int book_enabled(void);
 
 // 盤面の正規形キーと、それを与える変換 (テスト用)

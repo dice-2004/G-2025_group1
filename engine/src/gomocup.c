@@ -122,7 +122,7 @@ int main(void) {
                 else if (!strcasecmp(key, "max_depth")) limits.max_depth = (int)val;
                 else if (!strcasecmp(key, "max_node")) limits.max_nodes = val;
                 else if (!strcasecmp(key, "verbose")) limits.verbose = (int)val;
-                else if (!strcasecmp(key, "book")) book_set_enabled(val != 0);   // 開局ブック (既定 1)
+                else if (!strcasecmp(key, "book")) book_set_enabled((int)val);   // 開局ブック (0=無効 1=既定 2=相手の活三にも)
                 else if (!strncasecmp(key, "p_", 2) && search_set_param(key + 2, val)) eval_dirty = 1;
                 else if (!strcasecmp(key, "rule")) rule_code = (int)val & 5;  // 1=ちょうど五, 4=連珠
                 if (eval_dirty && tables_rule >= 0) {
