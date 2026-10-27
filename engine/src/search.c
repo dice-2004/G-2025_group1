@@ -8,6 +8,7 @@
 // - 遅い手の深さ削減 (LMR) と浅い所での手数打ち切り (戦術的でない手のみ)
 #include "search.h"
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,15 +19,16 @@
 
 // ---------------------------------------------------------------- 置換表
 
+// 複数スレッドで共有する。ロックは使わず、key には「局面のハッシュ ^ data」を入れて、
+// 書き込みが混ざったエントリは key が合わなくなって捨てられるようにする
 typedef struct {
     uint64_t key;
-    int16_t value;
-    int16_t move;
-    int8_t depth;
-    uint8_t flag;
-    uint8_t gen;
-    uint8_t pad;
+    uint64_t data;  // value 16 | move 16 | depth 8 | flag 8 | gen 8
 } TTEntry;
+
+typedef struct {
+    int value, move, depth, flag;
+} TTData;
 
 enum { TT_NONE = 0, TT_UPPER = 1, TT_LOWER = 2, TT_EXACT = 3 };
 
@@ -65,42 +67,90 @@ static int value_from_tt(int v, int ply) {
     return v;
 }
 
-static TTEntry *tt_probe(uint64_t key) {
+static inline int d_value(uint64_t d) { return (int16_t)(d & 0xFFFF); }
+static inline int d_move(uint64_t d) { return (int16_t)(d >> 16 & 0xFFFF); }
+static inline int d_depth(uint64_t d) { return (int8_t)(d >> 32 & 0xFF); }
+static inline int d_flag(uint64_t d) { return (int)(d >> 40 & 0xFF); }
+static inline int d_gen(uint64_t d) { return (int)(d >> 48 & 0xFF); }
+
+static inline uint64_t ld(const uint64_t *p) { return __atomic_load_n(p, __ATOMIC_RELAXED); }
+static inline void st(uint64_t *p, uint64_t v) { __atomic_store_n(p, v, __ATOMIC_RELAXED); }
+
+static int tt_probe(uint64_t key, TTData *out) {
     TTEntry *e = &tt[(key & tt_mask) * 2];
-    if (e[0].key == key && e[0].flag) return &e[0];
-    if (e[1].key == key && e[1].flag) return &e[1];
-    return NULL;
+    for (int i = 0; i < 2; i++) {
+        uint64_t d = ld(&e[i].data);
+        if ((ld(&e[i].key) ^ d) == key && d_flag(d)) {
+            out->value = d_value(d);
+            out->move = d_move(d);
+            out->depth = d_depth(d);
+            out->flag = d_flag(d);
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void tt_store(uint64_t key, int value, int move, int depth, int flag, int ply) {
-    TTEntry *e = &tt[(key & tt_mask) * 2], *slot;
-    if (e[0].key == key) slot = &e[0];
-    else if (e[1].key == key) slot = &e[1];
+    TTEntry *e = &tt[(key & tt_mask) * 2];
+    uint64_t d0 = ld(&e[0].data), d1 = ld(&e[1].data);
+    int m0 = (ld(&e[0].key) ^ d0) == key, m1 = (ld(&e[1].key) ^ d1) == key;
+    int slot;
+    uint64_t old;
+    if (m0) slot = 0, old = d0;
+    else if (m1) slot = 1, old = d1;
     else {
         // 古い世代か浅いほうを置き換える
-        int s0 = e[0].depth - (e[0].gen != tt_gen) * 64;
-        int s1 = e[1].depth - (e[1].gen != tt_gen) * 64;
-        slot = (s0 <= s1) ? &e[0] : &e[1];
+        int s0 = d_depth(d0) - (d_gen(d0) != tt_gen) * 64;
+        int s1 = d_depth(d1) - (d_gen(d1) != tt_gen) * 64;
+        slot = (s0 <= s1) ? 0 : 1;
+        old = 0;
     }
-    if (slot->key == key && move < 0) move = slot->move;   // 手の情報は残す
-    if (slot->key == key && slot->gen == tt_gen && depth < slot->depth - 2 && flag != TT_EXACT) return;
-    slot->key = key;
-    slot->value = (int16_t)value_to_tt(value, ply);
-    slot->move = (int16_t)move;
-    slot->depth = (int8_t)(depth < -100 ? -100 : depth > 100 ? 100 : depth);
-    slot->flag = (uint8_t)flag;
-    slot->gen = tt_gen;
+    int same = m0 || m1;
+    if (same && move < 0) move = d_move(old);   // 手の情報は残す
+    if (same && d_gen(old) == tt_gen && depth < d_depth(old) - 2 && flag != TT_EXACT) return;
+    if (depth < -100) depth = -100;
+    if (depth > 100) depth = 100;
+    uint64_t d = (uint64_t)(uint16_t)value_to_tt(value, ply) | (uint64_t)(uint16_t)move << 16 |
+                 (uint64_t)(uint8_t)depth << 32 | (uint64_t)(uint8_t)flag << 40 | (uint64_t)tt_gen << 48;
+    st(&e[slot].key, key ^ d);
+    st(&e[slot].data, d);
 }
 
 // ---------------------------------------------------------------- 共通
 
-static int history[3][NCELL];
+#define MAX_THREADS 16
+
+typedef struct {
+    Board *b;
+    long nodes;
+    long max_nodes;
+    int stop;
+    int id;             // 0 = 主スレッド (時間を見る・手を決める)
+    double t0;
+    int hard_ms;
+    int seldepth;
+    int root_depth;
+    int killer[MAX_PLY][2];
+    int pv[MAX_PLY][MAX_PLY];
+    int pvlen[MAX_PLY];
+    int history[3][NCELL];  // 前の手の情報を少し残す (search_root で 1/4 に)
+} Ctx;
+
+static Ctx ctxs[MAX_THREADS];
+static Board boards[MAX_THREADS];   // 補助スレッド用の盤のコピー
+static int n_threads = 1;
+static int g_stop;                  // 主スレッドが探索を終えたら 1 (補助スレッドを止める)
+
+void search_set_threads(int n) {
+    n_threads = n < 1 ? 1 : n > MAX_THREADS ? MAX_THREADS : n;
+}
 
 // 新しい対局: 置換表は局面のハッシュで引くので前の対局の内容も正しいまま使える (消さない)。
 // 全体を消すと 128MB の確保直後は数百 ms かかる (ページの割り当て) ので、ルールや評価が変わった時だけ消す
 void search_new_game(void) {
     tt_alloc();
-    memset(history, 0, sizeof history);
+    for (int i = 0; i < MAX_THREADS; i++) memset(ctxs[i].history, 0, sizeof ctxs[i].history);
 }
 
 void search_clear_tt(void) {
@@ -190,6 +240,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "ext_three")) sp.ext_three = (int)v;
     else if (!strcmp(name, "vctdef_pct")) sp.vctdef_pct = (int)v;
     else if (!strcmp(name, "unstable_pct")) sp.unstable_pct = (int)v;
+    else if (!strcmp(name, "threads")) search_set_threads((int)v);
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strncmp(name, "threat", 6) && strlen(name) == 9) {
@@ -212,20 +263,6 @@ typedef struct {
     int value;      // パターン点 (攻め + 守り)。history などを含まない
     int tactical;   // 三・四を作る、または相手の三・四の点をふさぐ
 } Move;
-
-typedef struct {
-    Board *b;
-    long nodes;
-    long max_nodes;
-    int stop;
-    double t0;
-    int hard_ms;
-    int seldepth;
-    int root_depth;
-    int killer[MAX_PLY][2];
-    int pv[MAX_PLY][MAX_PLY];
-    int pvlen[MAX_PLY];
-} Ctx;
 
 #define DEF_SCALE 52    // 守り (相手の点) の重み /64
 
@@ -261,7 +298,7 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
     x0 = x0 > 2 ? x0 - 2 : 0, y0 = y0 > 2 ? y0 - 2 : 0;
     x1 = x1 + 2 < b->size ? x1 + 2 : b->size - 1, y1 = y1 + 2 < b->size ? y1 + 2 : b->size - 1;
     const int16_t *vme = g_cell_value[me], *vop = g_cell_value[op];
-    const int *hist = history[me];
+    const int *hist = c->history[me];
     for (int y = y0; y <= y1; y++) {
         int q = to_pos(x0, y);
         for (int x = x0; x <= x1; x++, q++) {
@@ -305,7 +342,8 @@ static inline void pick_move(Move *m, int i, int n) {
 
 static inline void check_time(Ctx *c) {
     if ((c->nodes & 1023) == 0) {
-        if (now_ms() - c->t0 >= c->hard_ms) c->stop = 1;
+        if (c->id == 0 && now_ms() - c->t0 >= c->hard_ms) c->stop = 1;
+        if (__atomic_load_n(&g_stop, __ATOMIC_RELAXED)) c->stop = 1;
     }
     if (c->max_nodes && c->nodes >= c->max_nodes) c->stop = 1;
 }
@@ -365,12 +403,12 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
 
     // 置換表
     int ttmove = -1;
-    TTEntry *e = tt_probe(b->hash);
-    if (e) {
-        ttmove = e->move;
-        if (!is_pv && e->depth >= depth) {
-            int v = value_from_tt(e->value, ply);
-            if (e->flag == TT_EXACT || (e->flag == TT_LOWER && v >= beta) || (e->flag == TT_UPPER && v <= alpha))
+    TTData e;
+    if (tt_probe(b->hash, &e)) {
+        ttmove = e.move;
+        if (!is_pv && e.depth >= depth) {
+            int v = value_from_tt(e.value, ply);
+            if (e.flag == TT_EXACT || (e.flag == TT_LOWER && v >= beta) || (e.flag == TT_UPPER && v <= alpha))
                 return v;
         }
     }
@@ -424,11 +462,11 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
                         c->killer[ply][1] = c->killer[ply][0];
                         c->killer[ply][0] = q;
                     }
-                    int *h = &history[me][q];
+                    int *h = &c->history[me][q];
                     *h += depth * depth * 32;
                     if (*h > (1 << 20)) {
                         for (int cc = 1; cc <= 2; cc++)
-                            for (int p = 0; p < NCELL; p++) history[cc][p] /= 2;
+                            for (int p = 0; p < NCELL; p++) c->history[cc][p] /= 2;
                     }
                     break;
                 }
@@ -466,121 +504,38 @@ static void log_info(const Ctx *c, int depth, int score, const int *pv, int pvle
     fprintf(stderr, "\n");
 }
 
-void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
-    static Ctx ctx;
-    Ctx *c = &ctx;
-    tt_alloc();
-    tt_used = 1;
-    tt_gen++;
-    memset(c, 0, sizeof *c);
-    c->b = b;
-    c->t0 = now_ms();
-    c->hard_ms = lim->hard_ms > 0 ? lim->hard_ms : 1 << 30;
-    c->max_nodes = lim->max_nodes;
-    memset(res, 0, sizeof *res);
-    res->move = -1;
-    res->reason = "search";
+// Lazy SMP: 補助スレッドも同じ反復深化を (深さを少しずらして) 回し、置換表を通じて主スレッドを助ける
+static const int SKIP_SIZE[20] = {1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4};
+static const int SKIP_PHASE[20] = {0, 1, 0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6, 7};
 
-    int me = board_side(b), op = opp_color(me);
+static void ctx_reset(Ctx *c, Board *b, int id, double t0) {
+    c->b = b;
+    c->id = id;
+    c->nodes = 0;
+    c->max_nodes = 0;
+    c->stop = 0;
+    c->t0 = t0;
+    c->hard_ms = 1 << 30;
+    c->seldepth = 0;
+    c->root_depth = 0;
+    memset(c->killer, 0, sizeof c->killer);
+    memset(c->pvlen, 0, sizeof c->pvlen);
     // history は前の手の情報を少し残す
     for (int cc = 1; cc <= 2; cc++)
-        for (int p = 0; p < NCELL; p++) history[cc][p] /= 4;
+        for (int p = 0; p < NCELL; p++) c->history[cc][p] /= 4;
+}
 
-    if (b->nmoves == 0) {
-        res->move = to_pos(b->size / 2, b->size / 2);
-        res->reason = "center";
-        return;
-    }
-    // 即決の手
-    int q = find_cell(b, me, P4_FIVE);
-    if (q >= 0) { res->move = q; res->score = SCORE_WIN; res->reason = "five"; return; }
-    if (b->p4cnt[op][P4_FIVE]) {
-        q = find_cell(b, op, P4_FIVE);
-        res->move = q;
-        res->score = b->p4cnt[op][P4_FIVE] >= 2 || !legal(b, me, q) ? -SCORE_WIN : 0;
-        res->reason = "block-five";
-        if (b->p4cnt[op][P4_FIVE] >= 2 || legal(b, me, q)) {
-            // 1 つなら止めるしかない。2 つ以上なら負け (どちらかを止める)
-            return;
-        }
-        // 黒が止める点が禁じ手: 負けだが他の手を探す (下へ)
-    }
-    q = legal_flex4(b, me);
-    if (q >= 0) { res->move = q; res->score = SCORE_WIN - 2; res->reason = "flex4"; return; }
-
-    // 詰み探索 (vcf.c): 自分の VCF → 相手の VCF への受け → 自分の VCT
-    // ノード数は持ち時間に比例させる (VCF・VCT の 1 ノードはおよそ 1.5us)
-    long hard = lim->hard_ms > 0 ? lim->hard_ms : 1000;
-    int vmove;
-    if (vcf_solve(b, 40, hard * 60, &vmove)) {
-        res->move = vmove;
-        res->score = SCORE_WIN - 10;
-        res->reason = "vcf";
-        return;
-    }
-    static int defs[MAX_MOVES];
-    int ndefs = vcf_defenses(b, hard * 60, defs);   // -1 = 相手に VCF なし
-    if (ndefs < 0 && sp.vct_pct > 0 && vct_solve(b, sp.vct_depth, hard * sp.vct_pct * 6, &vmove)) {
-        res->move = vmove;
-        res->score = SCORE_WIN - 20;
-        res->reason = "vct";
-        return;
-    }
-    if (ndefs < 0 && sp.vctdef_pct > 0) {
-        // 相手に VCT があれば、それを崩し得る手 (返されなかった手は負けと証明済み) に絞る
-        ndefs = vct_defenses(b, sp.vct_depth, hard * sp.vctdef_pct * 6, defs);
-        if (lim->verbose && ndefs >= 0) fprintf(stderr, "opponent has VCT: %d defenses\n", ndefs);
-    }
-    if (lim->verbose && ndefs >= 0) fprintf(stderr, "opponent has VCF: %d defenses\n", ndefs);
-
-    // ルートの候補
-    int op_threat = legal_flex4(b, op) >= 0;
-    Move list[MAX_MOVES];
-    TTEntry *e = tt_probe(b->hash);
-    int n = gen_moves(c, list, me, op, op_threat, e ? e->move : -1, 0, 0);
-    sort_moves(list, n);
-    RootMove root[MAX_MOVES];
-    int nr = 0;
-    // 相手の VCF への受け (vcf_defenses、受けになり得る手の上位集合) を先に調べる。def_restrict なら受けだけに絞る
-    for (int pass = 0; pass < 2; pass++) {
-        for (int i = 0; i < n; i++) {
-            int p = list[i].pos, isdef = 0;
-            for (int k = 0; k < ndefs && !isdef; k++) isdef = defs[k] == p;
-            if ((ndefs <= 0 || isdef == (pass == 0)) && legal(b, me, p)) root[nr++] = (RootMove){p, 0};
-        }
-        if (ndefs <= 0 || sp.def_restrict) break;
-    }
-    if (nr == 0 && ndefs > 0) {
-        // 受けが候補の外 (遠い点) にしかない
-        for (int k = 0; k < ndefs; k++)
-            if (legal(b, me, defs[k])) root[nr++] = (RootMove){defs[k], 0};
-    }
-    if (nr == 0) {
-        // 防ぎ手がない (相手の活三を止められない) か全部禁じ手: 何でもよいので合法手
-        n = gen_moves(c, list, me, op, 0, -1, 0, 0);
-        sort_moves(list, n);
-        for (int i = 0; i < n; i++)
-            if (legal(b, me, list[i].pos)) root[nr++] = (RootMove){list[i].pos, 0};
-        if (nr == 0) {
-            for (int y = 0; y < b->size && res->move < 0; y++)
-                for (int x = 0; x < b->size; x++) {
-                    int p = to_pos(x, y);
-                    if (b->cell[p] == EMPTY && legal(b, me, p)) { res->move = p; break; }
-                }
-            res->reason = "no-move";
-            return;
-        }
-        res->move = root[0].pos;
-        res->score = -SCORE_WIN;
-        res->reason = "lost";
-        return;
-    }
-    res->move = root[0].pos;
-    if (nr == 1) { res->reason = "only-move"; return; }
-
+// 反復深化 (ルートの候補 root[0..nr) を調べ、結果を res に入れる)
+static void iterate(Ctx *c, RootMove *root, int nr, const SearchLimits *lim, SearchResult *res) {
+    Board *b = c->b;
     int max_depth = lim->max_depth > 0 ? lim->max_depth : MAX_PLY - 10;
     int prev_score = 0, prev_best = -1, unstable = 0;
     for (int depth = 1; depth <= max_depth; depth++) {
+        if (c->id > 0) {
+            // 補助スレッドはスレッドごとに一部の深さを飛ばす (同じ深さを全員で読まないように)
+            int k = (c->id - 1) % 20;
+            if ((depth + SKIP_PHASE[k]) / SKIP_SIZE[k] % 2) continue;
+        }
         c->root_depth = depth;
         // aspiration window: 前の反復の点の周りの狭い窓で調べ、外れたら広げてやり直す
         int lo = -SCORE_INF, hi = SCORE_INF, best, bestmove, searched;
@@ -641,7 +596,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
             prev_best = bestmove;
             res->depth = depth;
             prev_score = best;
-            log_info(c, depth, best, bestpv, bestpvlen, lim->verbose);
+            if (c->id == 0) log_info(c, depth, best, bestpv, bestpvlen, lim->verbose);
         }
         // 次の反復のために並べ替え (最善手を先頭、他は点の順。安定ソート)
         for (int i = 1; i < nr; i++) {
@@ -657,8 +612,153 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         }
         if (lim->soft_ms > 0 && now_ms() - c->t0 >= (double)lim->soft_ms * (unstable ? sp.unstable_pct : 100) / 100) break;
     }
-    (void)prev_score;
+}
+
+typedef struct {
+    Ctx *c;
+    RootMove root[MAX_MOVES];
+    int nr;
+    SearchLimits lim;
+    SearchResult res;
+} Helper;
+
+static Helper helpers[MAX_THREADS];
+
+static void *helper_main(void *arg) {
+    Helper *h = arg;
+    iterate(h->c, h->root, h->nr, &h->lim, &h->res);
+    return NULL;
+}
+
+void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
+    Ctx *c = &ctxs[0];
+    tt_alloc();
+    tt_used = 1;
+    tt_gen++;
+    __atomic_store_n(&g_stop, 0, __ATOMIC_RELAXED);
+    double t0 = now_ms();
+    ctx_reset(c, b, 0, t0);
+    c->hard_ms = lim->hard_ms > 0 ? lim->hard_ms : 1 << 30;
+    c->max_nodes = lim->max_nodes;
+    memset(res, 0, sizeof *res);
+    res->move = -1;
+    res->reason = "search";
+
+    int me = board_side(b), op = opp_color(me);
+    if (b->nmoves == 0) {
+        res->move = to_pos(b->size / 2, b->size / 2);
+        res->reason = "center";
+        return;
+    }
+    // 即決の手
+    int q = find_cell(b, me, P4_FIVE);
+    if (q >= 0) { res->move = q; res->score = SCORE_WIN; res->reason = "five"; return; }
+    if (b->p4cnt[op][P4_FIVE]) {
+        q = find_cell(b, op, P4_FIVE);
+        res->move = q;
+        res->score = b->p4cnt[op][P4_FIVE] >= 2 || !legal(b, me, q) ? -SCORE_WIN : 0;
+        res->reason = "block-five";
+        if (b->p4cnt[op][P4_FIVE] >= 2 || legal(b, me, q)) {
+            // 1 つなら止めるしかない。2 つ以上なら負け (どちらかを止める)
+            return;
+        }
+        // 黒が止める点が禁じ手: 負けだが他の手を探す (下へ)
+    }
+    q = legal_flex4(b, me);
+    if (q >= 0) { res->move = q; res->score = SCORE_WIN - 2; res->reason = "flex4"; return; }
+
+    // 詰み探索 (vcf.c): 自分の VCF → 相手の VCF への受け → 自分の VCT
+    // ノード数は持ち時間に比例させる (VCF・VCT の 1 ノードはおよそ 1.5us)
+    long hard = lim->hard_ms > 0 ? lim->hard_ms : 1000;
+    int vmove;
+    if (vcf_solve(b, 40, hard * 60, &vmove)) {
+        res->move = vmove;
+        res->score = SCORE_WIN - 10;
+        res->reason = "vcf";
+        return;
+    }
+    static int defs[MAX_MOVES];
+    int ndefs = vcf_defenses(b, hard * 60, defs);   // -1 = 相手に VCF なし
+    if (ndefs < 0 && sp.vct_pct > 0 && vct_solve(b, sp.vct_depth, hard * sp.vct_pct * 6, &vmove)) {
+        res->move = vmove;
+        res->score = SCORE_WIN - 20;
+        res->reason = "vct";
+        return;
+    }
+    if (ndefs < 0 && sp.vctdef_pct > 0) {
+        // 相手に VCT があれば、それを崩し得る手 (返されなかった手は負けと証明済み) に絞る
+        ndefs = vct_defenses(b, sp.vct_depth, hard * sp.vctdef_pct * 6, defs);
+        if (lim->verbose && ndefs >= 0) fprintf(stderr, "opponent has VCT: %d defenses\n", ndefs);
+    }
+    if (lim->verbose && ndefs >= 0) fprintf(stderr, "opponent has VCF: %d defenses\n", ndefs);
+
+    // ルートの候補
+    int op_threat = legal_flex4(b, op) >= 0;
+    Move list[MAX_MOVES];
+    TTData e;
+    int n = gen_moves(c, list, me, op, op_threat, tt_probe(b->hash, &e) ? e.move : -1, 0, 0);
+    sort_moves(list, n);
+    RootMove root[MAX_MOVES];
+    int nr = 0;
+    // 相手の VCF への受け (vcf_defenses、受けになり得る手の上位集合) を先に調べる。def_restrict なら受けだけに絞る
+    for (int pass = 0; pass < 2; pass++) {
+        for (int i = 0; i < n; i++) {
+            int p = list[i].pos, isdef = 0;
+            for (int k = 0; k < ndefs && !isdef; k++) isdef = defs[k] == p;
+            if ((ndefs <= 0 || isdef == (pass == 0)) && legal(b, me, p)) root[nr++] = (RootMove){p, 0};
+        }
+        if (ndefs <= 0 || sp.def_restrict) break;
+    }
+    if (nr == 0 && ndefs > 0) {
+        // 受けが候補の外 (遠い点) にしかない
+        for (int k = 0; k < ndefs; k++)
+            if (legal(b, me, defs[k])) root[nr++] = (RootMove){defs[k], 0};
+    }
+    if (nr == 0) {
+        // 防ぎ手がない (相手の活三を止められない) か全部禁じ手: 何でもよいので合法手
+        n = gen_moves(c, list, me, op, 0, -1, 0, 0);
+        sort_moves(list, n);
+        for (int i = 0; i < n; i++)
+            if (legal(b, me, list[i].pos)) root[nr++] = (RootMove){list[i].pos, 0};
+        if (nr == 0) {
+            for (int y = 0; y < b->size && res->move < 0; y++)
+                for (int x = 0; x < b->size; x++) {
+                    int p = to_pos(x, y);
+                    if (b->cell[p] == EMPTY && legal(b, me, p)) { res->move = p; break; }
+                }
+            res->reason = "no-move";
+            return;
+        }
+        res->move = root[0].pos;
+        res->score = -SCORE_WIN;
+        res->reason = "lost";
+        return;
+    }
+    res->move = root[0].pos;
+    if (nr == 1) { res->reason = "only-move"; return; }
+
+    pthread_t th[MAX_THREADS];
+    int started[MAX_THREADS] = {0};
+    for (int t = 1; t < n_threads; t++) {
+        Helper *h = &helpers[t];
+        boards[t] = *b;
+        h->c = &ctxs[t];
+        ctx_reset(h->c, &boards[t], t, t0);
+        memcpy(h->root, root, sizeof(RootMove) * nr);
+        h->nr = nr;
+        h->lim = *lim;
+        h->lim.soft_ms = 0;
+        h->lim.verbose = 0;
+        started[t] = pthread_create(&th[t], NULL, helper_main, h) == 0;
+    }
+    iterate(c, root, nr, lim, res);
+    __atomic_store_n(&g_stop, 1, __ATOMIC_RELAXED);
     res->nodes = c->nodes;
+    for (int t = 1; t < n_threads; t++) {
+        if (!started[t]) continue;
+        pthread_join(th[t], NULL);
+        res->nodes += ctxs[t].nodes;
+    }
     res->seldepth = c->seldepth;
     res->ms = (int)(now_ms() - c->t0);
 }

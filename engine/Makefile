@@ -2,7 +2,7 @@
 #   make            -> build/pbrain-g2 (Gomocup エンジン), build/g2-test (テストツール)
 #   make test       -> 差分更新の自己検証と、Python レフェリーとの禁じ手判定照合、開局ブックの表引き照合
 CC ?= gcc
-CFLAGS ?= -O2 -std=c11 -Wall -Wextra -D_POSIX_C_SOURCE=200809L
+CFLAGS ?= -O2 -std=c11 -Wall -Wextra -D_POSIX_C_SOURCE=200809L -pthread
 BUILD = build
 
 CORE = $(filter-out src/gomocup.c src/class_entry.c,$(wildcard src/*.c))

@@ -118,6 +118,7 @@ int main(void) {
                     search_set_tt_size((int)(mb < 4 ? 4 : mb > 64 ? 64 : mb));
                     search_new_game();
                 }
+                else if (!strcasecmp(key, "thread_num")) search_set_threads((int)val);
                 else if (!strcasecmp(key, "max_depth")) limits.max_depth = (int)val;
                 else if (!strcasecmp(key, "max_node")) limits.max_nodes = val;
                 else if (!strcasecmp(key, "verbose")) limits.verbose = (int)val;

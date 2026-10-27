@@ -30,7 +30,7 @@ engine:
 G2_CORE = $(filter-out engine/src/gomocup.c engine/src/class_entry.c,$(wildcard engine/src/*.c))
 g2class: gomoku_g2
 gomoku_g2: gomoku.c .libgomoku.c gomoku.h $(G2_CORE) engine/src/class_entry.c $(wildcard engine/src/*.h)
-	$(CC) -O2 -std=c11 -Wall -D_POSIX_C_SOURCE=200809L gomoku.c .libgomoku.c $(G2_CORE) engine/src/class_entry.c $(LDFLAGS) -o $@
+	$(CC) -O2 -std=c11 -Wall -D_POSIX_C_SOURCE=200809L gomoku.c .libgomoku.c $(G2_CORE) engine/src/class_entry.c $(LDFLAGS) -pthread -o $@
 
 # ベンチマーク用 Gomocup エンジン (bench/README.md 参照)
 .PHONY: bench

@@ -121,7 +121,7 @@ static int bench(Rule rule) {
 }
 
 // 固定深さの探索速度 (詰み探索は使わずに本探索だけを測る)
-static int speed(Rule rule, int depth) {
+static int speed(Rule rule, int depth, int threads) {
     static Board b;
     char line[8192];
     long total_nodes = 0;
@@ -129,6 +129,7 @@ static int speed(Rule rule, int depth) {
     int npos = 0;
     pattern_init(&rule);
     search_set_param("vct_pct", 0);
+    search_set_threads(threads);
     while (fgets(line, sizeof line, stdin)) {
         board_init(&b, 15, &rule);
         char *s = line;
@@ -216,7 +217,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "forbid")) return forbid(rule);
     if (!strcmp(argv[1], "bench")) return bench(rule);
     if (!strcmp(argv[1], "features")) return features(rule);
-    if (!strcmp(argv[1], "speed")) return speed(rule, argc > 3 ? atoi(argv[3]) : 8);
+    if (!strcmp(argv[1], "speed")) return speed(rule, argc > 3 ? atoi(argv[3]) : 8, argc > 4 ? atoi(argv[4]) : 1);
     fprintf(stderr, "unknown command\n");
     return 2;
 }
