@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 
+#include "book.h"
 #include "search.h"
 
 // 1 手の上限 (hard) と、次の反復を始めない目安 (soft) を決める
@@ -30,6 +31,11 @@ static void plan_time(const Board *b, const ThinkLimits *lim, SearchLimits *sl) 
 }
 
 int think_move(Board *b, const ThinkLimits *lim) {
+    int bm;
+    if (book_probe(b, &bm)) {
+        if (lim->verbose) fprintf(stderr, "move %d,%d (book)\n", pos_x(bm), pos_y(bm));
+        return bm;
+    }
     SearchLimits sl = {0};
     plan_time(b, lim, &sl);
     sl.max_depth = lim->max_depth;
