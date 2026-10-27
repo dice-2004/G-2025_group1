@@ -173,7 +173,7 @@ static struct {
     int ext_three;      // 1 = 活三 (相手に受けを強いる手) は深さを減らさない (延長)。延長はルートの深さの 2 倍まで
     int vctdef_pct;     // 相手の VCT への受け (vct_defenses) に使う時間 (上限時間の %)。0 = 使わない
     int unstable_pct;   // 直前の反復で最善手が変わったら、次の反復を始めない目安を何 % に延ばすか
-} sp = {0, P4_BLOCK4_PLUS, 40, 0, 10, 1, 100, 3, 0, 1, 0, 100};
+} sp = {0, P4_BLOCK4_PLUS, 60, 0, 10, 1, 100, 3, 0, 1, 0, 100};
 
 int search_soft_pct(void) { return sp.soft_pct; }
 
