@@ -192,9 +192,10 @@ def main():
     ap.add_argument("-j", type=int, default=4)
     ap.add_argument("--rapfi", default=os.environ.get("RAPFI_DIR", os.path.join(REPO, "..", "rapfi-bin")) + "/pbrain-rapfi")
     ap.add_argument("--max-ply", type=int, default=8, help="この石数未満の局面にブックの手を入れる")
-    ap.add_argument("--opp-k", default="3,8,6,6,4,4,3,3", help="相手の手番の局面で追う候補数 (石数ごと)")
+    ap.add_argument("--max-ply-white", type=int, default=0, help="G2 が白の木だけこの石数未満まで (0 = --max-ply と同じ)")
+    ap.add_argument("--opp-k", default="3,8,6,6,4,4,3,3,3,3,2,2", help="相手の手番の局面で追う候補数 (石数ごと)")
     ap.add_argument("--margin", type=int, default=250, help="最善との評価差がこれ以内の候補だけ追う")
-    ap.add_argument("--ms", default="30000,30000,30000,20000,15000,15000,10000,10000",
+    ap.add_argument("--ms", default="30000,30000,30000,20000,15000,15000,10000,10000,8000",
                     help="解析の持ち時間 (石数ごと, ms)")
     ap.add_argument("--memory", type=int, default=512, help="Rapfi 1 プロセスの置換表 MB")
     ap.add_argument("--games", nargs="*", default=[], help="相手の手を拾う追加の棋譜 (bench/web/play.py の jsonl)")
@@ -246,15 +247,16 @@ def main():
     book = {}       # 正規形 key -> (move, eval, depth)
     tree = []       # (石数, G2 の色, 正規形 key): 木の全節 (検証用の開局に使う)
     seen = set()
-    for ply in range(args.max_ply):
+    max_ply = {1: args.max_ply, 2: args.max_ply_white or args.max_ply}
+    for ply in range(max(max_ply.values())):
         if not level:
             break
         # この深さで解析が要る局面と必要な PV 数
         need = set()
         for (k, g2), moves in level.items():
             tomove = 1 if ply % 2 == 0 else 2
-            if tomove != g2 and ply == args.max_ply - 1:
-                continue    # 最後の深さの相手の候補は使わない
+            if ply >= max_ply[g2] or (tomove != g2 and ply == max_ply[g2] - 1):
+                continue    # その木の深さを超えた / 最後の深さの相手の候補は使わない
             need.add((k, 1 if tomove == g2 else max(2, opp_k[min(ply, len(opp_k) - 1)])))
         movesof = {k: m for (k, _), m in level.items()}
         with cf.ThreadPoolExecutor(max_workers=max(1, args.j)) as ex:
@@ -279,6 +281,8 @@ def main():
                 kk = opp_k[min(ply, len(opp_k) - 1)]
                 best = pv[0][1]
                 children = [m for i, (m, ev, _) in enumerate(pv[:kk]) if i < 2 or ev >= best - args.margin]
+                if best >= MATE - 1000:
+                    children = children[:1]     # 相手の勝ちが読み切れている局面は最善の 1 手だけ
                 if ply == 0:
                     # 相手の初手: 天元のほか、天元の隣と斜め隣 (サイトの AI がずらして打つ場合)
                     children = [(C, C), (C, C - 1), (C - 1, C - 1)]
