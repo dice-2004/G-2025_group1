@@ -223,7 +223,9 @@ static struct {
     int ext_three;      // 1 = 活三 (相手に受けを強いる手) は深さを減らさない (延長)。延長はルートの深さの 2 倍まで
     int vctdef_pct;     // 相手の VCT への受け (vct_defenses) に使う時間 (上限時間の %)。0 = 使わない
     int unstable_pct;   // 直前の反復で最善手が変わったら、次の反復を始めない目安を何 % に延ばすか
-} sp = {0, P4_BLOCK4_PLUS, 60, 0, 10, 1, 100, 3, 0, 1, 0, 100};
+    int leaf_vcf;       // 末端 (深さ 0) で手番側に四があれば VCF を調べるノード数の上限。0 = 調べない
+    int leaf_vcf_depth; // 末端の VCF の深さ (攻めの手数)
+} sp = {0, P4_BLOCK4_PLUS, 60, 0, 10, 1, 100, 3, 0, 1, 0, 100, 0, 12};
 
 int search_soft_pct(void) { return sp.soft_pct; }
 
@@ -241,6 +243,8 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "vctdef_pct")) sp.vctdef_pct = (int)v;
     else if (!strcmp(name, "unstable_pct")) sp.unstable_pct = (int)v;
     else if (!strcmp(name, "threads")) search_set_threads((int)v);
+    else if (!strcmp(name, "leaf_vcf")) sp.leaf_vcf = (int)v;
+    else if (!strcmp(name, "leaf_vcf_depth")) sp.leaf_vcf_depth = (int)v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strncmp(name, "threat", 6) && strlen(name) == 9) {
@@ -393,6 +397,12 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     // 静止探索: 深さが尽きたら、相手の活三への防ぎ (脅威がある時) か自分の四だけを読む
     int qmode = depth <= 0, stand = -SCORE_INF;
     if (qmode) {
+        // 末端の VCF: 評価の尺度を変えずに、手番側の四の連続による勝ちだけを見つける
+        if (sp.leaf_vcf && depth == 0 &&
+            b->p4cnt[me][P4_BLOCK4] + b->p4cnt[me][P4_BLOCK4_PLUS] + b->p4cnt[me][P4_BLOCK4_FLEX3] > 0) {
+            TssResult r;
+            if (tss_solve(b, me, TSS_VCF, sp.leaf_vcf_depth, sp.leaf_vcf, &r)) return SCORE_WIN - ply - r.nline;
+        }
         if (depth <= -sp.qdepth) return evaluate(b);
         if (!op_threat) {
             stand = evaluate(b);
@@ -626,6 +636,7 @@ static Helper helpers[MAX_THREADS];
 
 static void *helper_main(void *arg) {
     Helper *h = arg;
+    tss_set_thread(h->c->id);
     iterate(h->c, h->root, h->nr, &h->lim, &h->res);
     return NULL;
 }

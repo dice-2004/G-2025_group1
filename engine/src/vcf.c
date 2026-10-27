@@ -26,13 +26,19 @@ typedef struct {
     int8_t result;
 } TTEntry;
 
-static TTEntry *tt;
+// 探索のスレッドごとに置換表と作業領域を分ける (tss_set_thread)
+#define TSS_MAX_THREADS 16
+static TTEntry *tts[TSS_MAX_THREADS];
+static int tt_epoch[TSS_MAX_THREADS];
+static int tss_epoch;               // tss_clear のたびに増やす (他のスレッドの表は次に使う時に消す)
+static _Thread_local int tss_tid;
+static _Thread_local TTEntry *tt;
 static const uint64_t SALT[2][3] = {
     {0, 0x6a09e667f3bcc908ULL, 0xbb67ae8584caa73bULL},
     {0, 0x3c6ef372fe94f82bULL, 0xa54ff53a5f1d36f1ULL},
 };
 
-static struct {
+static _Thread_local struct {
     Board *b;
     int att, def;
     int restricted;     // 黒に禁じ手がある
@@ -44,7 +50,15 @@ static struct {
 } C;
 
 void tss_clear(void) {
-    if (tt) memset(tt, 0, sizeof(TTEntry) * TT_SIZE);
+    tss_epoch++;
+    if (tts[tss_tid]) {
+        memset(tts[tss_tid], 0, sizeof(TTEntry) * TT_SIZE);
+        tt_epoch[tss_tid] = tss_epoch;
+    }
+}
+
+void tss_set_thread(int id) {
+    tss_tid = id < 0 || id >= TSS_MAX_THREADS ? 0 : id;
 }
 
 static void tt_store(uint64_t key, int depth, int win, int best) {
@@ -448,10 +462,15 @@ static int walk_line(int mode, int first, int *line, int max) {
 }
 
 int tss_solve(Board *b, int attacker, int mode, int max_depth, long max_nodes, TssResult *res) {
-    if (!tt) {
-        tt = calloc(TT_SIZE, sizeof(TTEntry));
-        if (!tt) return 0;
+    if (!tts[tss_tid]) {
+        tts[tss_tid] = calloc(TT_SIZE, sizeof(TTEntry));
+        if (!tts[tss_tid]) return 0;
+        tt_epoch[tss_tid] = tss_epoch;
+    } else if (tt_epoch[tss_tid] != tss_epoch) {
+        memset(tts[tss_tid], 0, sizeof(TTEntry) * TT_SIZE);
+        tt_epoch[tss_tid] = tss_epoch;
     }
+    tt = tts[tss_tid];
     C.b = b;
     C.att = attacker;
     C.def = opp_color(attacker);

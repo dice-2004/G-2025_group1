@@ -51,5 +51,7 @@ extern int g_vcf_inner;
 
 // 置換表を空にする (ルールや盤サイズを変えたとき。pattern_init の後に呼ぶ)
 void tss_clear(void);
+// 呼び出し元のスレッドの番号 (0〜15、既定 0)。スレッドごとに別の置換表を使う
+void tss_set_thread(int id);
 
 #endif
