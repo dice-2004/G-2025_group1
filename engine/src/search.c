@@ -267,6 +267,8 @@ static struct {
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
+    int ttfirst;    // 1 = 置換表の手を手の生成の前に読み、切れなければ生成する (段階的な手の生成。速さだけ)
+    int tfut, tfut_margin;   // 残り深さ 1 の節点で評価が alpha - tfut_margin 以下なら、四でない手 (1 = 自分のただの三も、2 = 相手の三の点の受けも) を読まない
     int vz, vz_depth, vz_nodes, vz_keep, vz_pv, vz_root, vz_root_nodes;   // 相手の VCT の証明の圏 (dfpn_vct_zone) の外の手を読まない。vz_keep 以上の自分の形を作る手 (反撃) は残す
     int mcp, mcp_mul, mcp_tact, mcp_pv;   // 全部の深さの手の数の枝刈り (Rapfi 風): 3 + 深さ^1.3 手 (評価が良くなっていなければ半分) を超えたら読まない。倍率 %、戦術的な手・PV にも掛けるか
     int fut, fut_margin, fut_depth;      // futility: 評価 − margin × (深さ − 1 − 改善) ≥ beta なら評価を返す (PV・相手の活三があるときは除く)
@@ -286,6 +288,7 @@ static struct {
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
     .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .mcp = 0, .mcp_mul = 100, .mcp_tact = 0, .mcp_pv = 0, .fut = 0, .fut_margin = 250, .fut_depth = 99, .razor = 0, .razor_margin = 100, .razor_depth = 2, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
+    .ttfirst = 0, .tfut = 0, .tfut_margin = 600,
     .vz = 0, .vz_depth = 4, .vz_nodes = 2000, .vz_keep = P4_BLOCK3, .vz_pv = 1, .vz_root = 0, .vz_root_nodes = 20000,
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
@@ -399,6 +402,9 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "leaf_vcf_depth")) sp.leaf_vcf_depth = (int)v;
     else if (!strcmp(name, "tz")) sp.tz = (int)v;
     else if (!strcmp(name, "vz")) sp.vz = (int)v;
+    else if (!strcmp(name, "tfut")) sp.tfut = (int)v;
+    else if (!strcmp(name, "ttfirst")) sp.ttfirst = (int)v;
+    else if (!strcmp(name, "tfut_margin")) sp.tfut_margin = (int)v;
     else if (!strcmp(name, "vz_depth")) sp.vz_depth = (int)v;
     else if (!strcmp(name, "vz_nodes")) sp.vz_nodes = (int)v;
     else if (!strcmp(name, "vz_keep")) sp.vz_keep = (int)v;
@@ -581,6 +587,17 @@ static void sort_moves(Move *m, int n) {
         while (j >= 0 && m[j].score < t.score) { m[j + 1] = m[j]; j--; }
         m[j + 1] = t;
     }
+}
+
+// 置換表の手が gen_moves の出す手か (ttfirst 用。gen_moves の絞り込みと同じ条件)
+static int gen_ok(Ctx *c, int q, int me, int op, int op_threat, int mode) {
+    Board *b = c->b;
+    if (q < 0 || q >= NCELL || b->nmoves == 0 || b->cell[q] != EMPTY || !b->near[q]) return 0;
+    int a = b->pat4[me][q];
+    if (mode == 1 && (a < sp.q_min_p4 || a > P4_BLOCK4_FLEX3)) return 0;
+    if (op_threat && a < P4_BLOCK4 && !blocks_threat(b, op, q)) return 0;
+    if (c->drop4 && (a == P4_BLOCK4 || a == P4_BLOCK4_PLUS) && !blocks_threat(b, op, q)) return 0;
+    return 1;
 }
 
 // i 番目以降で最も点の高い手を i 番目に持ってくる (枝刈りで早く打ち切ることが多いので全部は並べない)
@@ -822,7 +839,18 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     int vzon = sp.vz && !qmode && !op_threat && !tzon && depth >= sp.vz_depth && (sp.vz_pv || !is_pv) &&
                alpha > -SCORE_WIN_MIN && vz_gate(b, op) && vz_mark(c, b, op, sp.vz_nodes);
     Move list[MAX_MOVES];
-    int n = gen_moves(c, list, me, op, op_threat, ttmove, ply, qmode && !op_threat, tzon);
+    int n, i0 = 0, ttstage = 0, gmode = qmode && !op_threat, drop4 = c->drop4;
+    if (sp.ttfirst && ttmove >= 0 && !tzon && !vzon && !sp.tpo && !sp.mcp && !(op_threat && sp.def_line) &&
+        gen_ok(c, ttmove, me, op, op_threat, gmode)) {
+        // 段階的な手の生成: 置換表の手だけを先に読み、切れなければ残りを生成する
+        ttstage = 1;
+        list[0].pos = ttmove;
+        list[0].score = 1 << 28;
+        list[0].value = 0;
+        list[0].tactical = b->pat4[me][ttmove] >= sp.tact_own || b->pat4[op][ttmove] >= sp.tact_def;
+        n = 1;
+    } else
+        n = gen_moves(c, list, me, op, op_threat, ttmove, ply, gmode, tzon);
     c->drop4 = 0;
     if (vzon) {
         int m = 0;
@@ -843,8 +871,13 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     int best = stand, bestmove = -1, alpha0 = alpha, searched = 0;
     int rzon = sp.rz && !is_pv && !qmode && depth >= sp.rz_depth && !op_threat && !tzon;
     if (rzon) rz_reset(ply);
+    // 葉の手前の戦術的な手の futility: 評価が alpha よりずっと低いなら、ただの三とその受けで alpha を超えることはまずない
+    // (残り深さ 1、stand - alpha < -600 で三が alpha を超えたのは 0.4〜2%)。四・四三・三三は残す
+    int tfon = sp.tfut && depth == 1 && !is_pv && !op_threat && !qmode && alpha > -SCORE_WIN_MIN && alpha < SCORE_WIN_MIN &&
+               evaluate(b) + sp.tfut_margin <= alpha;
 
-    for (int i = 0; i < n; i++) {
+moves_loop:
+    for (int i = i0; i < n; i++) {
         pick_move(list, i, n);
         int q = list[i].pos, tactical = list[i].tactical || op_threat || tzon;
         // 全部の深さの手の数の枝刈り (Rapfi 風、既定は無効)。i + 1 = 何手目か (枝刈りした手も数える)
@@ -854,6 +887,10 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         if (searched > 0 && !is_pv && !tactical && best > -SCORE_WIN_MIN) {
             if (depth >= 1 && depth <= 4 && searched * 100 >= LMP_COUNT[depth] * sp.lmp_mul) continue;
             if (list[i].value < sp.cand_min) continue;
+        }
+        if (tfon && searched > 0 && best > -SCORE_WIN_MIN) {
+            int a = b->pat4[me][q];
+            if (a < P4_BLOCK4 && a != P4_FLEX3_2X && (sp.tfut >= 2 || a >= P4_FLEX3 || !tactical)) continue;
         }
         if (restricted(b, me) && board_is_forbidden(b, q)) continue;
         int rzout = rzon && !tactical && searched >= sp.rz_after && rz_count(ply) > 0 && best > -SCORE_WIN_MIN &&
@@ -939,6 +976,23 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         }
     }
 
+    if (ttstage == 1 && best < beta) {
+        // 置換表の手で切れなかった: 残りを生成する (置換表の手を先頭に置いて、その次から読む)
+        ttstage = 2;
+        c->drop4 = drop4;
+        n = gen_moves(c, list, me, op, op_threat, ttmove, ply, gmode, tzon);
+        c->drop4 = 0;
+        i0 = 0;
+        for (int k = 0; k < n; k++)
+            if (list[k].pos == ttmove) {
+                Move t = list[0];
+                list[0] = list[k];
+                list[k] = t;
+                i0 = 1;
+                break;
+            }
+        goto moves_loop;
+    }
     if (searched == 0) {
         // 打てる手がない: 相手の活三を止められない (負け)、または全部禁じ手 / 静止探索で四がない
         if (op_threat) best = -(SCORE_WIN - ply - 3);
