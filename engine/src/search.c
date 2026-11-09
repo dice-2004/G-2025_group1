@@ -18,6 +18,7 @@
 #include "dfpn.h"
 #include "l3.h"
 #include "rz.h"
+#include "ts.h"
 #include "tz.h"
 #include "vcf.h"
 
@@ -251,9 +252,11 @@ static struct {
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
+    int ts_pct;         // ルートで自分の勝ちを αβ の脅威探索 (ts.c) で調べる時間 (上限時間の %)。0 = 使わない
+    int dfver_ts;       // 選んだ手の確かめ (dfver_pct): 1 = df-pn と ts に半分ずつ、2 = ts だけ
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
-    .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
+    .ts_pct = 0, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
@@ -306,6 +309,8 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "dfver_pct")) sp.dfver_pct = (int)v;
     else if (!strcmp(name, "dfver_l3")) sp.dfver_l3 = (int)v;
     else if (!strcmp(name, "rz")) sp.rz = (int)v;
+    else if (!strcmp(name, "ts_pct")) sp.ts_pct = (int)v;
+    else if (!strcmp(name, "dfver_ts")) sp.dfver_ts = (int)v;
     else if (!strcmp(name, "rz_depth")) sp.rz_depth = (int)v;
     else if (!strcmp(name, "rz_after")) sp.rz_after = (int)v;
     else if (!strcmp(name, "rz_len")) sp.rz_len = (int)v;
@@ -840,7 +845,18 @@ static void verify_move(Ctx *c, Board *b, int op, RootMove *root, int nr, int ha
         DfpnResult r;
         board_move(b, cand[i]);
         int lose;
-        if (sp.dfver_l3) {
+        if (sp.dfver_ts) {
+            TsResult tr;
+            lose = 0;
+            r.nodes = 0;
+            r.aborted = 0;
+            if (sp.dfver_ts == 1) lose = dfpn_vct(b, op, 1L << 40, per / 2, &r);
+            if (!lose) {
+                lose = ts_win(b, op, 40, 1L << 40, sp.dfver_ts == 1 ? per / 2 : per, &tr);
+                r.nodes += tr.nodes;
+                r.aborted = tr.aborted;
+            }
+        } else if (sp.dfver_l3) {
             L3Result lr;
             lose = l3_win(b, op, 1L << 40, per, &lr);
             r.nodes = lr.nodes;
@@ -920,6 +936,13 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         res->move = vmove;
         res->score = SCORE_WIN - 20;
         res->reason = "vct";
+        return;
+    }
+    TsResult tsr;
+    if (ndefs < 0 && sp.ts_pct > 0 && ts_win(b, me, 40, 1L << 40, (int)(hard * sp.ts_pct / 100), &tsr) && tsr.move >= 0) {
+        res->move = tsr.move;
+        res->score = SCORE_WIN - 20;
+        res->reason = "ts";
         return;
     }
     if (ndefs < 0 && sp.vctdef_pct > 0) {

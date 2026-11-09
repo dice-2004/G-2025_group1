@@ -20,6 +20,7 @@
 #include "../src/board.h"
 #include "../src/dfpn.h"
 #include "../src/l3.h"
+#include "../src/ts.h"
 #include "../src/tz.h"
 #include "../src/vcf.h"
 
@@ -167,6 +168,27 @@ static int cmd_zonecheck(Rule rule, long nodes) {
     return 0;
 }
 
+static int cmd_ts(Rule rule, int depth, int ms, int opp) {
+    static Board b;
+    char line[8192];
+    double total = 0;
+    while (fgets(line, sizeof line, stdin)) {
+        board_init(&b, 15, &rule);
+        if (load_moves(&b, line) < 0) { printf("error\n"); continue; }
+        int att = opp ? opp_color(board_side(&b)) : board_side(&b);
+        TsResult r;
+        double t0 = now_sec();
+        ts_win(&b, att, depth, 1L << 40, ms, &r);
+        double dt = now_sec() - t0;
+        total += dt;
+        if (r.win) printf("win %d,%d | depth=%d nodes=%ld %.1fms\n", pos_x(r.move), pos_y(r.move), r.depth, r.nodes, dt * 1000);
+        else printf("nowin | depth=%d nodes=%ld%s %.1fms\n", r.depth, r.nodes, r.aborted ? " aborted" : "", dt * 1000);
+        fflush(stdout);
+    }
+    fprintf(stderr, "time %.3f s\n", total);
+    return 0;
+}
+
 static int cmd_dfpn(Rule rule, long nodes, int opp, int ms) {
     static Board b;
     char line[8192];
@@ -309,6 +331,14 @@ int main(int argc, char **argv) {
     if (getenv("L3_MIN")) g_l3_quiet_min = atoi(getenv("L3_MIN"));
     if (!strcmp(argv[1], "l3count")) return cmd_l3count(rule, argc > 3 ? atol(argv[3]) : 2000, argc > 4 ? atoi(argv[4]) : 0);
     if (!strcmp(argv[1], "zonecheck")) return cmd_zonecheck(rule, argc > 3 ? atol(argv[3]) : 20000);
+    if (getenv("TS_VCF")) g_ts_vcf_nodes = atol(getenv("TS_VCF"));
+    if (getenv("TS_MIN")) g_ts_threat_min = atoi(getenv("TS_MIN"));
+    if (getenv("TS_FLAGS")) g_ts_flags = atoi(getenv("TS_FLAGS"));
+    if (getenv("TS_QUIET")) g_ts_quiet_nodes = atol(getenv("TS_QUIET"));
+    { extern int g_ts_step, g_ts_start; if (getenv("TS_STEP")) g_ts_step = atoi(getenv("TS_STEP")); if (getenv("TS_START")) g_ts_start = atoi(getenv("TS_START")); }
+    if (getenv("TS_LOC")) g_ts_loc = atoi(getenv("TS_LOC"));
+    if (!strcmp(argv[1], "ts")) return cmd_ts(rule, argc > 3 ? atoi(argv[3]) : 20, argc > 4 ? atoi(argv[4]) : 1000, 0);
+    if (!strcmp(argv[1], "tsopp")) return cmd_ts(rule, argc > 3 ? atoi(argv[3]) : 20, argc > 4 ? atoi(argv[4]) : 1000, 1);
     if (!strcmp(argv[1], "l3")) return cmd_l3(rule, argc > 3 ? atol(argv[3]) : 100000, 0, argc > 4 ? atoi(argv[4]) : 0);
     if (!strcmp(argv[1], "l3opp")) return cmd_l3(rule, argc > 3 ? atol(argv[3]) : 100000, 1, argc > 4 ? atoi(argv[4]) : 0);
     if (!strcmp(argv[1], "dfpnopp")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 1, argc > 4 ? atoi(argv[4]) : 0);
