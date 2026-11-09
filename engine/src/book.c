@@ -80,10 +80,12 @@ static const BookEntry *lookup(const BookEntry *tab, int n, uint64_t key) {
 
 int book_probe(Board *b, int *move) {
     if (!g_enabled || b->size != BSIZE || b->nmoves > g_book_max_stones) return 0;
-    // 五や達四の点がある局面は探索に任せる。g_enabled >= 2 なら相手の達四の点 (相手の活三) にはブックの受けを使う
-    int me = board_side(b);
+    // 五や自分の達四の点がある局面は探索に任せる。相手の達四の点 (相手の活三) があるときは、ブックの手が
+    // それを止める (打った後に相手の達四の点がなくなる) ときだけ使う。g_enabled >= 2 なら止めなくても使う
+    int me = board_side(b), op = opp_color(me);
     for (int c = BLACK; c <= WHITE; c++)
-        if (b->p4cnt[c][P4_FIVE] || (b->p4cnt[c][P4_FLEX4] && (c == me || g_enabled < 2))) return 0;
+        if (b->p4cnt[c][P4_FIVE] || (b->p4cnt[c][P4_FLEX4] && c == me)) return 0;
+    int must_block = b->p4cnt[op][P4_FLEX4] && g_enabled < 2;
     // 石数が手番と合わない盤 (BOARD で置き石など) は使わない
     int nb = 0, nw = 0;
     for (int y = 0; y < BSIZE; y++)
@@ -110,6 +112,12 @@ int book_probe(Board *b, int *move) {
     int p = to_pos(x, y);
     if (b->cell[p] != EMPTY) return 0;
     if (board_side(b) == BLACK && board_is_forbidden(b, p)) return 0;
+    if (must_block) {
+        board_move(b, p);
+        int blocked = !b->p4cnt[op][P4_FLEX4];
+        board_undo(b);
+        if (!blocked) return 0;
+    }
     *move = p;
     return 1;
 }
