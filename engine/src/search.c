@@ -269,7 +269,7 @@ static struct {
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
     int ttfirst;    // 1 = 置換表の手を手の生成の前に読み、切れなければ生成する (段階的な手の生成。速さだけ)
     int tfut, tfut_margin;   // 残り深さ 1 の節点で評価が alpha - tfut_margin 以下なら、四でない手 (1 = 自分のただの三も、2 = 相手の三の点の受けも) を読まない
-    int vz, vz_depth, vz_nodes, vz_keep, vz_pv, vz_root, vz_root_nodes;   // 相手の VCT の証明の圏 (dfpn_vct_zone) の外の手を読まない。vz_keep 以上の自分の形を作る手 (反撃) は残す
+    int vz, vz_depth, vz_nodes, vz_keep, vz_pv, vz_root, vz_root_nodes, vz_tact;   // 相手の VCT の証明の圏 (dfpn_vct_zone) の外の手を読まない。vz_keep 以上の自分の形を作る手 (反撃) は残す
     int mcp, mcp_mul, mcp_tact, mcp_pv;   // 全部の深さの手の数の枝刈り (Rapfi 風): 3 + 深さ^1.3 手 (評価が良くなっていなければ半分) を超えたら読まない。倍率 %、戦術的な手・PV にも掛けるか
     int fut, fut_margin, fut_depth;      // futility: 評価 − margin × (深さ − 1 − 改善) ≥ beta なら評価を返す (PV・相手の活三があるときは除く)
     int razor, razor_margin, razor_depth; // razoring: 評価 + margin × 深さ < alpha なら静止探索の値を返す
@@ -289,7 +289,7 @@ static struct {
 } sp = {
     .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .mcp = 0, .mcp_mul = 100, .mcp_tact = 0, .mcp_pv = 0, .fut = 0, .fut_margin = 250, .fut_depth = 99, .razor = 0, .razor_margin = 100, .razor_depth = 2, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
     .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
-    .vz = 0, .vz_depth = 4, .vz_nodes = 2000, .vz_keep = P4_BLOCK3, .vz_pv = 1, .vz_root = 0, .vz_root_nodes = 20000,
+    .vz = 0, .vz_depth = 4, .vz_nodes = 2000, .vz_keep = P4_BLOCK3, .vz_pv = 1, .vz_root = 0, .vz_root_nodes = 20000, .vz_tact = 0,
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
@@ -409,6 +409,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "vz_nodes")) sp.vz_nodes = (int)v;
     else if (!strcmp(name, "vz_keep")) sp.vz_keep = (int)v;
     else if (!strcmp(name, "vz_pv")) sp.vz_pv = (int)v;
+    else if (!strcmp(name, "vz_tact")) sp.vz_tact = (int)v;   // 1 = 圏の中の手を戦術的な手として枝刈り・LMR から守る
     else if (!strcmp(name, "vz_root")) sp.vz_root = (int)v;
     else if (!strcmp(name, "vz_root_nodes")) sp.vz_root_nodes = (int)v;
     else if (!strcmp(name, "tz_depth")) sp.tz_depth = (int)v;
@@ -879,7 +880,7 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
 moves_loop:
     for (int i = i0; i < n; i++) {
         pick_move(list, i, n);
-        int q = list[i].pos, tactical = list[i].tactical || op_threat || tzon;
+        int q = list[i].pos, tactical = list[i].tactical || op_threat || tzon || (vzon && sp.vz_tact);
         // 全部の深さの手の数の枝刈り (Rapfi 風、既定は無効)。i + 1 = 何手目か (枝刈りした手も数える)
         if (sp.mcp && !qmode && searched > 0 && best > -SCORE_WIN_MIN && (sp.mcp_tact || !tactical) && (sp.mcp_pv || !is_pv) &&
             (i + 1) * (2 - improving) >= mcp_table[depth < 63 ? depth : 63])
