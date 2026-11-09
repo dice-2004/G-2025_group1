@@ -381,6 +381,13 @@ static int timed(Rule rule, int ms, int threads) {
         SearchResult r;
         search_root(&b, &lim, &r);
         printf("%d,%d %d %d %ld %d %s\n", pos_x(r.move), pos_y(r.move), r.score, r.depth, r.nodes, r.ms, r.reason);
+        extern long tstree_stat[12];
+        if (tstree_stat[0] && getenv("G2_TSSTAT")) {
+            fprintf(stderr, "ts_tree calls %ld nodes %ld wins %ld by depth", tstree_stat[0], tstree_stat[1], tstree_stat[10]);
+            for (int d = 0; d < 8; d++) fprintf(stderr, " %ld", tstree_stat[2 + d]);
+            fprintf(stderr, "\n");
+            memset(tstree_stat, 0, sizeof tstree_stat);
+        }
         fflush(stdout);
     }
     return 0;
