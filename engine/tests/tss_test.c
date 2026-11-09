@@ -18,6 +18,7 @@
 #include <time.h>
 
 #include "../src/board.h"
+#include "../src/dfpn.h"
 #include "../src/vcf.h"
 
 static Rule parse_rule(const char *s) {
@@ -70,6 +71,28 @@ static int cmd_solve(Rule rule, int mode, int depth, long nodes, int opp) {
         } else {
             printf("nowin | nodes=%ld%s\n", r.nodes, r.aborted ? " aborted" : "");
         }
+        fflush(stdout);
+    }
+    fprintf(stderr, "time %.3f s\n", total);
+    return 0;
+}
+
+// df-pn の VCT (dfpn.c): g2-tss dfpn <rule> [nodes]
+static int cmd_dfpn(Rule rule, long nodes, int opp) {
+    static Board b;
+    char line[8192];
+    double total = 0;
+    while (fgets(line, sizeof line, stdin)) {
+        board_init(&b, 15, &rule);
+        if (load_moves(&b, line) < 0) { printf("error\n"); continue; }
+        int att = opp ? opp_color(board_side(&b)) : board_side(&b);
+        DfpnResult r;
+        double t0 = now_sec();
+        dfpn_vct(&b, att, nodes, 0, &r);
+        double dt = now_sec() - t0;
+        total += dt;
+        if (r.win) printf("win %d,%d | nodes=%ld %.1fms\n", pos_x(r.move), pos_y(r.move), r.nodes, dt * 1000);
+        else printf("nowin | nodes=%ld%s %.1fms\n", r.nodes, r.aborted ? " aborted" : "", dt * 1000);
         fflush(stdout);
     }
     fprintf(stderr, "time %.3f s\n", total);
@@ -179,6 +202,10 @@ int main(int argc, char **argv) {
     pattern_init(&rule);
     if (!strcmp(argv[1], "defend")) return cmd_defend(rule, argc > 3 ? atol(argv[3]) : 200000, 0);
     if (!strcmp(argv[1], "vctdefend")) return cmd_defend(rule, argc > 3 ? atol(argv[3]) : 1000000, 1);
+    if (getenv("DFPN_VCF")) g_dfpn_vcf_nodes = atol(getenv("DFPN_VCF"));
+    if (getenv("DFPN_ZONE")) g_dfpn_zone_k = atoi(getenv("DFPN_ZONE"));
+    if (!strcmp(argv[1], "dfpn")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 0);
+    if (!strcmp(argv[1], "dfpnopp")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 1);
     if (argc < 4) return 2;
     int mode = !strcmp(argv[3], "vct") ? TSS_VCT : TSS_VCF;
     int depth = argc > 4 ? atoi(argv[4]) : (mode == TSS_VCF ? 30 : 10);

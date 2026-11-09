@@ -15,6 +15,7 @@
 #include <time.h>
 
 #include "eval.h"
+#include "dfpn.h"
 #include "tz.h"
 #include "vcf.h"
 
@@ -243,14 +244,16 @@ static struct {
     int lmr_pv;         // lmr_log のとき PV の節点での削減を何 % にするか
     int tact_own;       // 自分のこの形 (Pattern4) 以上を作る手を「戦術的」(LMP・LMR をしない) とする
     int tact_def;       // 相手のこの形以上の点をふさぐ手を「戦術的」とする
+    int vct_dfpn;       // 1 = ルートの VCT (vct_pct) を証明数探索 (dfpn.c) で調べる (既定。0 = vct_solve)
 } sp = {
-    .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 0,
+    .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
     .cand_min = 0, .ext_three = 1, .vctdef_pct = 0, .unstable_pct = 100,
     .leaf_vcf = 0, .leaf_vcf_depth = 12, .tz = 0, .tz_depth = 2,
     .tz_nodes = 300, .tz_ext = 0, .nmp = 0, .nmp_depth = 3,
     .nmp_r = 2, .own_vcf = 0, .ext_four = 0, .ext_limit = 4,
     .lmr_log = 0, .lmr_pv = 66, .tact_own = P4_FLEX3, .tact_def = P4_FLEX3,
+    .vct_dfpn = 1,
 };
 
 int search_soft_pct(void) { return sp.soft_pct; }
@@ -305,6 +308,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "lmr_pv")) sp.lmr_pv = (int)v;
     else if (!strcmp(name, "tact_own")) sp.tact_own = (int)v;
     else if (!strcmp(name, "tact_def")) sp.tact_def = (int)v;
+    else if (!strcmp(name, "vct_dfpn")) sp.vct_dfpn = (int)v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strcmp(name, "table")) g_eval_params.use_table = (int)v;
@@ -801,7 +805,11 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     }
     static int defs[MAX_MOVES];
     int ndefs = vcf_defenses(b, hard * 60, defs);   // -1 = 相手に VCF なし
-    if (ndefs < 0 && sp.vct_pct > 0 && vct_solve(b, sp.vct_depth, hard * sp.vct_pct * 6, &vmove)) {
+    // df-pn は上限時間の vct_pct % まで
+    DfpnResult dr;
+    if (ndefs < 0 && sp.vct_pct > 0 &&
+        (sp.vct_dfpn ? (dfpn_vct(b, me, 1L << 40, (int)(hard * sp.vct_pct / 100), &dr) && (vmove = dr.move) >= 0)
+                     : vct_solve(b, sp.vct_depth, hard * sp.vct_pct * 6, &vmove))) {
         res->move = vmove;
         res->score = SCORE_WIN - 20;
         res->reason = "vct";
