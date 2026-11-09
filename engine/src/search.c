@@ -144,6 +144,7 @@ typedef struct {
     int history[3][NCELL];  // 前の手の情報を少し残す (search_root で 1/4 に)
     uint32_t tzmark[NCELL]; // 脅威圏の点の印 (== tzgen なら圏内)。gen_moves の間だけ使う
     uint32_t tzgen;
+    int seval[MAX_PLY];     // 節点の静的評価 (手の数の枝刈り・futility の「評価が良くなっているか」用)
 } Ctx;
 
 static Ctx ctxs[MAX_THREADS];
@@ -255,6 +256,9 @@ static struct {
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
+    int mcp, mcp_mul, mcp_tact, mcp_pv;   // 全部の深さの手の数の枝刈り (Rapfi 風): 3 + 深さ^1.3 手 (評価が良くなっていなければ半分) を超えたら読まない。倍率 %、戦術的な手・PV にも掛けるか
+    int fut, fut_margin, fut_depth;      // futility: 評価 − margin × (深さ − 1 − 改善) ≥ beta なら評価を返す (PV・相手の活三があるときは除く)
+    int razor, razor_margin, razor_depth; // razoring: 評価 + margin × 深さ < alpha なら静止探索の値を返す
     int ts_tree_root;   // >0: 根の手番側の前の反復の点がこれ以下に負けているときだけ本探索の中の ts を使う
     int ts_tree_pv;   // 1 = PV の局面だけ
     int ts_tree_fail;   // 1 = 勝てなかった局面を覚えて呼び直さない
@@ -269,7 +273,7 @@ static struct {
     int dfver_ts;       // 選んだ手の確かめ (dfver_pct): 1 = df-pn と ts に半分ずつ、2 = ts だけ
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
-    .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
+    .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .mcp = 0, .mcp_mul = 100, .mcp_tact = 0, .mcp_pv = 0, .fut = 0, .fut_margin = 250, .fut_depth = 99, .razor = 0, .razor_margin = 100, .razor_depth = 2, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
@@ -292,6 +296,19 @@ static double ln_(double x) {
     double t = (x - 1) / (x + 1), t2 = t * t, s = 0, p = t;
     for (int i = 1; i < 30; i += 2) { s += p / i; p *= t2; }
     return k * 0.6931471805599453 + 2 * s;
+}
+// 手の数の枝刈りの表 [深さ] = (3 + 深さ^1.3) × mcp_mul / 100 (深さ^1.3 = exp(1.3 ln d))
+static int mcp_table[64];
+static double exp_(double x) {
+    int k = 0;
+    while (x > 0.5) { x /= 2; k++; }
+    double s = 1, t = 1;
+    for (int i = 1; i < 20; i++) { t *= x / i; s += t; }
+    while (k-- > 0) s *= s;
+    return s;
+}
+static void mcp_init(void) {
+    for (int d = 0; d < 64; d++) mcp_table[d] = (int)((3 + (d ? exp_(1.3 * ln_(d)) : 0)) * sp.mcp_mul / 100);
 }
 static int lmr_table_ok;
 static void lmr_init(void) {
@@ -345,6 +362,16 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "ts_tree_fail")) sp.ts_tree_fail = (int)v;
     else if (!strcmp(name, "ts_tree_pv")) sp.ts_tree_pv = (int)v;
     else if (!strcmp(name, "ts_tree_root")) sp.ts_tree_root = (int)v;
+    else if (!strcmp(name, "mcp")) sp.mcp = (int)v, mcp_init();
+    else if (!strcmp(name, "mcp_mul")) sp.mcp_mul = (int)v, mcp_init();
+    else if (!strcmp(name, "mcp_tact")) sp.mcp_tact = (int)v;
+    else if (!strcmp(name, "mcp_pv")) sp.mcp_pv = (int)v;
+    else if (!strcmp(name, "fut")) sp.fut = (int)v;
+    else if (!strcmp(name, "fut_margin")) sp.fut_margin = (int)v;
+    else if (!strcmp(name, "fut_depth")) sp.fut_depth = (int)v;
+    else if (!strcmp(name, "razor")) sp.razor = (int)v;
+    else if (!strcmp(name, "razor_margin")) sp.razor_margin = (int)v;
+    else if (!strcmp(name, "razor_depth")) sp.razor_depth = (int)v;
     else if (!strcmp(name, "ts_tree_depth")) sp.ts_tree_depth = (int)v;
     else if (!strcmp(name, "ts_tree_plies")) sp.ts_tree_plies = (int)v;
     else if (!strcmp(name, "ts_tree_eval")) sp.ts_tree_eval = (int)v;
@@ -588,6 +615,19 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         }
     }
 
+    // 静的評価による打ち切り (Rapfi 風、既定は無効): futility と razoring。手の数の枝刈りの「評価が良くなっているか」もここで決める
+    int improving = 1;
+    if (!qmode && (sp.mcp || sp.fut || sp.razor)) {
+        int sev = evaluate(b);
+        if (ply < MAX_PLY) c->seval[ply] = sev;
+        improving = ply < 2 || sev > c->seval[ply - 2];
+        if (!is_pv && !op_threat && beta < SCORE_WIN_MIN && alpha > -SCORE_WIN_MIN) {
+            int m = depth - 1 - improving;
+            if (sp.fut && depth <= sp.fut_depth && sev - sp.fut_margin * (m > 0 ? m : 0) >= beta) return sev;
+            if (sp.razor && depth <= sp.razor_depth && sev + sp.razor_margin * depth < alpha) return pvs(c, alpha, alpha + 1, 0, ply, 0);
+        }
+    }
+
     // 勝勢の側の脅威探索 (ts.c): 評価が高く脅威の手がある局面で、脅威の手だけで勝てるかを短い予算で調べる
     if (sp.ts_tree && !qmode && !op_threat && depth >= sp.ts_tree_depth && (!sp.ts_tree_side || (ply & 1)) && (!sp.ts_tree_pv || is_pv) && tstree_gate &&
         b->p4cnt[me][P4_FLEX3] + b->p4cnt[me][P4_FLEX3_PLUS] + b->p4cnt[me][P4_FLEX3_2X] + b->p4cnt[me][P4_BLOCK4_FLEX3] +
@@ -667,6 +707,10 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     for (int i = 0; i < n; i++) {
         pick_move(list, i, n);
         int q = list[i].pos, tactical = list[i].tactical || op_threat || tzon;
+        // 全部の深さの手の数の枝刈り (Rapfi 風、既定は無効)。i + 1 = 何手目か (枝刈りした手も数える)
+        if (sp.mcp && !qmode && searched > 0 && best > -SCORE_WIN_MIN && (sp.mcp_tact || !tactical) && (sp.mcp_pv || !is_pv) &&
+            (i + 1) * (2 - improving) >= mcp_table[depth < 63 ? depth : 63])
+            continue;
         if (searched > 0 && !is_pv && !tactical && best > -SCORE_WIN_MIN) {
             if (depth >= 1 && depth <= 4 && searched * 100 >= LMP_COUNT[depth] * sp.lmp_mul) continue;
             if (list[i].value < sp.cand_min) continue;
