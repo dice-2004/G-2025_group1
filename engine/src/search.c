@@ -286,7 +286,7 @@ static struct {
     .tz_nodes = 300, .tz_ext = 0, .nmp = 0, .nmp_depth = 3,
     .nmp_r = 2, .own_vcf = 0, .ext_four = 0, .ext_limit = 4,
     .lmr_log = 0, .lmr_pv = 66, .tact_own = P4_FLEX3, .tact_def = P4_FLEX3,
-    .vct_dfpn = 1, .def_line = 0, .def_own4 = 1, .def_vcf_nodes = 300, .def_vcf_depth = 16, .def_vcf_min = 2, .def_own4_depth = 99,
+    .vct_dfpn = 1, .def_line = 0, .def_own4 = 0, .def_vcf_nodes = 300, .def_vcf_depth = 16, .def_vcf_min = 99, .def_own4_depth = 2,
 };
 
 int search_soft_pct(void) { return sp.soft_pct; }
