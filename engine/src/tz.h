@@ -36,16 +36,6 @@ int tz_probe_att(Board *b, int attacker, long max_nodes, TzZone *z);
 // 手番は見ない (受け側の手番の局面で「受け側がパスしたら」の手順として使う)
 int tz_line_zone(Board *b, int att, const int *line, int n, TzZone *z);
 
-// λ2 探索 (圏つきの VCT): 攻めは「打った後、受け側がパスすれば VCF がある」手すべて (三・四に限らない)、
-// 受けはその VCF の圏と受け側の四だけ (圏の外の受けは同じ VCF で負けるので健全)。attacker が手番として調べる。
-// max_depth は攻めの脅威の手数、vcf_nodes は 1 回の VCF の上限。勝てれば 1 (*move に初手)
-typedef struct {
-    long nodes;
-    int aborted;
-    int depth;      // 勝ちを見つけた反復の深さ
-} L2Result;
-int l2_solve(Board *b, int attacker, int max_depth, long max_nodes, long vcf_nodes, int *move, L2Result *res);
-
 // ルール・盤が変わったとき (search_clear_tt から)
 void tz_clear(void);
 

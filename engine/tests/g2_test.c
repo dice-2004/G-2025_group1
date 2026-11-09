@@ -123,6 +123,21 @@ static int bench(Rule rule) {
     return 0;
 }
 
+// 環境変数 G2_PARAMS="tz=1,tz_depth=2" で探索の値を変える (speed / timed)
+static void apply_env_params(Rule rule) {
+    const char *env = getenv("G2_PARAMS");
+    if (!env) return;
+    char buf[512], *save = NULL;
+    snprintf(buf, sizeof buf, "%s", env);
+    for (char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
+        char *eq = strchr(t, '=');
+        if (!eq) continue;
+        *eq = 0;
+        if (!search_set_param(t, atol(eq + 1))) fprintf(stderr, "unknown param %s\n", t);
+    }
+    pattern_init(&rule);
+}
+
 // 固定深さの探索速度 (詰み探索は使わずに本探索だけを測る)
 static int speed(Rule rule, int depth, int threads) {
     static Board b;
@@ -133,19 +148,7 @@ static int speed(Rule rule, int depth, int threads) {
     pattern_init(&rule);
     search_set_param("vct_pct", 0);
     search_set_threads(threads);
-    // 環境変数 G2_PARAMS="tz=1,tz_depth=2" で探索の値を変える
-    const char *env = getenv("G2_PARAMS");
-    if (env) {
-        char buf[512], *save = NULL;
-        snprintf(buf, sizeof buf, "%s", env);
-        for (char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
-            char *eq = strchr(t, '=');
-            if (!eq) continue;
-            *eq = 0;
-            if (!search_set_param(t, atol(eq + 1))) fprintf(stderr, "unknown param %s\n", t);
-        }
-        pattern_init(&rule);
-    }
+    apply_env_params(rule);
     while (fgets(line, sizeof line, stdin)) {
         board_init(&b, 15, &rule);
         char *s = line;
@@ -292,6 +295,7 @@ static int timed(Rule rule, int ms, int threads) {
     char line[8192];
     pattern_init(&rule);
     search_set_threads(threads);
+    apply_env_params(rule);
     while (fgets(line, sizeof line, stdin)) {
         board_init(&b, 15, &rule);
         char *s = line;

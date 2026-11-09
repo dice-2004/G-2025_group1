@@ -243,7 +243,15 @@ static struct {
     int lmr_pv;         // lmr_log のとき PV の節点での削減を何 % にするか
     int tact_own;       // 自分のこの形 (Pattern4) 以上を作る手を「戦術的」(LMP・LMR をしない) とする
     int tact_def;       // 相手のこの形以上の点をふさぐ手を「戦術的」とする
-} sp = {0, P4_BLOCK4_PLUS, 60, 0, 10, 1, 100, 3, 0, 1, 0, 100, 0, 12, 0, 2, 300, 0, 0, 3, 2, 0, 0, 4, 0, 66, P4_FLEX3, P4_FLEX3};
+} sp = {
+    .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 0,
+    .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
+    .cand_min = 0, .ext_three = 1, .vctdef_pct = 0, .unstable_pct = 100,
+    .leaf_vcf = 0, .leaf_vcf_depth = 12, .tz = 0, .tz_depth = 2,
+    .tz_nodes = 300, .tz_ext = 0, .nmp = 0, .nmp_depth = 3,
+    .nmp_r = 2, .own_vcf = 0, .ext_four = 0, .ext_limit = 4,
+    .lmr_log = 0, .lmr_pv = 66, .tact_own = P4_FLEX3, .tact_def = P4_FLEX3,
+};
 
 int search_soft_pct(void) { return sp.soft_pct; }
 

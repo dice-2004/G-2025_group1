@@ -18,7 +18,6 @@
 #include <time.h>
 
 #include "../src/board.h"
-#include "../src/tz.h"
 #include "../src/vcf.h"
 
 static Rule parse_rule(const char *s) {
@@ -71,27 +70,6 @@ static int cmd_solve(Rule rule, int mode, int depth, long nodes, int opp) {
         } else {
             printf("nowin | nodes=%ld%s\n", r.nodes, r.aborted ? " aborted" : "");
         }
-        fflush(stdout);
-    }
-    fprintf(stderr, "time %.3f s\n", total);
-    return 0;
-}
-
-// λ2 (tz.c): g2-tss l2 <rule> [depth] [nodes] [vcf_nodes]
-static int cmd_l2(Rule rule, int depth, long nodes, long vcf_nodes) {
-    static Board b;
-    char line[8192];
-    double total = 0;
-    while (fgets(line, sizeof line, stdin)) {
-        board_init(&b, 15, &rule);
-        if (load_moves(&b, line) < 0) { printf("error\n"); continue; }
-        int mv;
-        L2Result r;
-        double t0 = now_sec();
-        int win = l2_solve(&b, board_side(&b), depth, nodes, vcf_nodes, &mv, &r);
-        total += now_sec() - t0;
-        if (win) printf("win %d,%d | depth=%d nodes=%ld\n", pos_x(mv), pos_y(mv), r.depth, r.nodes);
-        else printf("nowin | nodes=%ld%s\n", r.nodes, r.aborted ? " aborted" : "");
         fflush(stdout);
     }
     fprintf(stderr, "time %.3f s\n", total);
@@ -201,8 +179,6 @@ int main(int argc, char **argv) {
     pattern_init(&rule);
     if (!strcmp(argv[1], "defend")) return cmd_defend(rule, argc > 3 ? atol(argv[3]) : 200000, 0);
     if (!strcmp(argv[1], "vctdefend")) return cmd_defend(rule, argc > 3 ? atol(argv[3]) : 1000000, 1);
-    if (!strcmp(argv[1], "l2"))
-        return cmd_l2(rule, argc > 3 ? atoi(argv[3]) : 8, argc > 4 ? atol(argv[4]) : 100000, argc > 5 ? atol(argv[5]) : 2000);
     if (argc < 4) return 2;
     int mode = !strcmp(argv[3], "vct") ? TSS_VCT : TSS_VCF;
     int depth = argc > 4 ? atoi(argv[4]) : (mode == TSS_VCF ? 30 : 10);
