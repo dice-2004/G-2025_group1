@@ -191,7 +191,7 @@ def main():
     ap.add_argument("--rule", default="renju", choices=["freestyle", "renju"])
     ap.add_argument("-j", type=int, default=4)
     ap.add_argument("--rapfi", default=os.environ.get("RAPFI_DIR", os.path.join(REPO, "..", "rapfi-bin")) + "/pbrain-rapfi")
-    ap.add_argument("--max-ply", type=int, default=8, help="この石数未満の局面にブックの手を入れる")
+    ap.add_argument("--max-ply", type=int, default=6, help="この石数未満の局面にブックの手を入れる (既定 6 = 6 手目まで。深いブックは事前計算=学習に近づくので浅く保つ)")
     ap.add_argument("--max-ply-white", type=int, default=0, help="G2 が白の木だけこの石数未満まで (0 = --max-ply と同じ)")
     ap.add_argument("--opp-k", default="3,8,6,6,4,4,3,3,3,3,2,2", help="相手の手番の局面で追う候補数 (石数ごと)")
     ap.add_argument("--margin", type=int, default=250, help="最善との評価差がこれ以内の候補だけ追う")
