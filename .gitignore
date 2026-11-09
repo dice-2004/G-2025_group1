@@ -61,3 +61,6 @@ __pycache__/
 /gomoku
 /gomoku_g2
 engine/build/
+
+# Rapfi の評価のキャッシュ (engine/tests/*.py が作る。make clean で消えないよう build の外)
+engine/cache/*.tsv

@@ -23,7 +23,7 @@ ap.add_argument("--name", default="g2")
 ap.add_argument("--nodes", type=int, default=300000)
 ap.add_argument("--min", type=int, default=150)
 ap.add_argument("--all", action="store_true", help="勝った対局も含める")
-ap.add_argument("--cache", default=os.path.join(HERE, "..", "build", "drops_labels.tsv"))
+ap.add_argument("--cache", default=os.path.join(HERE, "..", "cache", "drops_labels.tsv"))
 ap.add_argument("-j", type=int, default=4)
 a = ap.parse_args()
 
