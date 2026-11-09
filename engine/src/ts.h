@@ -15,6 +15,8 @@ typedef struct {
 } TsResult;
 
 int ts_win(Board *b, int attacker, int max_depth, long max_nodes, int max_ms, TsResult *res);
+// 本探索の中から呼ぶ版: 置換表を消さない (同じ予算で何度も呼ぶ前提。前の呼び出しの結果を使い回す)
+int ts_probe(Board *b, int attacker, int max_depth, long max_nodes, TsResult *res);
 
 // 調整用: 中の VCF の確認のノード上限 (200)、脅威の手の pat4 の下限 (P4_BLOCK3)、静かな脅威を探す線の範囲 (3)
 extern long g_ts_vcf_nodes, g_ts_quiet_nodes;

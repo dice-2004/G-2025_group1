@@ -252,11 +252,12 @@ static struct {
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
+    int ts_tree, ts_tree_depth, ts_tree_plies, ts_tree_eval;   // 本探索の中の ts: ノード上限 (0 = 使わない)、残りの深さの下限、攻めの手数、静的評価の下限
     int ts_pct;         // ルートで自分の勝ちを αβ の脅威探索 (ts.c) で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_ts;       // 選んだ手の確かめ (dfver_pct): 1 = df-pn と ts に半分ずつ、2 = ts だけ
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
-    .ts_pct = 0, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
+    .ts_tree = 0, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
@@ -310,6 +311,10 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "dfver_l3")) sp.dfver_l3 = (int)v;
     else if (!strcmp(name, "rz")) sp.rz = (int)v;
     else if (!strcmp(name, "ts_pct")) sp.ts_pct = (int)v;
+    else if (!strcmp(name, "ts_tree")) sp.ts_tree = (int)v;
+    else if (!strcmp(name, "ts_tree_depth")) sp.ts_tree_depth = (int)v;
+    else if (!strcmp(name, "ts_tree_plies")) sp.ts_tree_plies = (int)v;
+    else if (!strcmp(name, "ts_tree_eval")) sp.ts_tree_eval = (int)v;
     else if (!strcmp(name, "dfver_ts")) sp.dfver_ts = (int)v;
     else if (!strcmp(name, "rz_depth")) sp.rz_depth = (int)v;
     else if (!strcmp(name, "rz_after")) sp.rz_after = (int)v;
@@ -517,6 +522,13 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         }
     }
 
+    // 勝勢の側の脅威探索 (ts.c): 評価が高く脅威の手がある局面で、脅威の手だけで勝てるかを短い予算で調べる
+    if (sp.ts_tree && !qmode && !op_threat && depth >= sp.ts_tree_depth &&
+        b->p4cnt[me][P4_FLEX3] + b->p4cnt[me][P4_FLEX3_PLUS] + b->p4cnt[me][P4_FLEX3_2X] + b->p4cnt[me][P4_BLOCK4_FLEX3] +
+        b->p4cnt[me][P4_BLOCK4] + b->p4cnt[me][P4_BLOCK4_PLUS] > 0 && evaluate(b) >= sp.ts_tree_eval) {
+        TsResult tr;
+        if (ts_probe(b, me, sp.ts_tree_plies, sp.ts_tree, &tr)) return SCORE_WIN - ply - 2 * tr.depth - 1;
+    }
     // 脅威圏: パスしたら相手に VCF があるなら、その手順を崩し得る点と自分の四だけを読む (他は同じ手順で負け)
     // 手番側の VCF (本探索の深さでは届かない長い四の連続)
     if (sp.own_vcf && !qmode && depth >= sp.own_vcf && tz_gate(b, me)) {

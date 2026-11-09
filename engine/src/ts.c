@@ -266,14 +266,29 @@ static int and_node(int depth, int ply) {
     return 1;
 }
 
-int ts_win(Board *b, int attacker, int max_depth, long max_nodes, int max_ms, TsResult *res) {
+static int run(Board *b, int attacker, int max_depth, long max_nodes, int max_ms, TsResult *res);
+
+static int ts_alloc(void) {
     if (!T.tt) {
         T.tt = calloc(TTS_SIZE, sizeof(TsEntry));
         T.qc = calloc(QC_SIZE, sizeof(QEntry));
-        if (!T.tt || !T.qc) return 0;
     }
+    return T.tt && T.qc;
+}
+
+int ts_win(Board *b, int attacker, int max_depth, long max_nodes, int max_ms, TsResult *res) {
+    if (!ts_alloc()) return 0;
     memset(T.tt, 0, TTS_SIZE * sizeof(TsEntry));
     memset(T.qc, 0, QC_SIZE * sizeof(QEntry));   // fail の深さは呼び出しの条件 (予算) によるので毎回消す
+    return run(b, attacker, max_depth, max_nodes, max_ms, res);
+}
+
+int ts_probe(Board *b, int attacker, int max_depth, long max_nodes, TsResult *res) {
+    if (!ts_alloc()) return 0;
+    return run(b, attacker, max_depth, max_nodes, 0, res);
+}
+
+static int run(Board *b, int attacker, int max_depth, long max_nodes, int max_ms, TsResult *res) {
     T.b = b;
     T.att = attacker;
     T.def = opp_color(attacker);
