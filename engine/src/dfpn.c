@@ -7,7 +7,7 @@
 
 #include "tz.h"
 
-long g_dfpn_vcf_nodes = 2000;
+long g_dfpn_vcf_nodes = 100;   // 長い VCF はルートの vcf_solve が別に調べる。小さいほうが同じ時間で詰みを多く見つける
 int g_dfpn_zone_k = 2;
 
 #define INF 100000000u

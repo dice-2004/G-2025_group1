@@ -309,6 +309,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "tact_own")) sp.tact_own = (int)v;
     else if (!strcmp(name, "tact_def")) sp.tact_def = (int)v;
     else if (!strcmp(name, "vct_dfpn")) sp.vct_dfpn = (int)v;
+    else if (!strcmp(name, "dfpn_vcf")) g_dfpn_vcf_nodes = v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strcmp(name, "table")) g_eval_params.use_table = (int)v;

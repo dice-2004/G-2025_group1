@@ -19,6 +19,7 @@
 
 #include "../src/board.h"
 #include "../src/dfpn.h"
+#include "../src/tz.h"
 #include "../src/vcf.h"
 
 static Rule parse_rule(const char *s) {
@@ -96,6 +97,8 @@ static int cmd_dfpn(Rule rule, long nodes, int opp) {
         fflush(stdout);
     }
     fprintf(stderr, "time %.3f s\n", total);
+    TzStats z = tz_stats();
+    fprintf(stderr, "tz: probes %ld cache %ld replay %ld solves %ld found %ld\n", z.probes, z.cache_hits, z.replay_hits, z.solves, z.found);
     return 0;
 }
 
