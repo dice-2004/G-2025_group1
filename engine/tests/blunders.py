@@ -32,7 +32,7 @@ pos, meta = [], []
 for gi, (g, me) in enumerate(games):
     mv = ["%d,%d" % tuple(m) for m in g["opening"] + g["moves"]]
     for i, m in enumerate(mv):
-        if (i % 2 == 0) != (me == "black") or i + 1 >= len(mv) or i == 0:
+        if (i % 2 == 0) != (me == "black") or i + 1 >= len(mv) or i < max(1, len(g["opening"])):
             continue
         pos.append(" ".join(mv[:i]))
         pos.append(" ".join(mv[:i + 1]))

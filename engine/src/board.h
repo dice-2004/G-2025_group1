@@ -7,6 +7,18 @@
 #include "pattern.h"
 #include "types.h"
 
+// 差分更新の取り消し用: 着手で変わった (空点, 方向) の前の値
+typedef struct {
+    uint16_t q;
+    uint8_t d, pb, pw, p4b, p4w, pad;
+} BoardUndo;
+#define BOARD_UNDO_MAX ((MAX_MOVES + 16) * 40)
+
+typedef struct {
+    int32_t vsum[3];
+    int16_t p4cnt[3][P4_COUNT];
+} BoardSums;
+
 typedef struct {
     int size;
     Rule rule;
@@ -22,6 +34,11 @@ typedef struct {
     int moves[MAX_MOVES];           // 着手履歴
     int nmoves;
     int passes;                     // 探索中のパス (null move) の回数の偶奇。通常は 0
+    // 取り消し用の記録 (着手ごとに undo_mark から始まる)
+    int nundo;
+    int undo_mark[MAX_MOVES + 16];          // (禁じ手の判定で仮に置く分の余裕)
+    BoardSums sums_before[MAX_MOVES + 16];
+    BoardUndo undo[BOARD_UNDO_MAX];
 } Board;
 
 void board_global_init(void);                       // Zobrist 表など (1 回だけ)

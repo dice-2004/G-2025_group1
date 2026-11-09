@@ -49,22 +49,34 @@ static void refresh_cell(Board *b, int q) {
 // 石のあるマスのパターンは使わないので更新しない (石を取るときに refresh_cell で作り直す)
 static inline void refresh_dir(Board *b, int q, int d) {
     if (b->cell[q] != EMPTY) return;
-    const int empty = 1;
-    for (int c = BLACK; c <= WHITE; c++) {
-        uint8_t np = g_pattern_table[c][b->key[q][d]];
-        uint8_t *pt = b->pat[c][q];
-        if (np == pt[d]) continue;
-        if (empty) {
-            b->vsum[c] -= g_cell_value[c][pattern_index(pt)];
-            b->p4cnt[c][b->pat4[c][q]]--;
-        }
-        pt[d] = np;
-        int idx = pattern_index(pt);
-        b->pat4[c][q] = g_p4_table[idx];
-        if (empty) {
-            b->vsum[c] += g_cell_value[c][idx];
-            b->p4cnt[c][b->pat4[c][q]]++;
-        }
+    uint8_t np2 = g_pattern2[b->key[q][d]];
+    uint8_t *pb = b->pat[BLACK][q], *pw = b->pat[WHITE][q];
+    uint8_t nb = np2 & 15, nw = np2 >> 4;
+    if (nb == pb[d] && nw == pw[d]) return;
+    BoardUndo *u = &b->undo[b->nundo++];
+    u->q = (uint16_t)q;
+    u->d = (uint8_t)d;
+    u->pb = pb[d];
+    u->pw = pw[d];
+    u->p4b = b->pat4[BLACK][q];
+    u->p4w = b->pat4[WHITE][q];
+    if (nb != pb[d]) {
+        b->vsum[BLACK] -= g_cell_value[BLACK][pattern_index(pb)];
+        b->p4cnt[BLACK][b->pat4[BLACK][q]]--;
+        pb[d] = nb;
+        int idx = pattern_index(pb);
+        b->pat4[BLACK][q] = g_p4_table[idx];
+        b->vsum[BLACK] += g_cell_value[BLACK][idx];
+        b->p4cnt[BLACK][b->pat4[BLACK][q]]++;
+    }
+    if (nw != pw[d]) {
+        b->vsum[WHITE] -= g_cell_value[WHITE][pattern_index(pw)];
+        b->p4cnt[WHITE][b->pat4[WHITE][q]]--;
+        pw[d] = nw;
+        int idx = pattern_index(pw);
+        b->pat4[WHITE][q] = g_p4_table[idx];
+        b->vsum[WHITE] += g_cell_value[WHITE][idx];
+        b->p4cnt[WHITE][b->pat4[WHITE][q]]++;
     }
 }
 
@@ -105,6 +117,10 @@ void board_init(Board *b, int size, const Rule *rule) {
 
 // 色を指定して石を置く/取る (履歴は触らない)
 static void put_stone(Board *b, int p, int color) {
+    b->undo_mark[b->nmoves] = b->nundo;
+    BoardSums *sv = &b->sums_before[b->nmoves];
+    memcpy(sv->vsum, b->vsum, sizeof sv->vsum);
+    memcpy(sv->p4cnt, b->p4cnt, sizeof sv->p4cnt);
     account_cell(b, p, -1);
     add_near(b, p, +1);
     b->cell[p] = (uint8_t)color;
@@ -126,29 +142,34 @@ static void put_stone(Board *b, int p, int color) {
     }
 }
 
+// 直前の put_stone を取り消す (着手は必ず後から順に戻すので、記録した前の値に戻せばよい。
+// p 自身のパターンは石がある間は更新していないので、置く前のまま)
 static void remove_stone(Board *b, int p) {
     int color = b->cell[p];
-    b->cell[p] = WALL;          // パターンだけ作り直して (集計に入れずに) から空点に戻す
-    refresh_cell(b, p);
     b->cell[p] = EMPTY;
-    account_cell(b, p, +1);
     add_near(b, p, -1);
     b->hash ^= zobrist[color][p];
     for (int d = 0; d < 4; d++) {
         int off = DIR_OFFSET[d];
         for (int k = 1; k <= 5; k++) {
             int q = p + k * off;
-            if (b->cell[q] != WALL) {
-                b->key[q][d] &= ~(3u << (2 * key_slot(-k)));
-                refresh_dir(b, q, d);
-            }
+            if (b->cell[q] != WALL) b->key[q][d] &= ~(3u << (2 * key_slot(-k)));
             q = p - k * off;
-            if (b->cell[q] != WALL) {
-                b->key[q][d] &= ~(3u << (2 * key_slot(k)));
-                refresh_dir(b, q, d);
-            }
+            if (b->cell[q] != WALL) b->key[q][d] &= ~(3u << (2 * key_slot(k)));
         }
     }
+    int mark = b->undo_mark[b->nmoves];
+    for (int i = b->nundo - 1; i >= mark; i--) {
+        const BoardUndo *u = &b->undo[i];
+        b->pat[BLACK][u->q][u->d] = u->pb;
+        b->pat[WHITE][u->q][u->d] = u->pw;
+        b->pat4[BLACK][u->q] = u->p4b;
+        b->pat4[WHITE][u->q] = u->p4w;
+    }
+    b->nundo = mark;
+    const BoardSums *sv = &b->sums_before[b->nmoves];
+    memcpy(b->vsum, sv->vsum, sizeof sv->vsum);
+    memcpy(b->p4cnt, sv->p4cnt, sizeof sv->p4cnt);
 }
 
 void board_move(Board *b, int pos) {
@@ -189,6 +210,7 @@ static int forbidden_rec(Board *b, int p, int depth) {
 
     // 活三の候補が 2 方向以上: 実際に「禁じ手でない手で達四にできるか」を確かめる
     put_stone(b, p, BLACK);
+    b->nmoves++;   // 取り消しの記録の位置をずらす (手番・履歴は使わない)
     int real = 0;
     for (int i = 0; i < nf3 && real < 2; i++) {
         int d = f3dirs[i], off = DIR_OFFSET[d];
@@ -206,6 +228,7 @@ static int forbidden_rec(Board *b, int p, int depth) {
         }
         real += ok;
     }
+    b->nmoves--;
     remove_stone(b, p);
     return real >= 2;
 }
