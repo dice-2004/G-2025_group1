@@ -255,6 +255,7 @@ static struct {
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
+    int ts_tree_root;   // >0: 根の手番側の前の反復の点がこれ以下に負けているときだけ本探索の中の ts を使う
     int ts_tree_pv;   // 1 = PV の局面だけ
     int ts_tree_fail;   // 1 = 勝てなかった局面を覚えて呼び直さない
     int ts_tree_side;   // 1 = 根の相手の勝ちだけ調べる (奇数手目の局面)
@@ -268,7 +269,7 @@ static struct {
     int dfver_ts;       // 選んだ手の確かめ (dfver_pct): 1 = df-pn と ts に半分ずつ、2 = ts だけ
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
-    .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
+    .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
@@ -343,6 +344,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "ts_tree_side")) sp.ts_tree_side = (int)v;
     else if (!strcmp(name, "ts_tree_fail")) sp.ts_tree_fail = (int)v;
     else if (!strcmp(name, "ts_tree_pv")) sp.ts_tree_pv = (int)v;
+    else if (!strcmp(name, "ts_tree_root")) sp.ts_tree_root = (int)v;
     else if (!strcmp(name, "ts_tree_depth")) sp.ts_tree_depth = (int)v;
     else if (!strcmp(name, "ts_tree_plies")) sp.ts_tree_plies = (int)v;
     else if (!strcmp(name, "ts_tree_eval")) sp.ts_tree_eval = (int)v;
@@ -489,6 +491,7 @@ static const int LMP_COUNT[5] = {0, 6, 10, 16, 24};
 
 #define TSFAIL_SIZE (1u << 15)
 static _Thread_local uint64_t tsfail[TSFAIL_SIZE];   // 本探索の中の ts で勝てなかった局面 (予算込みのキー)
+static _Thread_local int tstree_gate = 1;   // 本探索の中の ts を使う反復か (ts_tree_root)
 long tstree_stat[12];   // 本探索の中の ts: 呼んだ回数、ノード、残りの深さ別 [2+d]、勝ち [10]
 long nmp_stat[4];   // 調べた回数 (g2-test speed が表示)
 static _Thread_local int tp_inside;   // 脅威の潜在力の補正を足している局面の中か
@@ -586,7 +589,7 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     }
 
     // 勝勢の側の脅威探索 (ts.c): 評価が高く脅威の手がある局面で、脅威の手だけで勝てるかを短い予算で調べる
-    if (sp.ts_tree && !qmode && !op_threat && depth >= sp.ts_tree_depth && (!sp.ts_tree_side || (ply & 1)) && (!sp.ts_tree_pv || is_pv) &&
+    if (sp.ts_tree && !qmode && !op_threat && depth >= sp.ts_tree_depth && (!sp.ts_tree_side || (ply & 1)) && (!sp.ts_tree_pv || is_pv) && tstree_gate &&
         b->p4cnt[me][P4_FLEX3] + b->p4cnt[me][P4_FLEX3_PLUS] + b->p4cnt[me][P4_FLEX3_2X] + b->p4cnt[me][P4_BLOCK4_FLEX3] +
         b->p4cnt[me][P4_BLOCK4] + b->p4cnt[me][P4_BLOCK4_PLUS] > 0 && evaluate(b) >= sp.ts_tree_eval) {
         TsResult tr;
@@ -809,6 +812,8 @@ static void iterate(Ctx *c, RootMove *root, int nr, const SearchLimits *lim, Sea
             if ((depth + SKIP_PHASE[k]) / SKIP_SIZE[k] % 2) continue;
         }
         c->root_depth = depth;
+        // 本探索の中の ts を、根の手番側が前の反復で -ts_tree_root 以下 (相手が押している) のときだけ使う
+        tstree_gate = !sp.ts_tree_root || (depth > 1 && prev_score <= -sp.ts_tree_root);
         // aspiration window: 前の反復の点の周りの狭い窓で調べ、外れたら広げてやり直す
         int lo = -SCORE_INF, hi = SCORE_INF, best, bestmove, searched;
         int bestpv[MAX_PLY], bestpvlen;
