@@ -146,6 +146,7 @@ typedef struct {
     uint32_t tzmark[NCELL]; // 脅威圏の点の印 (== tzgen なら圏内)。gen_moves の間だけ使う
     uint32_t tzgen;
     int seval[MAX_PLY];     // 節点の静的評価 (手の数の枝刈り・futility の「評価が良くなっているか」用)
+    uint8_t xhalf[MAX_PLY]; // ext_three == 2 の半手の延長の繰り越し (その手数の節点に渡る)
     int drop4;          // gen_moves: 相手の活三を受ける節点で、受けにならない自分のただの四を除く
 } Ctx;
 
@@ -238,7 +239,7 @@ static struct {
     int lmp_mul;        // 浅い所の手数打ち切りの手数の倍率 (%)
     int lmr_moves;      // 何手目から深さを削るか
     int cand_min;       // ルート以外で、点 (攻め+守り) がこれ未満の戦術的でない手は 2 手目以降読まない
-    int ext_three;      // 1 = 活三 (相手に受けを強いる手) は深さを減らさない (延長)。延長はルートの深さの 2 倍まで
+    int ext_three;      // 1 = 活三 (相手に受けを強いる手) は深さを減らさない (延長)。延長はルートの深さの 2 倍まで。2 = 半手だけ延長 (2 手で 1 手分)
     int vctdef_pct;     // 相手の VCT への受け (vct_defenses) に使う時間 (上限時間の %)。0 = 使わない
     int unstable_pct;   // 直前の反復で最善手が変わったら、次の反復を始めない目安を何 % に延ばすか
     int leaf_vcf;       // 末端 (深さ 0) で手番側に四があれば VCF を調べるノード数の上限。0 = 調べない
@@ -652,6 +653,7 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         int q = find_cell(b, op, P4_FIVE);
         if (opfive >= 2 || !legal(b, me, q)) return -(SCORE_WIN - ply - 1);
         board_move(b, q);
+        if (ply + 1 < MAX_PLY) c->xhalf[ply + 1] = c->xhalf[ply];
         int v = -pvs(c, -beta, -alpha, depth, ply + 1, is_pv);
         board_undo(b);
         if (is_pv && !c->stop) {
@@ -816,7 +818,14 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         int v, nd = depth - 1;
         // 活三を作る手 (相手は受けるしかない) の延長
         int ext_ok = 2 * (ply + depth) < sp.ext_limit * c->root_depth;
-        if (sp.ext_three && !qmode && a4 >= P4_FLEX3 && a4 <= P4_FLEX3_2X && ext_ok) nd = depth;
+        int carry = ply < MAX_PLY - 1 ? c->xhalf[ply] : 0;   // ext_three == 2: 半手分の延長の繰り越し
+        if (sp.ext_three == 1 && !qmode && a4 >= P4_FLEX3 && a4 <= P4_FLEX3_2X && ext_ok) nd = depth;
+        // ext_three == 2: 活三を作る手を半手だけ延長する (2 手で 1 手分。繰り越しを子に渡す)
+        if (sp.ext_three == 2 && !qmode && a4 >= P4_FLEX3 && a4 <= P4_FLEX3_2X && ext_ok) {
+            if (carry) carry = 0;
+            else nd = depth, carry = 1;
+        }
+        if (ply + 1 < MAX_PLY) c->xhalf[ply + 1] = (uint8_t)carry;
         if (sp.ext_four && !qmode && a4 >= P4_BLOCK4 && a4 <= P4_BLOCK4_FLEX3 && ext_ok) nd = depth;
         if (tzon && sp.tz_ext && ext_ok) nd = depth;
         if (searched == 0) {
