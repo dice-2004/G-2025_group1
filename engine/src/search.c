@@ -260,7 +260,7 @@ static struct {
     int tact_def;       // 相手のこの形以上の点をふさぐ手を「戦術的」とする
     int def_own4;       // 0 = 相手の活三を受ける節点で、自分に VCF がなければ受けにならない自分のただの四を読まない
     int def_vcf_nodes, def_vcf_depth, def_vcf_min, def_own4_depth;   // その VCF の確かめのノード数・深さ
-    int policy;         // 1 = 手の並べ方に policy_data.c の表を使う
+    int policy;         // 1 = 手の並べ方に policy_data.c の重みを使う、2 = 四を作る手は今の点のまま
     int def_line;       // 1 = 相手の活三への受けを、達四の点を通る線の上の点 (と自分の四) に絞る
     int vct_dfpn;       // 1 = ルートの VCT (vct_pct) を証明数探索 (dfpn.c) で調べる (既定。0 = vct_solve)
     int smp_pick;       // 1 = 補助スレッドの結果 (勝ちの読み切り・より深い反復) も使う
@@ -449,23 +449,22 @@ typedef struct {
 
 #define DEF_SCALE 52    // 守り (相手の点) の重み /64
 
-// 手の並べ方の表 (policy_data.c、Rapfi の最善手に合わせたパターンの組ごとの点) を pattern_index で引ける形に広げたもの
+// 手の並べ方の重み (policy_data.c、Rapfi の最善手に合わせた線パターン・Pattern4 の点) を pattern_index で引ける形に広げたもの。
+// [手番の色][0 = 自分のパターン、1 = 相手のパターン][pattern_index]。g_p4_table はルールで変わるので search_root で作り直す
 static int16_t pol_tab[3][2][PIDX_COUNT];
-static int pol_ok;
+static int pol_ok, pol_rule;
 static void policy_init(void) {
-    static int16_t ws[3][2][PIDX_COUNT];
-    for (int i = 0; i < g_policy_count; i++) {
-        const PolicyEntry *e = &g_policy_entries[i];
-        if (e->color >= 1 && e->color <= 2 && e->spidx >= 0 && e->spidx < PIDX_COUNT) ws[e->color][e->role][e->spidx] = (int16_t)e->w;
-    }
     for (int i = 0; i < PIDX_COUNT; i++) {
-        uint8_t p[4] = {(uint8_t)(i / (P_COUNT * P_COUNT * P_COUNT)), (uint8_t)(i / (P_COUNT * P_COUNT) % P_COUNT),
-                        (uint8_t)(i / P_COUNT % P_COUNT), (uint8_t)(i % P_COUNT)};
-        for (int a = 1; a < 4; a++)
-            for (int j = a; j > 0 && p[j - 1] > p[j]; j--) { uint8_t t = p[j]; p[j] = p[j - 1]; p[j - 1] = t; }
-        int si = pattern_index(p);
-        for (int c = 1; c <= 2; c++)
-            for (int r = 0; r < 2; r++) pol_tab[c][r][i] = ws[c][r][si];
+        int p[4] = {i / (P_COUNT * P_COUNT * P_COUNT), i / (P_COUNT * P_COUNT) % P_COUNT, i / P_COUNT % P_COUNT, i % P_COUNT};
+        for (int c = 1; c <= 2; c++) {
+            int me = g_policy_p4_me[c - 1][g_p4_table[i]], op = g_policy_p4_op[c - 1][g_p4_table[i]];
+            for (int d = 0; d < 4; d++) {
+                me += g_policy_line_me[c - 1][p[d]];
+                op += g_policy_line_op[c - 1][p[d]];
+            }
+            pol_tab[c][0][i] = (int16_t)me;
+            pol_tab[c][1][i] = (int16_t)op;
+        }
     }
     pol_ok = 1;
 }
@@ -545,7 +544,7 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
             if (c->drop4 && (a == P4_BLOCK4 || a == P4_BLOCK4_PLUS) && !blocks_threat(b, op, q)) continue;
             if (tzon && a < P4_BLOCK4 && c->tzmark[q] != c->tzgen) continue;
             int s = vme[board_pidx(b, me, q)] + vop[board_pidx(b, op, q)] * DEF_SCALE / 64;
-            if (polon) {
+            if (polon && (sp.policy == 1 || a < P4_BLOCK4)) {
                 // 表の点 (1 logit = 256) を今の点の尺度 (100 ≒ 1 logit) に直す
                 int pv = s * g_policy_base_scale / 100 + pol_tab[me][0][board_pidx(b, me, q)] +
                          pol_tab[me][1][board_pidx(b, op, q)] + g_policy_dist_last[cheb_dist(q, lastm)] +
@@ -1131,7 +1130,10 @@ static void verify_move(Ctx *c, Board *b, int op, RootMove *root, int nr, int ha
 void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     Ctx *c = &ctxs[0];
     if (!lmr_table_ok) lmr_init();
-    if (!pol_ok) policy_init();
+    if (!pol_ok || pol_rule != b->rule.forbid_33 * 4 + b->rule.forbid_44 * 2 + b->rule.forbid_overline) {
+        policy_init();
+        pol_rule = b->rule.forbid_33 * 4 + b->rule.forbid_44 * 2 + b->rule.forbid_overline;
+    }
     tt_alloc();
     tt_used = 1;
     tt_gen++;

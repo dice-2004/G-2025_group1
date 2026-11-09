@@ -1,8 +1,13 @@
-// tune_policy.py が作る手の並べ方の表 (まだ当てはめていない: 今の並べ方と同じ)
+// tune_policy.py が作る手の並べ方の重み (Rapfi の最善手に合わせた、線パターン・Pattern4・直前の手との距離の点)。
+// 手で編集しない。1 logit = 256
 #include "policy_data.h"
 
-const PolicyEntry g_policy_entries[] = {{0, 0, 0, 0}};
-const int g_policy_count = 0;
-const int g_policy_dist_last[7] = {0, 0, 0, 0, 0, 0, 0};
-const int g_policy_dist_mine[7] = {0, 0, 0, 0, 0, 0, 0};
-const int g_policy_base_scale = 256;
+// [手番の色 黒=0 白=1][線パターン]
+const int g_policy_line_me[2][12] = {{-202, -362, -148, -126, -101, 134, 187, 108, 45, 0, 0, 0}, {-243, 0, -194, -189, -139, 90, 124, 225, 91, 0, 0, 0}};
+const int g_policy_line_op[2][12] = {{-42, 0, -12, -51, -49, 88, 138, 56, 15, 0, 0, 0}, {-45, -186, -30, -35, -37, 126, 182, 72, 0, 0, 0, 0}};
+// [手番の色][Pattern4]
+const int g_policy_p4_me[2][13] = {{-231, -251, -258, -229, -201, 269, 307, -691, 247, 6, -73, 0, 0}, {-159, -181, -175, -155, -155, 113, 115, 445, 277, 23, -318, 0, 0}};
+const int g_policy_p4_op[2][13] = {{-129, -202, -158, -275, -238, 183, 104, 379, 320, 140, -377, 0, 0}, {-118, -188, -163, -294, -282, 229, 115, 363, 339, 144, -351, 0, 0}};
+const int g_policy_dist_last[7] = {0, 114, 45, 8, 7, -63, -99};
+const int g_policy_dist_mine[7] = {0, 53, 18, -32, -24, -42, -47};
+const int g_policy_base_scale = 79;   // 今の候補手の点 1 あたり (/100)

@@ -404,7 +404,7 @@ static int moverank(Rule rule) {
 }
 
 // 手の並べ方 (policy) の当てはめ用: 各行 "手順<TAB>手" について、候補手ごとに
-// "行番号 手番の色 自分の4方向パターン(昇順の添字) 相手の(同) 直前の相手の手との距離 自分の前の手との距離 正解か 今の候補手の点" を出す
+// "行番号 手番の色 自分の4方向パターン(昇順の添字) 相手の(同) 直前の相手の手との距離 自分の前の手との距離 正解か 今の候補手の点 自分の Pattern4 相手の Pattern4" を出す
 static int sorted_pidx4(const uint8_t pats[4]) {
     uint8_t p[4] = {pats[0], pats[1], pats[2], pats[3]};
     for (int i = 1; i < 4; i++)
@@ -441,8 +441,8 @@ static int polfeat(Rule rule) {
             if (b.cell[q] != EMPTY || !b.near[q]) continue;
             int dl = cheb(q, last), dm = cheb(q, mylast);
             int v = g_cell_value[me][board_pidx(&b, me, q)] + g_cell_value[op][board_pidx(&b, op, q)] * 52 / 64;
-            printf("%d %d %d %d %d %d %d %d\n", row, me, sorted_pidx4(b.pat[me][q]), sorted_pidx4(b.pat[op][q]),
-                   dl > 6 ? 6 : dl, dm > 6 ? 6 : dm, q == target, v);
+            printf("%d %d %d %d %d %d %d %d %d %d\n", row, me, sorted_pidx4(b.pat[me][q]), sorted_pidx4(b.pat[op][q]),
+                   dl > 6 ? 6 : dl, dm > 6 ? 6 : dm, q == target, v, b.pat4[me][q], b.pat4[op][q]);
         }
         row++;
     }
