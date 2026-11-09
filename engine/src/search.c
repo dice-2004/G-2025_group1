@@ -1005,6 +1005,10 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
                     int p = to_pos(x, y);
                     if (b->cell[p] == EMPTY && legal(b, me, p)) { res->move = p; break; }
                 }
+            // 空点が禁じ手しかない: エラーにせず空点を返す (禁じ手を打って負け。返さないと対局が壊れる)
+            for (int y = 0; y < b->size && res->move < 0; y++)
+                for (int x = 0; x < b->size; x++)
+                    if (b->cell[to_pos(x, y)] == EMPTY) { res->move = to_pos(x, y); break; }
             res->reason = "no-move";
             return;
         }
