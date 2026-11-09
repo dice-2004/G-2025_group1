@@ -8,7 +8,7 @@
 | 項目 | 状態 |
 |---|---|
 | フェーズ | Phase 2 (本格探索) 項目 1 完了、評価の調整中 |
-| 最強の自作エンジン | G2 v0.5 (engine/)。連珠・1秒/手で rapfi-n100k に 44勝36敗 (Elo 約 +2735) |
+| 最強の自作エンジン | G2 (engine/、2026-11-09 490f305)。連珠・1秒/手で rapfi-n100k に 48勝32敗、Rapfi 本体 (古典) に 23勝57敗 |
 | サイト AI との実戦 | T1 サイト (trygomoku/gomokuonline/playgomokuonline) は全勝。playgonu Pro は白番で負け、Rapfi NNUE 5 秒 (Champion/gomocalc) は 3-70 (gomocalc の持ち時間 100〜5000ms の全設定で敗退)。[結果](./benchmarks/web/RESULTS.md) |
 | legacy の強さ | 連珠・1秒/手で Elo +883 (random=0)。1手読み貪欲ボットに 29.5/80、Rapfi 深さ2制限に 0/80 |
 | 開局ブック | 黒白とも 6 手目まで (連珠 150・自由 133 局面、2026-11-09 に縮小)。gomocalc 500ms 黒番 連珠 2-8 (深いブック 6-4、なし 1-9)・自由 7-3。[詳細](./benchmarks/2026-10-27_book.md) |
@@ -28,6 +28,7 @@
 
 **結果**
 - 同じ探索 (同じノード数) で 76 万 → 119 万 nps (+56%)。自己対戦 1 秒 80 局 44-1-35 (+39)
+- 1 秒 80 局: rapfi-n100k に 48-32 (+70、これまでで最高)、Rapfi 本体には 23-57 (v0.5 と同じ)
 - 詳細: [benchmarks/2026-10-22_search.md](./benchmarks/2026-10-22_search.md) の「形勢の問題集と、速さの改善」
 
 **次にやること**
