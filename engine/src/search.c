@@ -257,12 +257,14 @@ static struct {
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
     int ts_tree, ts_tree_depth, ts_tree_plies, ts_tree_eval;   // 本探索の中の ts: ノード上限 (0 = 使わない)、残りの深さの下限、攻めの手数、静的評価の下限
     int tpo, tpo_depth, tpo_own, tpo_opp;   // 脅威の潜在力で手を並べる (1 = 加点、2 = 加点して戦術手扱い)、残りの深さの下限、加点
+    int tpv_lazy;   // tpv == 2 で静的な値による見切りをするか
+    int tpv;   // 1 = 静止探索の葉の評価に VCF の有無の補正 (tp.c の tp_vcf_term) を足す、2 = 残り深さ 1 の局面で 1 回だけ足す
     int tp, tp_min_depth;   // 脅威の潜在力 (tp.c) を根から tp 手目の局面の値に足す (0 = 使わない)、その局面の残りの深さの下限
     int ts_pct;         // ルートで自分の勝ちを αβ の脅威探索 (ts.c) で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_ts;       // 選んだ手の確かめ (dfver_pct): 1 = df-pn と ts に半分ずつ、2 = ts だけ
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
-    .ts_tree = 0, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
+    .ts_tree = 0, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
@@ -317,6 +319,11 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "rz")) sp.rz = (int)v;
     else if (!strcmp(name, "ts_pct")) sp.ts_pct = (int)v;
     else if (!strcmp(name, "tp")) sp.tp = (int)v;
+    else if (!strcmp(name, "tpv")) sp.tpv = (int)v;
+    else if (!strcmp(name, "tpv_lazy")) sp.tpv_lazy = (int)v;
+    else if (!strcmp(name, "tpv_own")) g_tpv_own = (int)v;
+    else if (!strcmp(name, "tpv_opp")) g_tpv_opp = (int)v;
+    else if (!strcmp(name, "tpv_nodes")) g_tpv_nodes = v;
     else if (!strcmp(name, "tpo")) sp.tpo = (int)v;
     else if (!strcmp(name, "tpo_depth")) sp.tpo_depth = (int)v;
     else if (!strcmp(name, "tpo_own")) sp.tpo_own = (int)v;
@@ -475,8 +482,23 @@ static const int LMP_COUNT[5] = {0, 6, 10, 16, 24};
 long nmp_stat[4];   // 調べた回数 (g2-test speed が表示)
 static _Thread_local int tp_inside;   // 脅威の潜在力の補正を足している局面の中か
 
+static _Thread_local int tpv_inside;  // 残り深さ 1 の局面の旗の補正を足している局面の中か
+
 static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     Board *b = c->b;
+    // tpv == 2: 葉ではなく残り深さ 1 の局面で 1 回だけ VCF の旗 (tp.c) を調べ、補正の分だけ窓をずらして読み、値に足す
+    if (sp.tpv == 2 && depth == 1 && !tpv_inside && alpha > -SCORE_WIN_MIN && beta < SCORE_WIN_MIN &&
+        !b->p4cnt[BLACK][P4_FIVE] && !b->p4cnt[WHITE][P4_FIVE]) {
+        // 静的な値に補正を足しても窓の外のままなら調べない (葉の版と同じ見切り、tpv_lazy = 0 で常に調べる)
+        int stat = sp.tpv_lazy ? evaluate(b) : 0;
+        int corr = sp.tpv_lazy && (stat - g_tpv_opp >= beta || stat + g_tpv_own <= alpha) ? 0 : tp_vcf_term(b);
+        if (corr) {
+            tpv_inside = 1;
+            int v = pvs(c, alpha - corr, beta - corr, depth, ply, is_pv);
+            tpv_inside = 0;
+            return v > SCORE_WIN_MIN || v < -SCORE_WIN_MIN ? v : v + corr;
+        }
+    }
     // 脅威の潜在力 (tp.c): 根から sp.tp 手目の局面では、補正の分だけ窓をずらして読み、値に補正を足す
     if (sp.tp && ply == sp.tp && depth >= sp.tp_min_depth && !tp_inside && alpha > -SCORE_WIN_MIN && beta < SCORE_WIN_MIN &&
         !b->p4cnt[BLACK][P4_FIVE] && !b->p4cnt[WHITE][P4_FIVE]) {
@@ -532,9 +554,9 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
             if (g_fvcf ? fvcf_solve(b, me, sp.leaf_vcf_depth, sp.leaf_vcf, &r) : tss_solve(b, me, TSS_VCF, sp.leaf_vcf_depth, sp.leaf_vcf, &r))
                 return SCORE_WIN - ply - r.nline;
         }
-        if (depth <= -sp.qdepth) return evaluate(b);
+        if (depth <= -sp.qdepth) return sp.tpv == 1 ? tp_leaf_eval(b, evaluate(b), alpha, beta) : evaluate(b);
         if (!op_threat) {
-            stand = evaluate(b);
+            stand = sp.tpv == 1 ? tp_leaf_eval(b, evaluate(b), alpha, beta) : evaluate(b);
             if (stand >= beta) return stand;
             if (stand > alpha) alpha = stand;
         }

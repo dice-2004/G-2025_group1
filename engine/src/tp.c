@@ -7,6 +7,8 @@
 
 int g_tp_own = 40, g_tp_opp = 100, g_tp_lo = P4_BLOCK3, g_tp_cap = 20;
 long g_tp_nodes = 30;
+int g_tpv_own = 4000, g_tpv_opp = 1500;
+long g_tpv_nodes = 100;
 _Thread_local long g_tp_calls, g_tp_hits;
 
 #define TP_BITS 14
@@ -107,4 +109,42 @@ int tp_correction(Board *b) {
         g_tp_hits++;
     }
     return e->n[me] * g_tp_own - e->n[op] * g_tp_opp;
+}
+
+// 旗の表 (局面のハッシュで覚える): 0 = 未調査、1 = なし、2 = 自分の VCF、3 = 相手の VCF
+#define TV_BITS 16
+static _Thread_local struct { uint64_t key; uint8_t f; } tvc[1u << TV_BITS];
+static _Thread_local int tv_epoch;
+_Thread_local long g_tpv_probes, g_tpv_hits;
+
+int tp_vcf_term(Board *b) {
+    int ep = __atomic_load_n(&tp_epoch, __ATOMIC_RELAXED);
+    if (ep != tv_epoch) {
+        memset(tvc, 0, sizeof tvc);
+        tv_epoch = ep;
+    }
+    uint64_t key = b->hash ^ ((uint64_t)g_tpv_nodes << 48) ^ ((uint64_t)(g_tpv_own != 0) << 63);
+    unsigned i = key & ((1u << TV_BITS) - 1);
+    int f;
+    g_tpv_probes++;
+    if (tvc[i].key == key && tvc[i].f) {
+        g_tpv_hits++;
+        f = tvc[i].f;
+    } else {
+        int me = board_side(b), op = opp_color(me);
+        TzZone z;
+        f = 1;
+        if (g_tpv_own && tz_gate(b, me) && tz_probe_att(b, me, g_tpv_nodes, &z)) f = 2;
+        else if (tz_gate(b, op) && tz_probe_att(b, op, g_tpv_nodes, &z)) f = 3;
+        tvc[i].key = key;
+        tvc[i].f = (uint8_t)f;
+    }
+    return f == 2 ? g_tpv_own : f == 3 ? -g_tpv_opp : 0;
+}
+
+int tp_leaf_eval(Board *b, int stat, int alpha, int beta) {
+    int up = g_tpv_own, down = g_tpv_opp;
+    if (stat - down >= beta) return stat;        // 下げても窓の上 (上げても同じ)
+    if (stat + up <= alpha) return stat;         // 上げても窓の下
+    return stat + tp_vcf_term(b);
 }

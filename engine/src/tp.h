@@ -21,6 +21,14 @@ int tp_correction(Board *b);
 int tp_prepare(Board *b);
 int tp_mark(int q);
 
+// 葉の評価の補正 (search.c の静止探索のフック): 手番側に VCF がある → +g_tpv_own、
+// 相手に「手番側がパスしたら VCF」がある → −g_tpv_opp (脅威圏 tz.c の確認、上限 g_tpv_nodes ノード)
+int tp_vcf_term(Board *b);
+// 静止探索の窓 [alpha, beta] で、補正を足しても結果 (窓の上か下か、窓の中の値) が変わらないなら調べずに静的な値を返す
+int tp_leaf_eval(Board *b, int stat, int alpha, int beta);
+extern int g_tpv_own, g_tpv_opp;
+extern long g_tpv_nodes;
+
 void tp_clear(void);
 
 extern int g_tp_own, g_tp_opp, g_tp_lo, g_tp_cap;

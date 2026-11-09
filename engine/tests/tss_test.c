@@ -423,7 +423,11 @@ static int cmd_potential(Rule rule, long nodes, int lo) {
                 if (p4 >= P4_BLOCK4 && p4 != P4_FIVE) f4[c]++;
                 if (p4 < lo || p4 >= P4_FLEX3) continue;
                 if (c == BLACK && board_is_forbidden(&b, q)) continue;
-                if (nodes < 0) {   // 調査用: 足した石を通る線の空点に、四四・四三・達四の点ができるか (パターンだけ)
+                if (nodes <= -10) {   // 調査用: 足した後に四の手数 -nodes-10 以下の VCF があるか (ノードの上限なし、手の順に依らない)
+                    uint64_t h;
+                    TssResult tr;
+                    if (fvcf_extra_gate(&b, c, q, &h) > 0 && fvcf_extra_solve(&b, c, q, (int)(-nodes - 10), 1L << 30, &tr)) cnt[c]++;
+                } else if (nodes < 0) {   // 調査用: 足した石を通る線の空点に、四四・四三・達四の点ができるか (パターンだけ)
                     int hit = 0;
                     for (int d = 0; d < 4 && !hit; d++)
                         for (int k = -5; k <= 5 && !hit; k++) {
@@ -444,9 +448,12 @@ static int cmd_potential(Rule rule, long nodes, int lo) {
         }
         double dt = now_sec() - t0;
         total += dt;
+        // その局面で各色に VCF があるか (手番でない側はパスしたら)
+        int hv[3];
+        for (int c = BLACK; c <= WHITE; c++) { TssResult tr; hv[c] = fvcf_solve(&b, c, 30, 20000, &tr); }
         int ev = evaluate(&b);
         if (board_side(&b) == WHITE) ev = -ev;
-        printf("%d %d %d %d %d %.2f\t%s\n", cnt[BLACK], cnt[WHITE], f4[BLACK], f4[WHITE], ev, dt * 1000, tail);
+        printf("%d %d %d %d %d %.2f %d %d\t%s\n", cnt[BLACK], cnt[WHITE], f4[BLACK], f4[WHITE], ev, dt * 1000, hv[BLACK], hv[WHITE], tail);
     }
     fprintf(stderr, "time %.3f s\n", total);
     return 0;

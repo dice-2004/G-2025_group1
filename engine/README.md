@@ -24,7 +24,7 @@ python3 bench/match.py g2 legacy --rule renju    # 対局 (bench/README.md)
 | `src/dfpn.c/.h` | 証明数探索 (df-pn) の VCT `dfpn_vct`。受けの候補は脅威圏 (達四の点ごとの勝ち手順の圏の共通部分、またはパスしたときの VCF の圏) と受け側の四。ルートで上限時間の `p_vct_pct` % (既定 20) まで使う (`p_vct_dfpn=1`、既定)。`g2-tss dfpn <rule> [nodes]` |
 | `src/l3.c/.h` | λ3 の証明数探索 `l3_win` (試作、既定では使わない)。脅威 = 打って相手がパスしたら VCT がある手 (静かな手を含む)。受けの候補は VCT の証明の圏 (`dfpn_vct_zone`) と受け側の三・四。`p_dfver_l3=1` で選んだ手の確かめに使う。`g2-tss l3 / l3opp <rule> [nodes] [ms]`、`g2-tss l3count`、`g2-tss zonecheck` |
 | `src/fvcf.c/.h` | VCF 専用の軽い盤 `fvcf_solve` / `fvcf_replay`: 盤は読むだけで、触ったマスの並びと攻め側のパターン・四の点の集合だけを差分で持つ。`tss_solve(TSS_VCF)` と tz.c の手順の再生と結果・ノード数まで一致 (`g2-tss fvcfcheck <rule> [nodes] < 手順` / `fvcfrand <rule> [games] [seed]` で照合)。`p_fvcf=1` で脅威圏・ルートと末端の VCF に使う |
-| `src/tp.c/.h` | 脅威の潜在力 (試作、既定では使わない): 「打ってパスしたら VCF」の点の数を両方の色で数える。根から `p_tp` 手目の局面の値の補正、`p_tpo` で手の並べ方。`g2-tss potential <rule> [nodes] [lo]` |
+| `src/tp.c/.h` | 脅威の潜在力 (試作、既定では使わない): 「打ってパスしたら VCF」の点の数を両方の色で数える。根から `p_tp` 手目の局面の値の補正、`p_tpo` で手の並べ方、`p_tpv` で VCF の旗を葉 (1) か残り深さ 1 (2) の値に足す。`g2-tss potential <rule> [nodes] [lo]` |
 | `src/rz.c/.h` | 反証の圏 (試作、既定では使わない): 相手に反証された読み筋から遠い静かな手を本探索で読まない / 縮める (`p_rz`、`p_rz_rad` など) |
 | `src/ts.c/.h` | 評価で手を並べる αβ の脅威探索 `ts_win` (反復深化)。攻めは四・三・「打った後にパスしたら VCF」の手 (三でない脅威)、受けは脅威圏と自分の四。ルートで df-pn の後に自分の勝ちを上限時間の `p_ts_pct` % (既定 20) まで探す。選んだ手の確かめ (`p_dfver_ts`)、本探索の中 (`p_ts_tree`) にも使える (既定では使わない)。`g2-tss ts / tsopp <rule> [depth] [ms]` |
 | `src/eval.c/.h` | 評価の表: 4 方向のパターンの組 (12^4) → 点数。盤面の評価は空点の点数の和 (Board.vsum を差分更新) の手番側 − 相手側。重みは `tests/tune_eval.py` で調整 |
