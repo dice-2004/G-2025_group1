@@ -144,6 +144,7 @@ typedef struct {
     int history[3][NCELL];  // 前の手の情報を少し残す (search_root で 1/4 に)
     uint32_t tzmark[NCELL]; // 脅威圏の点の印 (== tzgen なら圏内)。gen_moves の間だけ使う
     uint32_t tzgen;
+    int drop4;          // gen_moves: 相手の活三を受ける節点で、受けにならない自分のただの四を除く
 } Ctx;
 
 static Ctx ctxs[MAX_THREADS];
@@ -250,6 +251,9 @@ static struct {
     int lmr_pv;         // lmr_log のとき PV の節点での削減を何 % にするか
     int tact_own;       // 自分のこの形 (Pattern4) 以上を作る手を「戦術的」(LMP・LMR をしない) とする
     int tact_def;       // 相手のこの形以上の点をふさぐ手を「戦術的」とする
+    int def_own4;       // 0 = 相手の活三を受ける節点で、自分に VCF がなければ受けにならない自分のただの四を読まない
+    int def_vcf_nodes, def_vcf_depth, def_vcf_min, def_own4_depth;   // その VCF の確かめのノード数・深さ
+    int def_line;       // 1 = 相手の活三への受けを、達四の点を通る線の上の点 (と自分の四) に絞る
     int vct_dfpn;       // 1 = ルートの VCT (vct_pct) を証明数探索 (dfpn.c) で調べる (既定。0 = vct_solve)
     int smp_pick;       // 1 = 補助スレッドの結果 (勝ちの読み切り・より深い反復) も使う
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
@@ -278,7 +282,7 @@ static struct {
     .tz_nodes = 300, .tz_ext = 0, .nmp = 0, .nmp_depth = 3,
     .nmp_r = 2, .own_vcf = 0, .ext_four = 0, .ext_limit = 4,
     .lmr_log = 0, .lmr_pv = 66, .tact_own = P4_FLEX3, .tact_def = P4_FLEX3,
-    .vct_dfpn = 1,
+    .vct_dfpn = 1, .def_line = 0, .def_own4 = 1, .def_vcf_nodes = 300, .def_vcf_depth = 16, .def_vcf_min = 2, .def_own4_depth = 99,
 };
 
 int search_soft_pct(void) { return sp.soft_pct; }
@@ -372,6 +376,12 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "tact_own")) sp.tact_own = (int)v;
     else if (!strcmp(name, "tact_def")) sp.tact_def = (int)v;
     else if (!strcmp(name, "vct_dfpn")) sp.vct_dfpn = (int)v;
+    else if (!strcmp(name, "def_line")) sp.def_line = (int)v;
+    else if (!strcmp(name, "def_own4")) sp.def_own4 = (int)v;
+    else if (!strcmp(name, "def_vcf_nodes")) sp.def_vcf_nodes = (int)v;
+    else if (!strcmp(name, "def_vcf_depth")) sp.def_vcf_depth = (int)v;
+    else if (!strcmp(name, "def_vcf_min")) sp.def_vcf_min = (int)v;
+    else if (!strcmp(name, "def_own4_depth")) sp.def_own4_depth = (int)v;
     else if (!strcmp(name, "dfpn_vcf")) g_dfpn_vcf_nodes = v;
     else if (!strcmp(name, "fvcf")) g_fvcf = (int)v;
     else if (!strcmp(name, "ts_light")) g_ts_light = (int)v;
@@ -435,6 +445,26 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
     x1 = x1 + 2 < b->size ? x1 + 2 : b->size - 1, y1 = y1 + 2 < b->size ? y1 + 2 : b->size - 1;
     const int16_t *vme = g_cell_value[me], *vop = g_cell_value[op];
     const int *hist = c->history[me];
+    int defl = op_threat && sp.def_line;
+    if (defl) {
+        // 相手の活三 (達四・四四の点) への受けは、その点を通る四の線の上で相手が四を作れる点だけ (他の点では線は変わらない)
+        c->tzgen++;
+        for (int y = y0; y <= y1; y++) {
+            int q = to_pos(x0, y);
+            for (int x = x0; x <= x1; x++, q++) {
+                if (b->cell[q] != EMPTY || b->pat4[op][q] != P4_FLEX4 || !legal(b, op, q)) continue;
+                c->tzmark[q] = c->tzgen;
+                for (int d = 0; d < 4; d++) {
+                    if (b->pat[op][q][d] < P_B4 || b->pat[op][q][d] > P_D4) continue;
+                    for (int k = -4; k <= 4; k++) {
+                        int r = q + k * DIR_OFFSET[d];
+                        if (r < 0 || r >= NCELL || b->cell[r] != EMPTY) continue;
+                        if (b->pat[op][r][d] >= P_B4 && b->pat[op][r][d] <= P_D4) c->tzmark[r] = c->tzgen;
+                    }
+                }
+            }
+        }
+    }
     for (int y = y0; y <= y1; y++) {
         int q = to_pos(x0, y);
         for (int x = x0; x <= x1; x++, q++) {
@@ -442,6 +472,8 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
             int a = b->pat4[me][q], d = b->pat4[op][q];
             if (mode == 1 && (a < sp.q_min_p4 || a > P4_BLOCK4_FLEX3)) continue;
             if (op_threat && a < P4_BLOCK4 && !blocks_threat(b, op, q)) continue;
+            if (defl && a < P4_BLOCK4 && c->tzmark[q] != c->tzgen) continue;
+            if (c->drop4 && (a == P4_BLOCK4 || a == P4_BLOCK4_PLUS) && !blocks_threat(b, op, q)) continue;
             if (tzon && a < P4_BLOCK4 && c->tzmark[q] != c->tzgen) continue;
             int s = vme[board_pidx(b, me, q)] + vop[board_pidx(b, op, q)] * DEF_SCALE / 64;
             out[n].value = s;
@@ -650,8 +682,19 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         if (v >= beta) { nmp_stat[3]++; return v >= SCORE_WIN_MIN ? beta : v; }
     }
 
+    // 相手の活三を受ける節点: 自分に VCF があれば勝ち。なければ、受けにならない自分のただの四 (四三でなく、
+    // 自分の石が相手の四の線に乗らない) は、相手が止めた後に同じ活三が残るだけなので読まない
+    c->drop4 = 0;
+    if (op_threat && !sp.def_own4 && depth <= sp.def_own4_depth) {
+        if (b->p4cnt[me][P4_BLOCK4] + b->p4cnt[me][P4_BLOCK4_PLUS] >= sp.def_vcf_min) {
+            TssResult vr;
+            if (fvcf_solve(b, me, sp.def_vcf_depth, sp.def_vcf_nodes, &vr)) return SCORE_WIN - ply - vr.nline;
+        }
+        c->drop4 = 1;
+    }
     Move list[MAX_MOVES];
     int n = gen_moves(c, list, me, op, op_threat, ttmove, ply, qmode && !op_threat, tzon);
+    c->drop4 = 0;
     // 脅威の潜在力 (tp.c): 手番側の λ2 の脅威の点と、相手の λ2 の脅威の点 (先にふさぐ) を先に読む
     if (sp.tpo && !qmode && !op_threat && !tzon && depth >= sp.tpo_depth && tp_prepare(b) > 0)
         for (int i = 0; i < n; i++) {
