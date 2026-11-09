@@ -294,6 +294,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "defend")) return cmd_defend(rule, argc > 3 ? atol(argv[3]) : 200000, 0);
     if (!strcmp(argv[1], "vctdefend")) return cmd_defend(rule, argc > 3 ? atol(argv[3]) : 1000000, 1);
     if (getenv("DFPN_VCF")) g_dfpn_vcf_nodes = atol(getenv("DFPN_VCF"));
+    if (getenv("DFPN_L2")) g_dfpn_l2 = atoi(getenv("DFPN_L2"));
     if (getenv("DFPN_FLAGS")) g_dfpn_flags = atoi(getenv("DFPN_FLAGS"));
     if (getenv("DFPN_ZONE")) g_dfpn_zone_k = atoi(getenv("DFPN_ZONE"));
     if (!strcmp(argv[1], "dfpn")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 0, argc > 4 ? atoi(argv[4]) : 0);

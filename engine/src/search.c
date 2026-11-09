@@ -17,6 +17,7 @@
 #include "eval.h"
 #include "dfpn.h"
 #include "l3.h"
+#include "rz.h"
 #include "tz.h"
 #include "vcf.h"
 
@@ -249,8 +250,10 @@ static struct {
     int smp_pick;       // 1 = 補助スレッドの結果 (勝ちの読み切り・より深い反復) も使う
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
+    int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
+    .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
@@ -302,6 +305,13 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "dfdef_pct")) sp.dfdef_pct = (int)v;
     else if (!strcmp(name, "dfver_pct")) sp.dfver_pct = (int)v;
     else if (!strcmp(name, "dfver_l3")) sp.dfver_l3 = (int)v;
+    else if (!strcmp(name, "rz")) sp.rz = (int)v;
+    else if (!strcmp(name, "rz_depth")) sp.rz_depth = (int)v;
+    else if (!strcmp(name, "rz_after")) sp.rz_after = (int)v;
+    else if (!strcmp(name, "rz_len")) sp.rz_len = (int)v;
+    else if (!strcmp(name, "rz_rad")) sp.rz_rad = (int)v;
+    else if (!strcmp(name, "rz_lines")) sp.rz_lines = (int)v;
+    else if (!strcmp(name, "rz_red")) sp.rz_red = (int)v;
     else if (!strcmp(name, "leaf_vcf")) sp.leaf_vcf = (int)v;
     else if (!strcmp(name, "leaf_vcf_depth")) sp.leaf_vcf_depth = (int)v;
     else if (!strcmp(name, "tz")) sp.tz = (int)v;
@@ -541,6 +551,8 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     Move list[MAX_MOVES];
     int n = gen_moves(c, list, me, op, op_threat, ttmove, ply, qmode && !op_threat, tzon);
     int best = stand, bestmove = -1, alpha0 = alpha, searched = 0;
+    int rzon = sp.rz && !is_pv && !qmode && depth >= sp.rz_depth && !op_threat && !tzon;
+    if (rzon) rz_reset(ply);
 
     for (int i = 0; i < n; i++) {
         pick_move(list, i, n);
@@ -550,6 +562,9 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
             if (list[i].value < sp.cand_min) continue;
         }
         if (restricted(b, me) && board_is_forbidden(b, q)) continue;
+        int rzout = rzon && !tactical && searched >= sp.rz_after && rz_count(ply) > 0 && best > -SCORE_WIN_MIN &&
+                    !rz_relevant(ply, q, sp.rz_rad, sp.rz_lines);
+        if (rzout && sp.rz == 2) continue;
 
         int a4 = b->pat4[me][q];
         board_move(b, q);
@@ -573,9 +588,24 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
                 }
                 if (r > nd - 1) r = nd - 1 > 0 ? nd - 1 : 0;
             }
+            if (rzout) {
+                r += sp.rz_red;
+                if (r > nd - 1) r = nd - 1 > 0 ? nd - 1 : 0;
+            }
             v = -pvs(c, -alpha - 1, -alpha, nd - r, ply + 1, 0);
             if (v > alpha && r) v = -pvs(c, -alpha - 1, -alpha, nd, ply + 1, 0);
             if (v > alpha && v < beta) v = -pvs(c, -beta, -alpha, nd, ply + 1, 1);
+        }
+        if (rzon && v <= alpha && !c->stop) {
+            // 反証の読み筋: 置換表の最善手を rz_len 手たどる
+            int k = 0;
+            for (; k < sp.rz_len; k++) {
+                TTData te;
+                if (!tt_probe(b->hash, &te) || te.move < 0 || b->cell[te.move] != EMPTY) break;
+                rz_add(ply, te.move);
+                board_move(b, te.move);
+            }
+            while (k-- > 0) board_undo(b);
         }
         board_undo(b);
         if (c->stop) return 0;

@@ -9,7 +9,8 @@
 
 long g_dfpn_vcf_nodes = 100;   // 長い VCF はルートの vcf_solve が別に調べる。小さいほうが同じ時間で詰みを多く見つける
 int g_dfpn_zone_k = 2;
-int g_dfpn_flags = 0;   // 調査用: 1 = OR の VCF の確認をしない、2 = AND の受け側の VCF の確認をしない
+int g_dfpn_flags = 0;
+int g_dfpn_l2 = 0;      // 1 = 三でない手でも、打った後にパスしたら VCF がある手 (VCF の脅威) を攻めに入れる   // 調査用: 1 = OR の VCF の確認をしない、2 = AND の受け側の VCF の確認をしない
 
 #define INF 100000000u
 #define DTT_BITS 19
@@ -131,7 +132,16 @@ static int gen_or(int *ch, int *nch, int *best) {
     int last = b->nmoves - 2 >= D.root_n ? b->moves[b->nmoves - 2] : -1;
     for (int i = 0; i < nt; i++) {
         int q = tmp[i], p4 = b->pat4[att][q];
-        if (p4 < P4_FLEX3 || p4 == P4_FIVE) continue;
+        if (p4 == P4_FIVE) continue;
+        if (p4 < P4_FLEX3) {
+            // VCF の脅威: 三でなくても、打った後にパスしたら VCF がある手
+            if (!g_dfpn_l2 || p4 < P4_BLOCK3 || !in_locality(q) || !dlegal(att, q)) continue;
+            board_move_color(b, q, att);
+            TzZone zq;
+            int ok = tz_gate(b, att) && tz_probe_att(b, att, g_dfpn_vcf_nodes, &zq);
+            board_undo(b);
+            if (!ok) continue;
+        }
         if (p4 == P4_FLEX4) {
             if (dlegal(att, q)) { *best = q; return 1; }
             continue;

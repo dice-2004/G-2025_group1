@@ -376,6 +376,7 @@ static int timed(Rule rule, int ms, int threads) {
         search_new_game();
         SearchLimits lim = {0};
         lim.hard_ms = ms;
+        lim.verbose = getenv("G2_VERBOSE") != NULL;
         lim.soft_ms = ms * search_soft_pct() / 100;
         SearchResult r;
         search_root(&b, &lim, &r);

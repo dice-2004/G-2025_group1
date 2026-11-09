@@ -30,5 +30,6 @@ int dfpn_vct_zone(Board *b, int attacker, int *cells, int max);
 extern long g_dfpn_vcf_nodes;
 extern int g_dfpn_zone_k;
 extern int g_dfpn_flags;
+extern int g_dfpn_l2;   // 1 = 三でない「パスしたら VCF」の脅威も攻めに入れる (試し。詰みの物差しで悪化、既定 0)
 
 #endif
