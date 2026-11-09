@@ -17,7 +17,7 @@ ap.add_argument("--moves")
 ap.add_argument("--engine", default=os.path.join(HERE, "..", "build", "pbrain-g2"))
 ap.add_argument("--tc", type=int, default=1000)
 ap.add_argument("--rule", type=int, default=4)
-ap.add_argument("--extra", default="", help="追加の INFO (例: 'max_depth 6')")
+ap.add_argument("--extra", action="append", default=[], help="追加の INFO (例: 'max_depth 6'、複数可)")
 a = ap.parse_args()
 
 if a.moves:
@@ -33,8 +33,8 @@ else:
     moves = moves[: a.ply]
 n = len(moves)
 cmds = ["START 15", "INFO rule %d" % a.rule, "INFO timeout_turn %d" % a.tc, "INFO verbose 1"]
-if a.extra:
-    cmds.append("INFO " + a.extra)
+for x in a.extra:
+    cmds.append("INFO " + x)
 cmds.append("BOARD")
 for i, (x, y) in enumerate(moves):
     own = (i % 2) == (n % 2)

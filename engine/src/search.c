@@ -236,9 +236,36 @@ static struct {
     int nmp;            // 1 = 脅威を確かめた null move 枝刈り: パスしても相手に VCF がなく、パスして浅く読んでも beta 以上なら打ち切る
     int nmp_depth;      // null move を試す最低の深さ
     int nmp_r;          // null move の深さの削減 (基本値。深さ 6 ごとに +1)
-} sp = {0, P4_BLOCK4_PLUS, 60, 0, 10, 1, 100, 3, 0, 1, 0, 100, 0, 12, 0, 2, 300, 0, 0, 3, 2};
+    int own_vcf;        // 深さ own_vcf 以上の節点で手番側の VCF を調べ、あれば勝ち (0 = 調べない)
+    int ext_four;       // 1 = 四を作る手 (相手は止めるしかない) も深さを減らさない (延長。ルートの深さの 2 倍まで)
+    int ext_limit;      // 延長の上限: ply + depth < ext_limit * ルートの深さ / 2
+    int lmr_log;        // 0 = 従来の LMR。正なら削減 = ln(深さ) * ln(手の順番) * 100 / lmr_log (深い所ほど遅い手を大きく削る)
+    int lmr_pv;         // lmr_log のとき PV の節点での削減を何 % にするか
+    int tact_own;       // 自分のこの形 (Pattern4) 以上を作る手を「戦術的」(LMP・LMR をしない) とする
+    int tact_def;       // 相手のこの形以上の点をふさぐ手を「戦術的」とする
+} sp = {0, P4_BLOCK4_PLUS, 60, 0, 10, 1, 100, 3, 0, 1, 0, 100, 0, 12, 0, 2, 300, 0, 0, 3, 2, 0, 0, 4, 0, 66, P4_FLEX3, P4_FLEX3};
 
 int search_soft_pct(void) { return sp.soft_pct; }
+
+// 対数の LMR の表 [深さ][何手目]
+static uint8_t lmr_table[64][64];
+// 自然対数 (libm を使わない): x = 2^k * y (1 <= y < 2)、ln y = 2 atanh((y-1)/(y+1))
+static double ln_(double x) {
+    int k = 0;
+    while (x >= 2) { x /= 2; k++; }
+    double t = (x - 1) / (x + 1), t2 = t * t, s = 0, p = t;
+    for (int i = 1; i < 30; i += 2) { s += p / i; p *= t2; }
+    return k * 0.6931471805599453 + 2 * s;
+}
+static int lmr_table_ok;
+static void lmr_init(void) {
+    for (int d = 0; d < 64; d++)
+        for (int m = 0; m < 64; m++) {
+            double r = (d && m && sp.lmr_log > 0) ? ln_(d) * ln_(m) * 100.0 / sp.lmr_log : 0;
+            lmr_table[d][m] = (uint8_t)(r + 0.5 > 30 ? 30 : r + 0.5);
+        }
+    lmr_table_ok = 1;
+}
 
 int search_set_param(const char *name, long v) {
     if (!strcmp(name, "qdepth")) sp.qdepth = (int)v;
@@ -263,6 +290,13 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "nmp")) sp.nmp = (int)v;
     else if (!strcmp(name, "nmp_depth")) sp.nmp_depth = (int)v;
     else if (!strcmp(name, "nmp_r")) sp.nmp_r = (int)v;
+    else if (!strcmp(name, "own_vcf")) sp.own_vcf = (int)v;
+    else if (!strcmp(name, "ext_four")) sp.ext_four = (int)v;
+    else if (!strcmp(name, "ext_limit")) sp.ext_limit = (int)v;
+    else if (!strcmp(name, "lmr_log")) { sp.lmr_log = (int)v; lmr_table_ok = 0; }
+    else if (!strcmp(name, "lmr_pv")) sp.lmr_pv = (int)v;
+    else if (!strcmp(name, "tact_own")) sp.tact_own = (int)v;
+    else if (!strcmp(name, "tact_def")) sp.tact_def = (int)v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strcmp(name, "table")) g_eval_params.use_table = (int)v;
@@ -338,7 +372,7 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
             else if (k && (q == k[0] || q == k[1])) s += 1 << 12;
             out[n].pos = q;
             out[n].score = s;
-            out[n].tactical = a >= P4_FLEX3 || d >= P4_FLEX3;
+            out[n].tactical = a >= sp.tact_own || d >= sp.tact_def;
             n++;
         }
     }
@@ -446,6 +480,11 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     }
 
     // 脅威圏: パスしたら相手に VCF があるなら、その手順を崩し得る点と自分の四だけを読む (他は同じ手順で負け)
+    // 手番側の VCF (本探索の深さでは届かない長い四の連続)
+    if (sp.own_vcf && !qmode && depth >= sp.own_vcf && tz_gate(b, me)) {
+        TzZone z;
+        if (tz_probe_att(b, me, sp.tz_nodes, &z)) return SCORE_WIN - ply - z.plies;
+    }
     int tzon = 0, tzplies = 0, tzres = -1;   // tzres: -1 = 調べていない、0 = 相手に VCF なし、1/2 = あり
     int want_nmp = sp.nmp && !is_pv && !qmode && !op_threat && !b->passes && depth >= sp.nmp_depth &&
                    beta < SCORE_WIN_MIN && beta > -SCORE_WIN_MIN;
@@ -493,14 +532,22 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         board_move(b, q);
         int v, nd = depth - 1;
         // 活三を作る手 (相手は受けるしかない) の延長
-        if (sp.ext_three && !qmode && a4 >= P4_FLEX3 && a4 <= P4_FLEX3_2X && ply + depth < 2 * c->root_depth) nd = depth;
-        if (tzon && sp.tz_ext && ply + depth < 2 * c->root_depth) nd = depth;
+        int ext_ok = 2 * (ply + depth) < sp.ext_limit * c->root_depth;
+        if (sp.ext_three && !qmode && a4 >= P4_FLEX3 && a4 <= P4_FLEX3_2X && ext_ok) nd = depth;
+        if (sp.ext_four && !qmode && a4 >= P4_BLOCK4 && a4 <= P4_BLOCK4_FLEX3 && ext_ok) nd = depth;
+        if (tzon && sp.tz_ext && ext_ok) nd = depth;
         if (searched == 0) {
             v = -pvs(c, -beta, -alpha, nd, ply + 1, is_pv);
         } else {
             int r = 0;
             if (!qmode && depth >= 3 && searched >= sp.lmr_moves && !tactical) {
-                r = 1 + (searched >= 10) + (depth >= 8 && searched >= 20);
+                if (sp.lmr_log) {
+                    r = lmr_table[depth < 63 ? depth : 63][searched < 63 ? searched : 63];
+                    if (is_pv) r = r * sp.lmr_pv / 100;
+                    if (r < 1) r = 1;
+                } else {
+                    r = 1 + (searched >= 10) + (depth >= 8 && searched >= 20);
+                }
                 if (r > nd - 1) r = nd - 1 > 0 ? nd - 1 : 0;
             }
             v = -pvs(c, -alpha - 1, -alpha, nd - r, ply + 1, 0);
@@ -698,6 +745,7 @@ static void *helper_main(void *arg) {
 
 void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     Ctx *c = &ctxs[0];
+    if (!lmr_table_ok) lmr_init();
     tt_alloc();
     tt_used = 1;
     tt_gen++;

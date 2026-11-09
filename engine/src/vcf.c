@@ -6,6 +6,8 @@
 // (モード, 攻め側の色) ごとにハッシュをずらせば混ざらない。
 #include "vcf.h"
 
+#include "tz.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -17,7 +19,8 @@ int g_vcf_inner = 24;     // VCT の各局面で先に試す VCF の深さ
 
 enum { TT_NONE = 0, TT_WIN = 1, TT_FAIL = 2 };
 
-int g_zone_k = 2;   // VCT の三を探す範囲: 探索中の攻め側の直近何手の周りか (0 = 盤全体)
+int g_zone_k = 2;
+int g_and_zone = 1;   // VCT の受けの局面で、先に調べた受けを破った VCF の圏の外の受けは調べない (tz.c)   // VCT の三を探す範囲: 探索中の攻め側の直近何手の周りか (0 = 盤全体)
 
 typedef struct {
     uint64_t key;
@@ -337,6 +340,47 @@ static int vcf_threat_cells(int *out) {
     return ok ? n : -1;
 }
 
+// 攻め側の手番の局面から、置換表の VCF の勝ちをたどって手順 (攻め・受けが交互) を作る。たどれなければ -1
+static int walk_vcf_tt(int *line, int max) {
+    Board *b = C.b;
+    int n = 0, played = 0, ok = 0;
+    while (n + 2 < max) {
+        int a;
+        if (b->p4cnt[C.att][P4_FIVE]) { ok = 1; break; }
+        if (b->p4cnt[C.def][P4_FIVE] >= 2) break;
+        if (b->p4cnt[C.def][P4_FIVE] == 1) {
+            int f[1];
+            if (!find_fives(C.def, f, 1)) break;
+            a = f[0];
+        } else {
+            uint64_t key = b->hash ^ SALT[TSS_VCF][C.att];
+            TTEntry *e = &tt[key & (TT_SIZE - 1)];
+            if (e->key != key || e->result != TT_WIN || e->best < 0) break;
+            a = e->best;
+        }
+        if (b->cell[a] != EMPTY) break;
+        line[n++] = a;
+        board_move_color(b, a, C.att);
+        played++;
+        int nf = b->p4cnt[C.att][P4_FIVE];
+        if (nf >= 2) { ok = 1; break; }
+        if (nf == 0) break;
+        int f[1];
+        if (fives_near(C.att, a, f, 1) != 1) break;
+        line[n++] = f[0];
+        board_move_color(b, f[0], C.def);
+        played++;
+    }
+    while (played--) board_undo(b);
+    return ok ? n : -1;
+}
+
+static int in_zone(const TzZone *z, int p) {
+    for (int i = 0; i < z->n; i++)
+        if (z->cells[i] == p) return 1;
+    return 0;
+}
+
 // 受け側の手番 (直前に攻め側が脅威を打った)。攻め側の勝ちを証明できれば 1
 static int defender_node(int mode, int depth) {
     Board *b = C.b;
@@ -396,13 +440,21 @@ static int defender_node(int mode, int depth) {
         score[i] = b->pat4[C.att][p] * 4 + b->pat4[C.def][p] * 3 + near_bonus(p);
     }
     sort_desc(cand, score, nc);
+    // 受けの圏: ある受けを攻め側が VCF で破ったら、その VCF 手順を (受けの前の) この局面で確かめて圏を作る。
+    // 圏の外の受け (四を除く) は同じ手順で破れるので調べない (石が増えて損をしない性質)
+    TzZone zone;
+    int zvalid = 0, ztries = 0;
     for (int i = 0; i < nc; i++) {
         int p = cand[i];
         if (!legal(C.def, p)) continue;
+        if (zvalid && b->pat4[C.def][p] < P4_BLOCK4 && !in_zone(&zone, p)) continue;
         board_move_color(b, p, C.def);
         int r = attacker_node(mode, depth);
+        int line[TSS_MAX_LINE], nl = -1;
+        if (r && !zvalid && g_and_zone && ztries < 3) { ztries++; nl = walk_vcf_tt(line, 48); }
         board_undo(b);
         if (!r) return 0;
+        if (nl > 0) zvalid = tz_line_zone(b, C.att, line, nl, &zone) == 1;
     }
     return 1;
 }

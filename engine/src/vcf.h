@@ -48,6 +48,7 @@ int vct_defenses(Board *b, int max_depth, long max_nodes, int *moves);
 // VCT の各局面で先に試す VCF の深さ (既定 24)
 extern int g_zone_k;
 extern int g_vcf_inner;
+extern int g_and_zone;   // 1 = VCT の受けの局面で圏による省略を使う (既定 1)
 
 // 置換表を空にする (ルールや盤サイズを変えたとき。pattern_init の後に呼ぶ)
 void tss_clear(void);
