@@ -16,6 +16,7 @@ ap.add_argument("--side", default="white", help="G2 が black / white / any の�
 ap.add_argument("--name", default="g2", help="G2 の名前 (black/white の値の先頭)")
 ap.add_argument("--nodes", type=int, default=300000)
 ap.add_argument("--rule", default=None)
+ap.add_argument("-j", type=int, default=2)
 a = ap.parse_args()
 
 games = []
@@ -31,15 +32,15 @@ pos, meta = [], []
 for gi, (g, me) in enumerate(games):
     mv = ["%d,%d" % tuple(m) for m in g["opening"] + g["moves"]]
     for i, m in enumerate(mv):
-        if (i % 2 == 0) != (me == "black") or i + 1 >= len(mv):
+        if (i % 2 == 0) != (me == "black") or i + 1 >= len(mv) or i == 0:
             continue
         pos.append(" ".join(mv[:i]))
         pos.append(" ".join(mv[:i + 1]))
         meta.append((gi, i + 1, m))
-rule = a.rule or games[0][0]["rule"] if games else "renju"
+rule = a.rule or (games[0][0]["rule"] if games else "renju")
 with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
     f.write("\n".join(pos) + "\n")
-out = subprocess.run([sys.executable, os.path.join(HERE, "rapfi_label.py"), "--rule", rule, "--nodes", str(a.nodes), "-j", "2", f.name],
+out = subprocess.run([sys.executable, os.path.join(HERE, "rapfi_label.py"), "--rule", rule, "--nodes", str(a.nodes), "-j", str(a.j), f.name],
                      capture_output=True, text=True, check=True).stdout.splitlines()
 
 print("game\tply\tg2_move\trapfi_move\tbefore(g2)\tafter(opp)")

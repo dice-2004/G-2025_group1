@@ -4,6 +4,7 @@
 //   g2-test forbid <rule>        標準入力の各行 (黒から順の手 "x,y x,y ...") について、
 //                                黒が打つと禁じ手になる空点を "x,y:F" 形式で出力 (Python 照合用)
 //   g2-test bench [rule]         パターン表生成と着手/戻しの速度
+//   g2-test timed <rule> <ms> [threads] 標準入力の各行を時間を決めて探索し "手 点 深さ ノード数 ms 理由" を出す
 //   g2-test speed <rule> <depth> 標準入力の各行 (手順 "x,y x,y ...") を固定深さで探索し、ノード数・時間・nps を出す
 //   g2-test features <rule>      標準入力の各行 "結果 x,y x,y ..." (結果は黒から見て 1/0/-1) の静かな局面ごとに
 //                                評価の特徴量 (空点の線パターン数・Pattern4 数を手番側/相手側) を CSV で出す (tune_eval.py 用)
@@ -205,6 +206,29 @@ static int features(Rule rule) {
     return 0;
 }
 
+// 時間を決めて探索し、各行 "move score depth nodes ms" を出す (詰みを何局面で見つけるかなどの測定用)
+static int timed(Rule rule, int ms, int threads) {
+    static Board b;
+    char line[8192];
+    pattern_init(&rule);
+    search_set_threads(threads);
+    while (fgets(line, sizeof line, stdin)) {
+        board_init(&b, 15, &rule);
+        char *s = line;
+        int x, y, k;
+        while (sscanf(s, " %d,%d%n", &x, &y, &k) == 2) { board_move(&b, to_pos(x, y)); s += k; }
+        search_new_game();
+        SearchLimits lim = {0};
+        lim.hard_ms = ms;
+        lim.soft_ms = ms * search_soft_pct() / 100;
+        SearchResult r;
+        search_root(&b, &lim, &r);
+        printf("%d,%d %d %d %ld %d %s\n", pos_x(r.move), pos_y(r.move), r.score, r.depth, r.nodes, r.ms, r.reason);
+        fflush(stdout);
+    }
+    return 0;
+}
+
 // 4 方向のパターンを小さい順に並べた組の添字 (方向によらない「組み合わせ」の番号)
 static int sorted_pidx(const uint8_t pats[4]) {
     uint8_t s[4] = {pats[0], pats[1], pats[2], pats[3]};
@@ -264,6 +288,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "forbid")) return forbid(rule);
     if (!strcmp(argv[1], "bench")) return bench(rule);
     if (!strcmp(argv[1], "features")) return features(rule);
+    if (!strcmp(argv[1], "timed")) return timed(rule, argc > 3 ? atoi(argv[3]) : 1000, argc > 4 ? atoi(argv[4]) : 1);
     if (!strcmp(argv[1], "msdump")) return msdump(rule);
     if (!strcmp(argv[1], "speed")) return speed(rule, argc > 3 ? atoi(argv[3]) : 8, argc > 4 ? atoi(argv[4]) : 1);
     fprintf(stderr, "unknown command\n");
