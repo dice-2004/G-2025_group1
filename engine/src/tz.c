@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "fvcf.h"
 #include "vcf.h"
 
 #define TZ_LINE_MAX 48
@@ -36,7 +37,10 @@ static int tz_epoch;   // tz_clear のたびに増やす (各スレッドの表�
 
 static const uint64_t SALT[3] = {0, 0x510e527fade682d1ULL, 0x9b05688c2b3e6c1fULL};
 
-void tz_clear(void) { __atomic_add_fetch(&tz_epoch, 1, __ATOMIC_RELAXED); }
+void tz_clear(void) {
+    __atomic_add_fetch(&tz_epoch, 1, __ATOMIC_RELAXED);
+    fvcf_clear();
+}
 
 static int ensure(void) {
     if (S) {
@@ -92,6 +96,7 @@ static int five_near(const Board *b, int color, int m) {
 // att の VCF 手順 line (攻め・受けが交互) を今の盤で再生して確かめ、圏を z に作る。
 // 戻り値 1 = 手順は有効 (圏あり)、2 = 有効だが圏を絞れない、0 = この盤では成り立たない
 static int replay(Board *b, int att, const int16_t *line, int n, TzZone *z) {
+    if (g_fvcf) return fvcf_replay(b, att, line, n, z);
     int def = opp_color(att);
     int forb = rule_has_forbidden(&b->rule);
     int restrict_a = forb && att == BLACK, restrict_d = forb && def == BLACK;
@@ -180,7 +185,8 @@ int tz_probe_att(Board *b, int att, long max_nodes, TzZone *z) {
     }
     S->st.solves++;
     TssResult tr;
-    tss_solve(b, att, TSS_VCF, 30, max_nodes, &tr);
+    if (g_fvcf) fvcf_solve(b, att, 30, max_nodes, &tr);
+    else tss_solve(b, att, TSS_VCF, 30, max_nodes, &tr);
     if (!tr.win) {
         remember(e, key, C_NONE, NULL, 0);
         return 0;

@@ -19,6 +19,7 @@
 
 #include "../src/board.h"
 #include "../src/dfpn.h"
+#include "../src/fvcf.h"
 #include "../src/l3.h"
 #include "../src/ts.h"
 #include "../src/tz.h"
@@ -178,7 +179,7 @@ static int cmd_ts(Rule rule, int depth, int ms, int opp) {
         int att = opp ? opp_color(board_side(&b)) : board_side(&b);
         TsResult r;
         double t0 = now_sec();
-        ts_win(&b, att, depth, 1L << 40, ms, &r);
+        ts_win(&b, att, depth, getenv("TS_NODES") ? atol(getenv("TS_NODES")) : 1L << 40, ms, &r);
         double dt = now_sec() - t0;
         total += dt;
         if (r.win && getenv("TS_ZONE")) {
@@ -260,6 +261,146 @@ static int cmd_defend(Rule rule, long nodes, int vct) {
 }
 
 // 問題集: 1 行 1 問 "<rule> <vcf|vct> <win|nowin> [first=x,y/x,y] [depth=N] : 手 ...  # コメント"
+// fvcf_solve と tss_solve(TSS_VCF) の結果 (勝ち・初手・手順・ノード数・打ち切り) を比べる。食い違いを数えて出力
+static long fc_pos, fc_bad, fc_wins;
+static double fc_t_old, fc_t_new;
+static long fc_n_old, fc_n_new, fc_replays, fc_replay_ok;
+static void fc_compare(Board *b, int att, int depth, long nodes, const char *tag) {
+    TssResult r1, r2;
+    uint64_t h = b->hash;
+    double t0 = now_sec();
+    tss_solve(b, att, TSS_VCF, depth, nodes, &r1);
+    double t1 = now_sec();
+    fvcf_solve(b, att, depth, nodes, &r2);
+    double t2 = now_sec();
+    fc_t_old += t1 - t0;
+    fc_t_new += t2 - t1;
+    fc_n_old += r1.nodes;
+    fc_n_new += r2.nodes;
+    fc_pos++;
+    fc_wins += r1.win;
+    int bad = r1.win != r2.win || r1.move != r2.move || r1.nodes != r2.nodes || r1.aborted != r2.aborted ||
+              r1.nline != r2.nline || b->hash != h;
+    for (int i = 0; !bad && i < r1.nline; i++) bad = r1.line[i] != r2.line[i];
+    // 手順の再生 (tz_line_zone): この局面と、石を 1 つ足した局面で、tz.c と fvcf の結果を比べる
+    if (!bad && r1.win && r1.nline > 0 && !getenv("FC_NOREPLAY")) {
+        for (int t = 0; t < 4 && !bad; t++) {
+            int extra = -1;
+            if (t > 0) {
+                int tries = 0;
+                do extra = to_pos(rand() % b->size, rand() % b->size);
+                while ((b->cell[extra] != EMPTY || !b->near[extra]) && ++tries < 50);
+                if (b->cell[extra] != EMPTY) continue;
+                board_move_color(b, extra, t == 1 ? att : opp_color(att));
+            }
+            TzZone z1, z2;
+            int sv = g_fvcf;
+            g_fvcf = 0;
+            int a1 = tz_line_zone(b, att, r1.line, r1.nline, &z1);
+            g_fvcf = 1;
+            int a2 = tz_line_zone(b, att, r1.line, r1.nline, &z2);
+            g_fvcf = sv;
+            fc_replays++;
+            fc_replay_ok += a1 != 0;
+            bad = a1 != a2 || z1.n != z2.n || z1.plies != z2.plies || z1.first != z2.first;
+            for (int i = 0; !bad && i < z1.n; i++) bad = z1.cells[i] != z2.cells[i];
+            if (bad) printf("REPLAY MISMATCH t=%d ret %d/%d n %d/%d plies %d/%d\n", t, a1, a2, z1.n, z2.n, z1.plies, z2.plies);
+            if (extra >= 0) board_undo(b);
+        }
+    }
+    if (!bad) return;
+    fc_bad++;
+    if (fc_bad > 20) return;
+    printf("MISMATCH %s att=%d nodes=%ld:", tag, att, nodes);
+    for (int i = 0; i < b->nmoves; i++) printf(" %d,%d", pos_x(b->moves[i]), pos_y(b->moves[i]));
+    printf("\n  old win=%d move=%d nodes=%ld ab=%d line=", r1.win, r1.move, r1.nodes, r1.aborted);
+    print_line(&r1);
+    printf("\n  new win=%d move=%d nodes=%ld ab=%d line=", r2.win, r2.move, r2.nodes, r2.aborted);
+    print_line(&r2);
+    printf("\n");
+}
+
+static void fc_report(void) {
+    printf("positions %ld (vcf wins %ld)  mismatches %ld\n", fc_pos, fc_wins, fc_bad);
+    printf("old: %ld nodes %.3f s (%.0f knps)   new: %ld nodes %.3f s (%.0f knps)   speedup %.2fx\n", fc_n_old, fc_t_old,
+           fc_n_old / (fc_t_old + 1e-9) / 1000, fc_n_new, fc_t_new, fc_n_new / (fc_t_new + 1e-9) / 1000,
+           fc_t_old / (fc_t_new + 1e-9));
+    printf("replays %ld (valid %ld)\n", fc_replays, fc_replay_ok);
+    printf("forbidden seen by fvcf: overline %ld  44 %ld  33 %ld\n", g_fvcf_forbid[0], g_fvcf_forbid[1], g_fvcf_forbid[2]);
+}
+
+// 標準入力の各行 (手順) のすべての途中局面で、両方の色を攻め側にして比べる。clear > 0 なら clear 局面ごとに置換表を消す
+static int cmd_fvcfcheck(Rule rule, long nodes, int depth, int clear) {
+    static Board b;
+    char line[8192];
+    pattern_init(&rule);
+    tss_clear();
+    fvcf_clear();
+    long k = 0;
+    while (fgets(line, sizeof line, stdin)) {
+        char *tab = strchr(line, '\t');
+        if (tab) *tab = 0;
+        if (line[0] == '#') continue;
+        int mv[MAX_MOVES], n = 0;
+        board_init(&b, 15, &rule);
+        if (load_moves(&b, line) < 0) continue;
+        n = b.nmoves;
+        for (int i = 0; i < n; i++) mv[i] = b.moves[i];
+        board_init(&b, 15, &rule);
+        for (int i = 0; i <= n; i++) {
+            if (i) board_move(&b, mv[i - 1]);
+            if (board_last_move_wins(&b)) break;
+            for (int att = BLACK; att <= WHITE; att++) {
+                if (clear > 0 && k++ % clear == 0) { tss_clear(); fvcf_clear(); fvcf_solve(&b, att, 1, 1, NULL); }
+                fc_compare(&b, att, depth, nodes, "line");
+            }
+        }
+    }
+    fc_report();
+    return fc_bad != 0;
+}
+
+// 乱数の対局 (石の近くにでたらめに打つ。黒は禁じ手を避ける) のすべての局面で比べる
+static int cmd_fvcfrand(Rule rule, int games, unsigned seed, long nodes, int size) {
+    static Board b;
+    pattern_init(&rule);
+    tss_clear();
+    fvcf_clear();
+    srand(seed);
+    const long budgets[3] = {30, 300, nodes};
+    long k = 0;
+    for (int g = 0; g < games; g++) {
+        board_init(&b, size, &rule);
+        int plies = 20 + rand() % (size * size / 2);
+        for (int ply = 0; ply < plies; ply++) {
+            int cand[MAX_MOVES], nc = 0;
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++) {
+                    int p = to_pos(x, y);
+                    if (b.cell[p] != EMPTY) continue;
+                    if (b.nmoves ? b.near[p] == 0 : (x != size / 2 || y != size / 2)) continue;
+                    cand[nc++] = p;
+                }
+            int p = -1;
+            for (int t = 0; t < 20 && nc > 0; t++) {
+                int q = cand[rand() % nc];
+                if (board_side(&b) == BLACK && board_is_forbidden(&b, q)) continue;
+                p = q;
+                break;
+            }
+            if (p < 0) break;
+            board_move(&b, p);
+            if (board_last_move_wins(&b)) break;
+            for (int att = BLACK; att <= WHITE; att++) {
+                if (k++ % 64 == 0) { tss_clear(); fvcf_clear(); fvcf_solve(&b, att, 1, 1, NULL); }
+                fc_compare(&b, att, 30, budgets[rand() % 3], "rand");
+            }
+        }
+    }
+    fc_report();
+    return fc_bad != 0;
+}
+
 static int cmd_puzzles(const char *file, long nodes) {
     FILE *fp = fopen(file, "r");
     if (!fp) { perror(file); return 2; }
@@ -364,6 +505,12 @@ int main(int argc, char **argv) {
     if (getenv("TS_QUIET")) g_ts_quiet_nodes = atol(getenv("TS_QUIET"));
     { extern int g_ts_step, g_ts_start; if (getenv("TS_STEP")) g_ts_step = atoi(getenv("TS_STEP")); if (getenv("TS_START")) g_ts_start = atoi(getenv("TS_START")); }
     if (getenv("TS_LOC")) g_ts_loc = atoi(getenv("TS_LOC"));
+    if (getenv("FVCF")) g_fvcf = atoi(getenv("FVCF"));
+    if (!strcmp(argv[1], "fvcfcheck"))
+        return cmd_fvcfcheck(rule, argc > 3 ? atol(argv[3]) : 100000, argc > 4 ? atoi(argv[4]) : 30, argc > 5 ? atoi(argv[5]) : 0);
+    if (!strcmp(argv[1], "fvcfrand"))
+        return cmd_fvcfrand(rule, argc > 3 ? atoi(argv[3]) : 100, argc > 4 ? (unsigned)atoi(argv[4]) : 1,
+                            argc > 5 ? atol(argv[5]) : 100000, argc > 6 ? atoi(argv[6]) : 15);
     if (!strcmp(argv[1], "ts")) return cmd_ts(rule, argc > 3 ? atoi(argv[3]) : 20, argc > 4 ? atoi(argv[4]) : 1000, 0);
     if (!strcmp(argv[1], "tsopp")) return cmd_ts(rule, argc > 3 ? atoi(argv[3]) : 20, argc > 4 ? atoi(argv[4]) : 1000, 1);
     if (!strcmp(argv[1], "tssib")) return cmd_tssib(rule, argc > 3 ? atoi(argv[3]) : 3000);

@@ -9,6 +9,7 @@
 #include "book.h"
 #include "eval.h"
 #include "search.h"
+#include "fvcf.h"
 #include "vcf.h"
 #include "think.h"
 
@@ -26,6 +27,7 @@ static int ensure_tables(void) {
     rule = rule_from_gomocup(rule_code);
     pattern_init(&rule);
     tss_clear();
+    fvcf_clear();
     search_clear_tt();
     tables_rule = rule_code;
     return 1;

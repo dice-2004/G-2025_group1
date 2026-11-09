@@ -7,6 +7,7 @@
 #include "../../gomoku.h"
 #include "board.h"
 #include "think.h"
+#include "fvcf.h"
 #include "vcf.h"
 
 static Board g_board;
@@ -19,6 +20,7 @@ int calcPutPos(int board[][BOARD_SIZE], int com, int *out_x, int *out_y) {
         g_rule = rule_from_class_check(check);
         pattern_init(&g_rule);
         tss_clear();
+        fvcf_clear();
         g_tables_check = check;
     }
     // 手順は分からないので、黒白を交互に置いて同じ盤面を作る

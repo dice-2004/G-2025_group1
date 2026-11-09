@@ -19,6 +19,7 @@
 #include "l3.h"
 #include "rz.h"
 #include "ts.h"
+#include "fvcf.h"
 #include "tz.h"
 #include "vcf.h"
 
@@ -340,6 +341,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "tact_def")) sp.tact_def = (int)v;
     else if (!strcmp(name, "vct_dfpn")) sp.vct_dfpn = (int)v;
     else if (!strcmp(name, "dfpn_vcf")) g_dfpn_vcf_nodes = v;
+    else if (!strcmp(name, "fvcf")) g_fvcf = (int)v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strcmp(name, "table")) g_eval_params.use_table = (int)v;
@@ -500,7 +502,8 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         if (sp.leaf_vcf && depth == 0 &&
             b->p4cnt[me][P4_BLOCK4] + b->p4cnt[me][P4_BLOCK4_PLUS] + b->p4cnt[me][P4_BLOCK4_FLEX3] > 0) {
             TssResult r;
-            if (tss_solve(b, me, TSS_VCF, sp.leaf_vcf_depth, sp.leaf_vcf, &r)) return SCORE_WIN - ply - r.nline;
+            if (g_fvcf ? fvcf_solve(b, me, sp.leaf_vcf_depth, sp.leaf_vcf, &r) : tss_solve(b, me, TSS_VCF, sp.leaf_vcf_depth, sp.leaf_vcf, &r))
+                return SCORE_WIN - ply - r.nline;
         }
         if (depth <= -sp.qdepth) return evaluate(b);
         if (!op_threat) {
@@ -811,6 +814,7 @@ static Helper helpers[MAX_THREADS];
 static void *helper_main(void *arg) {
     Helper *h = arg;
     tss_set_thread(h->c->id);
+    fvcf_set_thread(h->c->id);
     iterate(h->c, h->root, h->nr, &h->lim, &h->res);
     return NULL;
 }
@@ -932,7 +936,10 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     // ノード数は持ち時間に比例させる (VCF・VCT の 1 ノードはおよそ 1.5us)
     long hard = lim->hard_ms > 0 ? lim->hard_ms : 1000;
     int vmove;
-    if (vcf_solve(b, 40, hard * 60, &vmove)) {
+    TssResult vres;
+    int vwin = g_fvcf ? fvcf_solve(b, board_side(b), 40, hard * 60, &vres) : tss_solve(b, board_side(b), TSS_VCF, 40, hard * 60, &vres);
+    vmove = vres.move;
+    if (vwin) {
         res->move = vmove;
         res->score = SCORE_WIN - 10;
         res->reason = "vcf";
