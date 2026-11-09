@@ -267,6 +267,7 @@ static struct {
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
+    int vz, vz_depth, vz_nodes, vz_keep, vz_pv, vz_root, vz_root_nodes;   // 相手の VCT の証明の圏 (dfpn_vct_zone) の外の手を読まない。vz_keep 以上の自分の形を作る手 (反撃) は残す
     int mcp, mcp_mul, mcp_tact, mcp_pv;   // 全部の深さの手の数の枝刈り (Rapfi 風): 3 + 深さ^1.3 手 (評価が良くなっていなければ半分) を超えたら読まない。倍率 %、戦術的な手・PV にも掛けるか
     int fut, fut_margin, fut_depth;      // futility: 評価 − margin × (深さ − 1 − 改善) ≥ beta なら評価を返す (PV・相手の活三があるときは除く)
     int razor, razor_margin, razor_depth; // razoring: 評価 + margin × 深さ < alpha なら静止探索の値を返す
@@ -285,6 +286,7 @@ static struct {
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
     .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .mcp = 0, .mcp_mul = 100, .mcp_tact = 0, .mcp_pv = 0, .fut = 0, .fut_margin = 250, .fut_depth = 99, .razor = 0, .razor_margin = 100, .razor_depth = 2, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
+    .vz = 0, .vz_depth = 4, .vz_nodes = 2000, .vz_keep = P4_BLOCK3, .vz_pv = 1, .vz_root = 0, .vz_root_nodes = 20000,
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
@@ -396,6 +398,13 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "leaf_vcf")) sp.leaf_vcf = (int)v;
     else if (!strcmp(name, "leaf_vcf_depth")) sp.leaf_vcf_depth = (int)v;
     else if (!strcmp(name, "tz")) sp.tz = (int)v;
+    else if (!strcmp(name, "vz")) sp.vz = (int)v;
+    else if (!strcmp(name, "vz_depth")) sp.vz_depth = (int)v;
+    else if (!strcmp(name, "vz_nodes")) sp.vz_nodes = (int)v;
+    else if (!strcmp(name, "vz_keep")) sp.vz_keep = (int)v;
+    else if (!strcmp(name, "vz_pv")) sp.vz_pv = (int)v;
+    else if (!strcmp(name, "vz_root")) sp.vz_root = (int)v;
+    else if (!strcmp(name, "vz_root_nodes")) sp.vz_root_nodes = (int)v;
     else if (!strcmp(name, "tz_depth")) sp.tz_depth = (int)v;
     else if (!strcmp(name, "tz_nodes")) sp.tz_nodes = (int)v;
     else if (!strcmp(name, "tz_ext")) sp.tz_ext = (int)v;
@@ -600,7 +609,34 @@ static const int LMP_COUNT[5] = {0, 6, 10, 16, 24};
 static _Thread_local uint64_t tsfail[TSFAIL_SIZE];   // 本探索の中の ts で勝てなかった局面 (予算込みのキー)
 static _Thread_local int tstree_gate = 1;   // 本探索の中の ts を使う反復か (ts_tree_root)
 long tstree_stat[12];   // 本探索の中の ts: 呼んだ回数、ノード、残りの深さ別 [2+d]、勝ち [10]
-long nmp_stat[4];   // 調べた回数 (g2-test speed が表示)
+long nmp_stat[4];
+long vz_stat[6];   // 相手の VCT の圏: 調べた回数、勝ち、圏が取れた、絞る前の手の数、絞った後の手の数、ルートで外した手
+// 圏の外でも読む手: 自分の四の点を増やす形 (止め三以上。三三の点だけの活二×2 は除く) — 証明木の受け側の四が変わり得る
+static inline int vz_keep_move(const Board *b, int me, int q) {
+    int a = b->pat4[me][q];
+    return a >= sp.vz_keep && !(sp.vz_keep <= P4_FLEX2_2X && a == P4_FLEX2_2X);
+}
+// 相手に VCT の元 (三・四を作れる点) があるか
+static inline int vz_gate(const Board *b, int op) {
+    const int16_t *c = b->p4cnt[op];
+    for (int k = P4_FLEX3; k <= P4_BLOCK4_FLEX3; k++)
+        if (c[k]) return 1;
+    return 0;
+}
+// 相手 (op) にパスしたら VCT があるとき、その証明の圏に印を付ける (c->tzmark == c->tzgen)。圏が取れたら 1
+static int vz_mark(Ctx *c, Board *b, int op, long nodes) {
+    DfpnResult r;
+    vz_stat[0]++;
+    if (!dfpn_vct(b, op, nodes, 0, &r)) return 0;
+    vz_stat[1]++;
+    static _Thread_local int cells[NCELL];
+    int nz = dfpn_vct_zone(b, op, cells, NCELL);
+    if (nz < 0) return 0;
+    vz_stat[2]++;
+    c->tzgen++;
+    for (int i = 0; i < nz; i++) c->tzmark[cells[i]] = c->tzgen;
+    return 1;
+}   // 調べた回数 (g2-test speed が表示)
 static _Thread_local int tp_inside;   // 脅威の潜在力の補正を足している局面の中か
 
 static _Thread_local int tpv_inside;  // 残り深さ 1 の局面の旗の補正を足している局面の中か
@@ -781,9 +817,21 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         }
         c->drop4 = 1;
     }
+    // 相手の VCT の圏 (relevance zone): パスしたら相手に VCT があるなら、その証明の圏の外の手 (反撃の形を作る手を除く) は
+    // 同じ手順で負けるので読まない。手の並べ方に頼らない枝刈り
+    int vzon = sp.vz && !qmode && !op_threat && !tzon && depth >= sp.vz_depth && (sp.vz_pv || !is_pv) &&
+               alpha > -SCORE_WIN_MIN && vz_gate(b, op) && vz_mark(c, b, op, sp.vz_nodes);
     Move list[MAX_MOVES];
     int n = gen_moves(c, list, me, op, op_threat, ttmove, ply, qmode && !op_threat, tzon);
     c->drop4 = 0;
+    if (vzon) {
+        int m = 0;
+        vz_stat[3] += n;
+        for (int i = 0; i < n; i++)
+            if (c->tzmark[list[i].pos] == c->tzgen || vz_keep_move(b, me, list[i].pos)) list[m++] = list[i];
+        n = m;
+        vz_stat[4] += n;
+    }
     // 脅威の潜在力 (tp.c): 手番側の λ2 の脅威の点と、相手の λ2 の脅威の点 (先にふさぐ) を先に読む
     if (sp.tpo && !qmode && !op_threat && !tzon && depth >= sp.tpo_depth && tp_prepare(b) > 0)
         for (int i = 0; i < n; i++) {
@@ -895,6 +943,7 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         // 打てる手がない: 相手の活三を止められない (負け)、または全部禁じ手 / 静止探索で四がない
         if (op_threat) best = -(SCORE_WIN - ply - 3);
         else if (tzon) best = -(SCORE_WIN - ply - tzplies);
+        else if (vzon) best = -(SCORE_WIN - ply - 30);
         else if (qmode) best = stand;
         else best = evaluate(b);
     }
@@ -1255,6 +1304,14 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         res->score = -SCORE_WIN;
         res->reason = "lost";
         return;
+    }
+    if (sp.vz_root && ndefs < 0 && nr > 1 && !op_threat && vz_mark(c, b, op, sp.vz_root_nodes)) {
+        // ルート: 相手の VCT の圏の外の手 (反撃の形を作る手を除く) を外す
+        int m = 0;
+        for (int i = 0; i < nr; i++)
+            if (c->tzmark[root[i].pos] == c->tzgen || vz_keep_move(b, me, root[i].pos)) root[m++] = root[i];
+        if (lim->verbose) fprintf(stderr, "opponent VCT zone: %d / %d root moves kept\n", m, nr);
+        if (m > 0) { vz_stat[5] += nr - m; nr = m; }
     }
     if (sp.dfdef_pct > 0 && ndefs < 0 && nr > 1) dfpn_defenses(c, b, op, root, &nr, hard, lim->verbose);
     res->move = root[0].pos;

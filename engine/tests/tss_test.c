@@ -241,6 +241,64 @@ static int cmd_dfpn(Rule rule, long nodes, int opp, int ms) {
     return 0;
 }
 
+// 相手の VCT の圏の健全性: パスしたら相手に VCT があり圏が取れた局面で、圏の外の空点 (石の近く、自分の止め三以上を作る点・
+// 禁じ手を除く) に打った後も相手に VCT があるかを大きいノード数で確かめる。nodes = 圏を取る探索、vnodes = 確かめ
+static int cmd_vzcheck(Rule rule, long nodes, long vnodes, int pad) {
+    static Board b;
+    char line[8192];
+    static int cells[NCELL];
+    static uint8_t inz[NCELL];
+    long npos = 0, nzone = 0, tested = 0, lost = 0, unknown = 0, zsize = 0, nnear = 0;
+    while (fgets(line, sizeof line, stdin)) {
+        board_init(&b, 15, &rule);
+        char orig[8192];
+        snprintf(orig, sizeof orig, "%s", line);
+        if (load_moves(&b, line) < 0) continue;
+        npos++;
+        int me = board_side(&b), op = opp_color(me);
+        if (b.p4cnt[op][P4_FLEX4]) continue;
+        DfpnResult r;
+        if (!dfpn_vct(&b, op, nodes, 0, &r)) continue;
+        int nz = dfpn_vct_zone(&b, op, cells, NCELL);
+        if (nz < 0) continue;
+        nzone++;
+        memset(inz, 0, sizeof inz);
+        for (int i = 0; i < nz; i++) inz[cells[i]] = 1;
+        if (pad)
+            for (int q = 0; q < NCELL; q++)
+                if (b.cell[q] == EMPTY && b.pat4[op][q] >= pad) inz[q] = 1;
+        int bad = 0;
+        if (getenv("VZSHOW")) {
+            printf("pos %ld first %d,%d zone %d\n", npos, pos_x(r.move), pos_y(r.move), nz);
+            for (int y = 0; y < 15; y++) {
+                for (int x = 0; x < 15; x++) {
+                    int q = to_pos(x, y);
+                    putchar(b.cell[q] == BLACK ? (inz[q] ? 'X' : 'x') : b.cell[q] == WHITE ? (inz[q] ? 'O' : 'o') : inz[q] ? '+' : '.');
+                }
+                putchar('\n');
+            }
+        }
+        for (int q = 0; q < NCELL; q++) {
+            if (b.cell[q] != EMPTY || !b.near[q] || (me == BLACK && rule_has_forbidden(&b.rule) && board_is_forbidden(&b, q))) continue;
+            nnear++;
+            if (inz[q]) { zsize++; continue; }
+            int a = b.pat4[me][q];
+            if (a >= P4_BLOCK3 && a != P4_FLEX2_2X) continue;
+            board_move(&b, q);
+            int win = dfpn_vct(&b, op, vnodes, 0, &r);
+            board_undo(&b);
+            tested++;
+            if (win) lost++;
+            else {
+                unknown++;
+                if (bad++ < 3) printf("pos %ld: %d,%d outside zone but no VCT found%s | %s", npos, pos_x(q), pos_y(q), r.aborted ? " (aborted)" : "", orig);
+            }
+        }
+    }
+    printf("positions %ld zone %ld near-cells %ld in-zone %ld tested %ld still-lost %ld not-proven %ld\n", npos, nzone, nnear, zsize, tested, lost, unknown);
+    return 0;
+}
+
 static int cmd_defend(Rule rule, long nodes, int vct) {
     static Board b;
     char line[8192];
@@ -592,6 +650,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "tssib")) return cmd_tssib(rule, argc > 3 ? atoi(argv[3]) : 3000);
     if (!strcmp(argv[1], "l3")) return cmd_l3(rule, argc > 3 ? atol(argv[3]) : 100000, 0, argc > 4 ? atoi(argv[4]) : 0);
     if (!strcmp(argv[1], "l3opp")) return cmd_l3(rule, argc > 3 ? atol(argv[3]) : 100000, 1, argc > 4 ? atoi(argv[4]) : 0);
+    if (!strcmp(argv[1], "vzcheck")) return cmd_vzcheck(rule, argc > 3 ? atol(argv[3]) : 2000, argc > 4 ? atol(argv[4]) : 200000, argc > 5 ? atoi(argv[5]) : 0);
     if (!strcmp(argv[1], "dfpnopp")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 1, argc > 4 ? atoi(argv[4]) : 0);
     if (argc < 4) return 2;
     int mode = !strcmp(argv[3], "vct") ? TSS_VCT : TSS_VCF;

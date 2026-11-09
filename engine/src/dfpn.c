@@ -10,6 +10,8 @@
 long g_dfpn_vcf_nodes = 100;   // 長い VCF はルートの vcf_solve が別に調べる。小さいほうが同じ時間で詰みを多く見つける
 int g_dfpn_zone_k = 2;
 int g_dfpn_flags = 0;
+int g_dfpn_zone_union = 1;   // 1 = dfpn_vct_zone で達四の点ごとの圏の和を取る (0 = 前の共通部分だけ)
+int g_dfpn_zone_def = P4_BLOCK3;   // 0 = 使わない。圏に入れる受け側の形の下限
 int g_dfpn_l2 = 0;      // 1 = 三でない手でも、打った後にパスしたら VCF がある手 (VCF の脅威) を攻めに入れる   // 調査用: 1 = OR の VCF の確認をしない、2 = AND の受け側の VCF の確認をしない
 
 #define INF 100000000u
@@ -378,6 +380,10 @@ static void zwalk(int is_or, int ply) {
     if (Z.fail || ++Z.steps > 20000 || ply > MAX_DEPTH) { Z.fail = 1; return; }
     if (zseen(dkey(b, is_or))) return;
     int att = D.att, def = D.def;
+    // 受け側の石が 1 つ増えて受け側の四の点が新しくできると、証明木の受け (受け側の四) が変わり得る: その点も圏に入れる
+    if (g_dfpn_zone_def)
+        for (int q = 0; q < NCELL; q++)
+            if (b->cell[q] == EMPTY && b->pat4[def][q] >= g_dfpn_zone_def && b->pat4[def][q] != P4_FLEX2_2X) zadd(q);
     if (is_or) {
         if (b->p4cnt[att][P4_FIVE]) { zadd(find_p4(att, P4_FIVE)); return; }
         if (b->p4cnt[def][P4_FIVE] == 0 && tz_gate(b, att)) {
@@ -411,6 +417,16 @@ static void zwalk(int is_or, int ply) {
             if (b->cell[q] == EMPTY && b->pat4[att][q] == P4_FIVE) zadd(q);
     } else {
         for (int i = 0; i < D.zone.n; i++) zadd(D.zone.cells[i]);
+        // 達四の点が複数あるとき、受けの候補は各点の圏の共通部分だが、圏としては和が要る
+        // (片方の圏にだけ受け側の石が増えると、その点の圏が変わって新しい受けが生まれ得る)
+        if (g_dfpn_zone_union && b->p4cnt[att][P4_FLEX4] >= 2)
+            for (int q = 0; q < NCELL; q++) {
+                if (b->cell[q] != EMPTY || b->pat4[att][q] != P4_FLEX4 || !dlegal(att, q)) continue;
+                TzZone z;
+                int t = q;
+                if (tz_line_zone(b, att, &t, 1, &z) == 1)
+                    for (int i = 0; i < z.n; i++) zadd(z.cells[i]);
+            }
     }
     if (st > 0) return;
     int save[MAX_CH];

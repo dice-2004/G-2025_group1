@@ -172,6 +172,8 @@ static int speed(Rule rule, int depth, int threads) {
            total_ms > 0 ? total_nodes / total_ms * 1000 : 0);
     extern long nmp_stat[4];
     if (nmp_stat[0]) printf("nmp: want %ld safe %ld tried %ld cut %ld\n", nmp_stat[0], nmp_stat[1], nmp_stat[2], nmp_stat[3]);
+    extern long vz_stat[6];
+    if (vz_stat[0]) printf("vz: calls %ld vct %ld zone %ld moves %ld -> %ld root-cut %ld\n", vz_stat[0], vz_stat[1], vz_stat[2], vz_stat[3], vz_stat[4], vz_stat[5]);
     TzStats z = tz_stats();
     if (z.probes) printf("tz: probes %ld cache %ld replay %ld solves %ld found %ld\n", z.probes, z.cache_hits, z.replay_hits, z.solves, z.found);
     return 0;
