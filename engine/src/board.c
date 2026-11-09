@@ -5,6 +5,7 @@
 #include <string.h>
 
 static uint64_t zobrist[3][NCELL];
+static uint64_t zobrist_pass;
 
 static uint64_t splitmix64(uint64_t *s) {
     uint64_t z = (*s += 0x9E3779B97F4A7C15ULL);
@@ -17,6 +18,12 @@ void board_global_init(void) {
     uint64_t s = 20251022;
     for (int c = 0; c < 3; c++)
         for (int p = 0; p < NCELL; p++) zobrist[c][p] = splitmix64(&s);
+    zobrist_pass = splitmix64(&s);
+}
+
+void board_pass(Board *b) {
+    b->passes ^= 1;
+    b->hash ^= zobrist_pass;
 }
 
 // 空点 q の集計 (vsum, p4cnt) への寄与を足す (sign=+1) / 引く (sign=-1)
@@ -39,8 +46,10 @@ static void refresh_cell(Board *b, int q) {
 }
 
 // q の方向 d の線パターンだけを作り直す (石の出入りで変わるのはその方向だけ)。変わらなければ何もしない
+// 石のあるマスのパターンは使わないので更新しない (石を取るときに refresh_cell で作り直す)
 static inline void refresh_dir(Board *b, int q, int d) {
-    int empty = b->cell[q] == EMPTY;
+    if (b->cell[q] != EMPTY) return;
+    const int empty = 1;
     for (int c = BLACK; c <= WHITE; c++) {
         uint8_t np = g_pattern_table[c][b->key[q][d]];
         uint8_t *pt = b->pat[c][q];
@@ -119,6 +128,8 @@ static void put_stone(Board *b, int p, int color) {
 
 static void remove_stone(Board *b, int p) {
     int color = b->cell[p];
+    b->cell[p] = WALL;          // パターンだけ作り直して (集計に入れずに) から空点に戻す
+    refresh_cell(b, p);
     b->cell[p] = EMPTY;
     account_cell(b, p, +1);
     add_near(b, p, -1);
@@ -225,9 +236,11 @@ int board_verify(const Board *b) {
             int q = to_pos(x, y);
             for (int d = 0; d < 4; d++) {
                 if (b->key[q][d] != compute_key(b, q, d)) return 0;
+                if (b->cell[q] != EMPTY) continue;   // 石のあるマスのパターンは更新しない
                 for (int c = BLACK; c <= WHITE; c++)
                     if (b->pat[c][q][d] != pattern_of(c, b->key[q][d])) return 0;
             }
+            if (b->cell[q] != EMPTY) continue;
             for (int c = BLACK; c <= WHITE; c++)
                 if (b->pat4[c][q] != combine_pattern4(b->pat[c][q])) return 0;
         }

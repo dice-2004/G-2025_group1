@@ -16,6 +16,8 @@
 #include "../src/board.h"
 #include "../src/eval.h"
 #include "../src/search.h"
+#include "../src/tz.h"
+#include "../src/vcf.h"
 
 static Rule parse_rule(const char *s) {
     if (!s) return rule_from_gomocup(4);
@@ -130,6 +132,19 @@ static int speed(Rule rule, int depth, int threads) {
     pattern_init(&rule);
     search_set_param("vct_pct", 0);
     search_set_threads(threads);
+    // 環境変数 G2_PARAMS="tz=1,tz_depth=2" で探索の値を変える
+    const char *env = getenv("G2_PARAMS");
+    if (env) {
+        char buf[512], *save = NULL;
+        snprintf(buf, sizeof buf, "%s", env);
+        for (char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
+            char *eq = strchr(t, '=');
+            if (!eq) continue;
+            *eq = 0;
+            if (!search_set_param(t, atol(eq + 1))) fprintf(stderr, "unknown param %s\n", t);
+        }
+        pattern_init(&rule);
+    }
     while (fgets(line, sizeof line, stdin)) {
         board_init(&b, 15, &rule);
         char *s = line;
@@ -150,7 +165,72 @@ static int speed(Rule rule, int depth, int threads) {
     }
     printf("total: %d positions, nodes %ld, time %.1f ms, nps %.0f\n", npos, total_nodes, total_ms,
            total_ms > 0 ? total_nodes / total_ms * 1000 : 0);
+    extern long nmp_stat[4];
+    if (nmp_stat[0]) printf("nmp: want %ld safe %ld tried %ld cut %ld\n", nmp_stat[0], nmp_stat[1], nmp_stat[2], nmp_stat[3]);
+    TzStats z = tz_stats();
+    if (z.probes) printf("tz: probes %ld cache %ld replay %ld solves %ld found %ld\n", z.probes, z.cache_hits, z.replay_hits, z.solves, z.found);
     return 0;
+}
+
+
+// 脅威圏の健全性: 局面列 (1 行 1 局面) について tz_probe が圏を返したら、圏の外の空点 (自分の四・禁じ手を除く) に
+// 打っても相手の VCF が残ることを tss_solve で確かめる
+static int tzcheck(Rule rule) {
+    static Board b;
+    char line[8192];
+    long probes = 0, zones = 0, cells = 0, outside = 0, bad = 0, unknown = 0, zsum = 0;
+    pattern_init(&rule);
+    while (fgets(line, sizeof line, stdin)) {
+        board_init(&b, 15, &rule);
+        char *s = line;
+        int x, y, k;
+        int mv[400], nmv = 0;
+        while (sscanf(s, " %d,%d%n", &x, &y, &k) == 2) { mv[nmv++] = to_pos(x, y); s += k; }
+        for (int i = 0; i < nmv; i++) {
+            if (b.cell[mv[i]] != EMPTY) break;
+            board_move(&b, mv[i]);
+            if (board_last_move_wins(&b)) break;
+            int me = board_side(&b), op = opp_color(me);
+            if (b.p4cnt[op][P4_FIVE] || b.p4cnt[me][P4_FIVE]) continue;
+            if (!tz_gate(&b, op)) continue;
+            probes++;
+            TzZone z;
+            if (tz_probe(&b, 2000, &z) != 1) continue;
+            zones++;
+            zsum += z.n;
+            static uint8_t in[NCELL];
+            memset(in, 0, sizeof in);
+            for (int j = 0; j < z.n; j++) in[z.cells[j]] = 1;
+            for (int yy = 0; yy < 15; yy++)
+                for (int xx = 0; xx < 15; xx++) {
+                    int q = to_pos(xx, yy);
+                    if (b.cell[q] != EMPTY) continue;
+                    cells++;
+                    if (in[q] || b.pat4[me][q] >= P4_BLOCK4) continue;
+                    if (me == BLACK && rule_has_forbidden(&b.rule) && board_is_forbidden(&b, q)) continue;
+                    if (!b.near[q] && (q % 7)) continue;   // 遠い点は一部だけ
+                    outside++;
+                    board_move(&b, q);
+                    TssResult r;
+                    tss_solve(&b, op, TSS_VCF, 40, 200000, &r);
+                    board_undo(&b);
+                    if (!r.win) {
+                        if (r.aborted) unknown++;
+                        else {
+                            bad++;
+                            if (bad <= 10) {
+                                printf("BAD: move %d,%d outside zone breaks VCF. position:", xx, yy);
+                                for (int t = 0; t < b.nmoves; t++) printf(" %d,%d", pos_x(b.moves[t]), pos_y(b.moves[t]));
+                                printf("\n");
+                            }
+                        }
+                    }
+                }
+        }
+    }
+    printf("tzcheck: probes %ld zones %ld avg_zone %.1f empty_cells %ld checked_outside %ld bad %ld unknown %ld\n", probes,
+           zones, zones ? (double)zsum / zones : 0, cells, outside, bad, unknown);
+    return bad > 0;
 }
 
 static void cell_features(const Board *b, int color, int *f) {
@@ -265,6 +345,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "bench")) return bench(rule);
     if (!strcmp(argv[1], "features")) return features(rule);
     if (!strcmp(argv[1], "msdump")) return msdump(rule);
+    if (!strcmp(argv[1], "tzcheck")) return tzcheck(rule);
     if (!strcmp(argv[1], "speed")) return speed(rule, argc > 3 ? atoi(argv[3]) : 8, argc > 4 ? atoi(argv[4]) : 1);
     fprintf(stderr, "unknown command\n");
     return 2;

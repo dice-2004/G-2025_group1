@@ -15,6 +15,7 @@
 #include <time.h>
 
 #include "eval.h"
+#include "tz.h"
 #include "vcf.h"
 
 // ---------------------------------------------------------------- 置換表
@@ -135,6 +136,8 @@ typedef struct {
     int pv[MAX_PLY][MAX_PLY];
     int pvlen[MAX_PLY];
     int history[3][NCELL];  // 前の手の情報を少し残す (search_root で 1/4 に)
+    uint32_t tzmark[NCELL]; // 脅威圏の点の印 (== tzgen なら圏内)。gen_moves の間だけ使う
+    uint32_t tzgen;
 } Ctx;
 
 static Ctx ctxs[MAX_THREADS];
@@ -157,6 +160,7 @@ void search_clear_tt(void) {
     if (tt && tt_used) memset(tt, 0, (tt_mask + 1) * 2 * sizeof(TTEntry));   // 確保したばかりなら 0 のまま
     tt_used = 0;
     tt_gen = 0;
+    tz_clear();
 }
 
 static double now_ms(void) {
@@ -225,7 +229,14 @@ static struct {
     int unstable_pct;   // 直前の反復で最善手が変わったら、次の反復を始めない目安を何 % に延ばすか
     int leaf_vcf;       // 末端 (深さ 0) で手番側に四があれば VCF を調べるノード数の上限。0 = 調べない
     int leaf_vcf_depth; // 末端の VCF の深さ (攻めの手数)
-} sp = {0, P4_BLOCK4_PLUS, 60, 0, 10, 1, 100, 3, 0, 1, 0, 100, 0, 12};
+    int tz;             // 1 = 脅威圏探索: 深さ tz_depth 以上の節点で、パスしたら相手に VCF があれば手を圏 (tz.c) に絞る
+    int tz_depth;
+    int tz_nodes;       // 脅威圏の VCF 探索のノード数の上限
+    int tz_ext;         // 1 = 圏に絞った節点では深さを減らさない (延長。ルートの深さの 2 倍まで)
+    int nmp;            // 1 = 脅威を確かめた null move 枝刈り: パスしても相手に VCF がなく、パスして浅く読んでも beta 以上なら打ち切る
+    int nmp_depth;      // null move を試す最低の深さ
+    int nmp_r;          // null move の深さの削減 (基本値。深さ 6 ごとに +1)
+} sp = {0, P4_BLOCK4_PLUS, 60, 0, 10, 1, 100, 3, 0, 1, 0, 100, 0, 12, 0, 2, 300, 0, 0, 3, 2};
 
 int search_soft_pct(void) { return sp.soft_pct; }
 
@@ -245,6 +256,13 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "threads")) search_set_threads((int)v);
     else if (!strcmp(name, "leaf_vcf")) sp.leaf_vcf = (int)v;
     else if (!strcmp(name, "leaf_vcf_depth")) sp.leaf_vcf_depth = (int)v;
+    else if (!strcmp(name, "tz")) sp.tz = (int)v;
+    else if (!strcmp(name, "tz_depth")) sp.tz_depth = (int)v;
+    else if (!strcmp(name, "tz_nodes")) sp.tz_nodes = (int)v;
+    else if (!strcmp(name, "tz_ext")) sp.tz_ext = (int)v;
+    else if (!strcmp(name, "nmp")) sp.nmp = (int)v;
+    else if (!strcmp(name, "nmp_depth")) sp.nmp_depth = (int)v;
+    else if (!strcmp(name, "nmp_r")) sp.nmp_r = (int)v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strcmp(name, "table")) g_eval_params.use_table = (int)v;
@@ -280,7 +298,8 @@ static inline int blocks_threat(const Board *b, int op, int q) {
 }
 
 // mode: 0 = 通常 (近くの空点すべて。op_threat なら防ぎ手と自分の四だけ)、1 = 静止探索 (自分の四だけ)
-static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmove, int ply, int mode) {
+// tzon: 脅威圏 (c->tzmark == c->tzgen の点) と自分の四だけ
+static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmove, int ply, int mode, int tzon) {
     Board *b = c->b;
     int n = 0;
     if (b->nmoves == 0) {
@@ -311,6 +330,7 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
             int a = b->pat4[me][q], d = b->pat4[op][q];
             if (mode == 1 && (a < sp.q_min_p4 || a > P4_BLOCK4_FLEX3)) continue;
             if (op_threat && a < P4_BLOCK4 && !blocks_threat(b, op, q)) continue;
+            if (tzon && a < P4_BLOCK4 && c->tzmark[q] != c->tzgen) continue;
             int s = vme[board_pidx(b, me, q)] + vop[board_pidx(b, op, q)] * DEF_SCALE / 64;
             out[n].value = s;
             s = s * 16 + hist[q] / 64;
@@ -357,6 +377,7 @@ static inline void check_time(Ctx *c) {
 static const int LMP_COUNT[5] = {0, 6, 10, 16, 24};
 
 
+long nmp_stat[4];   // 調べた回数 (g2-test speed が表示)
 static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     Board *b = c->b;
     int me = board_side(b), op = opp_color(me);
@@ -424,13 +445,44 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         }
     }
 
+    // 脅威圏: パスしたら相手に VCF があるなら、その手順を崩し得る点と自分の四だけを読む (他は同じ手順で負け)
+    int tzon = 0, tzplies = 0, tzres = -1;   // tzres: -1 = 調べていない、0 = 相手に VCF なし、1/2 = あり
+    int want_nmp = sp.nmp && !is_pv && !qmode && !op_threat && !b->passes && depth >= sp.nmp_depth &&
+                   beta < SCORE_WIN_MIN && beta > -SCORE_WIN_MIN;
+    if (!qmode && !op_threat && ((sp.tz && depth >= sp.tz_depth) || want_nmp)) {
+        if (!tz_gate(b, op)) tzres = 0;
+        else {
+            TzZone z;
+            tzres = tz_probe(b, sp.tz_nodes, &z);
+            if (tzres == 1 && sp.tz && depth >= sp.tz_depth) {
+                tzon = 1;
+                tzplies = z.plies;
+                c->tzgen++;
+                for (int i = 0; i < z.n; i++) c->tzmark[z.cells[i]] = c->tzgen;
+            }
+        }
+    }
+    // null move: 五目並べは石が増えて損をしない (ツークツワンクがない) ので、パスしても beta 以上なら打ち切ってよい。
+    // パスした後に相手の VCF で負ける局面 (読みの深さが足りず誤る典型) は脅威圏の判定で除く
+    if (want_nmp) nmp_stat[0]++;
+    if (want_nmp && tzres == 0) nmp_stat[1]++;
+    if (want_nmp && tzres == 0 && evaluate(b) >= beta) {
+        nmp_stat[2]++;
+        int r = sp.nmp_r + depth / 6;
+        board_pass(b);
+        int v = -pvs(c, -beta, -beta + 1, depth - 1 - r, ply + 1, 0);
+        board_pass(b);
+        if (c->stop) return 0;
+        if (v >= beta) { nmp_stat[3]++; return v >= SCORE_WIN_MIN ? beta : v; }
+    }
+
     Move list[MAX_MOVES];
-    int n = gen_moves(c, list, me, op, op_threat, ttmove, ply, qmode && !op_threat);
+    int n = gen_moves(c, list, me, op, op_threat, ttmove, ply, qmode && !op_threat, tzon);
     int best = stand, bestmove = -1, alpha0 = alpha, searched = 0;
 
     for (int i = 0; i < n; i++) {
         pick_move(list, i, n);
-        int q = list[i].pos, tactical = list[i].tactical || op_threat;
+        int q = list[i].pos, tactical = list[i].tactical || op_threat || tzon;
         if (searched > 0 && !is_pv && !tactical && best > -SCORE_WIN_MIN) {
             if (depth >= 1 && depth <= 4 && searched * 100 >= LMP_COUNT[depth] * sp.lmp_mul) continue;
             if (list[i].value < sp.cand_min) continue;
@@ -442,6 +494,7 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         int v, nd = depth - 1;
         // 活三を作る手 (相手は受けるしかない) の延長
         if (sp.ext_three && !qmode && a4 >= P4_FLEX3 && a4 <= P4_FLEX3_2X && ply + depth < 2 * c->root_depth) nd = depth;
+        if (tzon && sp.tz_ext && ply + depth < 2 * c->root_depth) nd = depth;
         if (searched == 0) {
             v = -pvs(c, -beta, -alpha, nd, ply + 1, is_pv);
         } else {
@@ -488,6 +541,7 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     if (searched == 0) {
         // 打てる手がない: 相手の活三を止められない (負け)、または全部禁じ手 / 静止探索で四がない
         if (op_threat) best = -(SCORE_WIN - ply - 3);
+        else if (tzon) best = -(SCORE_WIN - ply - tzplies);
         else if (qmode) best = stand;
         else best = evaluate(b);
     }
@@ -708,7 +762,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     int op_threat = legal_flex4(b, op) >= 0;
     Move list[MAX_MOVES];
     TTData e;
-    int n = gen_moves(c, list, me, op, op_threat, tt_probe(b->hash, &e) ? e.move : -1, 0, 0);
+    int n = gen_moves(c, list, me, op, op_threat, tt_probe(b->hash, &e) ? e.move : -1, 0, 0, 0);
     sort_moves(list, n);
     RootMove root[MAX_MOVES];
     int nr = 0;
@@ -728,7 +782,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     }
     if (nr == 0) {
         // 防ぎ手がない (相手の活三を止められない) か全部禁じ手: 何でもよいので合法手
-        n = gen_moves(c, list, me, op, 0, -1, 0, 0);
+        n = gen_moves(c, list, me, op, 0, -1, 0, 0, 0);
         sort_moves(list, n);
         for (int i = 0; i < n; i++)
             if (legal(b, me, list[i].pos)) root[nr++] = (RootMove){list[i].pos, 0};
