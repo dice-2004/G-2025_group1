@@ -19,6 +19,7 @@
 
 #include "../src/board.h"
 #include "../src/dfpn.h"
+#include "../src/l3.h"
 #include "../src/tz.h"
 #include "../src/vcf.h"
 
@@ -79,6 +80,93 @@ static int cmd_solve(Rule rule, int mode, int depth, long nodes, int opp) {
 }
 
 // df-pn の VCT (dfpn.c): g2-tss dfpn <rule> [nodes]
+static int cmd_l3(Rule rule, long nodes, int opp, int ms) {
+    static Board b;
+    char line[8192];
+    double total = 0;
+    while (fgets(line, sizeof line, stdin)) {
+        board_init(&b, 15, &rule);
+        if (load_moves(&b, line) < 0) { printf("error\n"); continue; }
+        int att = opp ? opp_color(board_side(&b)) : board_side(&b);
+        L3Result r;
+        double t0 = now_sec();
+        l3_win(&b, att, nodes, ms, &r);
+        double dt = now_sec() - t0;
+        total += dt;
+        if (r.win) printf("win %d,%d | nodes=%ld vct=%ld %.1fms\n", pos_x(r.move), pos_y(r.move), r.nodes, r.vct_calls, dt * 1000);
+        else printf("nowin | nodes=%ld vct=%ld%s %.1fms\n", r.nodes, r.vct_calls, r.aborted ? " aborted" : "", dt * 1000);
+        extern long g_l3_stat[6];
+        fprintf(stderr, "  or %ld (avg ch %.1f) and %ld (avg ch %.1f) zonefail %ld dfpnfail %ld\n", g_l3_stat[0], g_l3_stat[1] / (g_l3_stat[0] + 1e-9), g_l3_stat[2], g_l3_stat[3] / (g_l3_stat[2] + 1e-9), g_l3_stat[4], g_l3_stat[5]);
+        extern double g_l3_ms[4];
+        fprintf(stderr, "  ms: or-vct %.0f quiet %.0f and-zone %.0f and-fail %.0f\n", g_l3_ms[0], g_l3_ms[1], g_l3_ms[2], g_l3_ms[3]);
+        memset(g_l3_ms, 0, sizeof g_l3_ms);
+        memset(g_l3_stat, 0, sizeof g_l3_stat);
+        fflush(stdout);
+    }
+    fprintf(stderr, "time %.3f s\n", total);
+    return 0;
+}
+
+// 調査用: 手番側の「打って相手がパスしたら VCT がある」手を数える (λ3 の脅威の数)
+static int cmd_l3count(Rule rule, long nodes, int minp) {
+    static Board b;
+    char line[8192];
+    while (fgets(line, sizeof line, stdin)) {
+        board_init(&b, 15, &rule);
+        if (load_moves(&b, line) < 0) { printf("error\n"); continue; }
+        int att = board_side(&b), n = 0, nq = 0, now = 0;
+        double t0 = now_sec();
+        if (tss_solve(&b, att, TSS_VCT, 8, nodes * 4, NULL)) now = 1;
+        char buf[2048]; int bl = 0; buf[0] = 0;
+        for (int q = 0; q < NCELL; q++) {
+            if (b.cell[q] != EMPTY || !b.near[q] || b.pat4[att][q] < minp) continue;
+            if (rule_has_forbidden(&b.rule) && att == BLACK && board_is_forbidden(&b, q)) continue;
+            nq++;
+            board_move_color(&b, q, att);
+            int ok = tss_solve(&b, att, TSS_VCT, 6, nodes, NULL);
+            board_undo(&b);
+            if (ok) { n++; if (bl < 2000) bl += snprintf(buf + bl, sizeof buf - bl, " %d,%d", pos_x(q), pos_y(q)); }
+        }
+        printf("vct_now=%d threats=%d/%d %.1fms |%s\n", now, n, nq, (now_sec() - t0) * 1000, buf);
+        fflush(stdout);
+    }
+    return 0;
+}
+
+// 調査用: dfpn_vct の証明の圏の外に受け側の石を置いても VCT が残るかを数える
+static int cmd_zonecheck(Rule rule, long nodes) {
+    static Board b;
+    char line[8192];
+    long tested = 0, broken = 0, proofs = 0, zsum = 0, zfail = 0;
+    int zc[400];
+    while (fgets(line, sizeof line, stdin)) {
+        board_init(&b, 15, &rule);
+        if (load_moves(&b, line) < 0) continue;
+        int att = board_side(&b), def = opp_color(att);
+        DfpnResult r;
+        if (!dfpn_vct(&b, att, nodes, 0, &r)) continue;
+        int nz = dfpn_vct_zone(&b, att, zc, 400);
+        if (nz < 0) { zfail++; continue; }
+        proofs++; zsum += nz;
+        static uint8_t in[NCELL]; memset(in, 0, sizeof in);
+        for (int i = 0; i < nz; i++) in[zc[i]] = 1;
+        for (int q = 0; q < NCELL; q++) {
+            if (b.cell[q] != EMPTY || !b.near[q] || in[q]) continue;
+            if (rule_has_forbidden(&b.rule) && def == BLACK && board_is_forbidden(&b, q)) continue;
+            int pd = b.pat4[def][q];
+            board_move_color(&b, q, def);
+            DfpnResult r2;
+            int ok = dfpn_vct(&b, att, nodes * 10, 0, &r2);
+            board_undo(&b);
+            tested++;
+            { static long hist[2][P4_COUNT]; hist[!ok][pd]++; if (getenv("ZHIST") && tested % 50 == 0) { for (int k = 0; k < P4_COUNT; k++) fprintf(stderr, "%d:%ld/%ld ", k, hist[1][k], hist[0][k] + hist[1][k]); fprintf(stderr, "\n"); } }
+            if (!ok) { broken++; if (broken <= 10) printf("broken: %s  def at %d,%d (aborted %d)\n", "pos", pos_x(q), pos_y(q), r2.aborted); }
+        }
+    }
+    printf("proofs %ld (zone fail %ld) avg zone %.1f, outside cells tested %ld, broken %ld\n", proofs, zfail, zsum / (proofs + 1e-9), tested, broken);
+    return 0;
+}
+
 static int cmd_dfpn(Rule rule, long nodes, int opp) {
     static Board b;
     char line[8192];
@@ -208,6 +296,18 @@ int main(int argc, char **argv) {
     if (getenv("DFPN_VCF")) g_dfpn_vcf_nodes = atol(getenv("DFPN_VCF"));
     if (getenv("DFPN_ZONE")) g_dfpn_zone_k = atoi(getenv("DFPN_ZONE"));
     if (!strcmp(argv[1], "dfpn")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 0);
+    if (getenv("L3_VCT")) g_l3_vct_nodes = atol(getenv("L3_VCT"));
+    if (getenv("L3_QUIET")) g_l3_quiet_nodes = atol(getenv("L3_QUIET"));
+    if (getenv("L3_DEPTH")) g_l3_vct_depth = atoi(getenv("L3_DEPTH"));
+    { extern int g_l3_or_mode; extern long g_l3_or_nodes;
+      if (getenv("L3_ORMODE")) g_l3_or_mode = atoi(getenv("L3_ORMODE"));
+      if (getenv("L3_OR")) g_l3_or_nodes = atol(getenv("L3_OR")); }
+    { extern int g_l3_def_min; if (getenv("L3_DEF")) g_l3_def_min = atoi(getenv("L3_DEF")); }
+    if (getenv("L3_MIN")) g_l3_quiet_min = atoi(getenv("L3_MIN"));
+    if (!strcmp(argv[1], "l3count")) return cmd_l3count(rule, argc > 3 ? atol(argv[3]) : 2000, argc > 4 ? atoi(argv[4]) : 0);
+    if (!strcmp(argv[1], "zonecheck")) return cmd_zonecheck(rule, argc > 3 ? atol(argv[3]) : 20000);
+    if (!strcmp(argv[1], "l3")) return cmd_l3(rule, argc > 3 ? atol(argv[3]) : 100000, 0, argc > 4 ? atoi(argv[4]) : 0);
+    if (!strcmp(argv[1], "l3opp")) return cmd_l3(rule, argc > 3 ? atol(argv[3]) : 100000, 1, argc > 4 ? atoi(argv[4]) : 0);
     if (!strcmp(argv[1], "dfpnopp")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 1);
     if (argc < 4) return 2;
     int mode = !strcmp(argv[3], "vct") ? TSS_VCT : TSS_VCF;

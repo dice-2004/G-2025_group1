@@ -32,6 +32,8 @@ static _Thread_local struct {
     long nodes, max_nodes;
     double deadline;    // 0 = 時間の制限なし
     int aborted;
+    TzZone zone;        // 最後の gen_and の攻め側の脅威の圏 (zone_all = 絞れない)
+    int zone_all;
 } D;
 
 static double now_ms(void) {
@@ -41,6 +43,9 @@ static double now_ms(void) {
 }
 
 static const uint64_t DSALT[3] = {0, 0x243f6a8885a308d3ULL, 0x13198a2e03707344ULL};
+// 受け側の手番の局面の鍵に混ぜる。パスで同じ石の配置が攻め側の手番にも受け側の手番にもなる (呼び出しをまたぐ置換表の取り違えを防ぐ)
+#define ANDSALT 0xa4093822299f31d0ULL
+static inline uint64_t dkey(const Board *b, int is_or) { return b->hash ^ DSALT[D.att] ^ (is_or ? 0 : ANDSALT); }
 
 static inline int dlegal(int color, int q) {
     return !(D.forb && color == BLACK && board_is_forbidden(D.b, q));
@@ -188,6 +193,8 @@ static int gen_and(int *ch, int *nch) {
         if (r == 2) all = 1;
         else acc = z;
     }
+    D.zone = acc;
+    D.zone_all = all;
     // 受け側が先に VCF で勝てるなら脅威は通らない
     if (tz_gate(b, def)) {
         TzZone zd;
@@ -229,7 +236,7 @@ static inline uint32_t add_cap(uint32_t a, uint32_t b) {
 // 局面の証明数・反証数を閾値まで調べる。is_or = 攻め側の手番
 static void mid(int is_or, int ply, uint32_t thpn, uint32_t thdn, uint32_t *opn, uint32_t *odn) {
     Board *b = D.b;
-    uint64_t key = b->hash ^ DSALT[D.att];
+    uint64_t key = dkey(b, is_or);
     DEntry *e = probe(key);
     if (e && (e->pn == 0 || e->dn == 0)) { *opn = e->pn; *odn = e->dn; return; }
     if (++D.nodes > D.max_nodes || (D.deadline > 0 && (D.nodes & 63) == 0 && now_ms() > D.deadline)) { D.aborted = 1; *opn = e ? e->pn : 1; *odn = e ? e->dn : 1; return; }
@@ -248,7 +255,7 @@ static void mid(int is_or, int ply, uint32_t thpn, uint32_t thdn, uint32_t *opn,
     uint32_t cpn[MAX_CH], cdn[MAX_CH];
     for (int i = 0; i < nch; i++) {
         board_move_color(b, ch[i], color);
-        DEntry *c = probe(b->hash ^ DSALT[D.att]);
+        DEntry *c = probe(dkey(b, !is_or));
         cpn[i] = c ? c->pn : 1;
         cdn[i] = c ? c->dn : 1;
         board_undo(b);
@@ -318,7 +325,7 @@ int dfpn_vct(Board *b, int attacker, long max_nodes, int max_ms, DfpnResult *res
     while (pn && dn && !D.aborted) mid(1, 0, INF, INF, &pn, &dn);
     int win = pn == 0, move = -1;
     if (win) {
-        DEntry *e = probe(b->hash ^ DSALT[attacker]);
+        DEntry *e = probe(dkey(b, 1));
         move = e ? e->best : -1;
     }
     if (res) {
@@ -328,4 +335,96 @@ int dfpn_vct(Board *b, int attacker, long max_nodes, int max_ms, DfpnResult *res
         res->aborted = D.aborted;
     }
     return win;
+}
+
+// ---- 証明の圏 (dfpn_vct_zone) ----
+// 証明木をたどって、攻め側の手・受けの候補・各 AND 局面の脅威の圏・末端の VCF の圏を集める。
+// この外に受け側の石が 1 つ増えても、証明木の各局面の受けの候補は (受け側の新しい四を除いて) 変わらない
+static _Thread_local struct {
+    uint8_t mark[NCELL];
+    int *out, n, max;
+    long steps;
+    int fail;
+    uint64_t seen[4096];
+} Z;
+
+static void zadd(int q) {
+    if (q < 0 || Z.mark[q]) return;
+    if (Z.n >= Z.max) { Z.fail = 1; return; }
+    Z.mark[q] = 1;
+    Z.out[Z.n++] = q;
+}
+
+static int zseen(uint64_t key) {
+    uint64_t *s = &Z.seen[key & 4095];
+    if (*s == key) return 1;
+    *s = key;
+    return 0;
+}
+
+static void zwalk(int is_or, int ply) {
+    Board *b = D.b;
+    if (Z.fail || ++Z.steps > 20000 || ply > MAX_DEPTH) { Z.fail = 1; return; }
+    if (zseen(dkey(b, is_or))) return;
+    int att = D.att, def = D.def;
+    if (is_or) {
+        if (b->p4cnt[att][P4_FIVE]) { zadd(find_p4(att, P4_FIVE)); return; }
+        if (b->p4cnt[def][P4_FIVE] == 0 && tz_gate(b, att)) {
+            TzZone z;
+            int r = tz_probe_att(b, att, 20000, &z);
+            if (r == 2) { Z.fail = 1; return; }
+            if (r == 1) {
+                for (int i = 0; i < z.n; i++) zadd(z.cells[i]);
+                zadd(z.first);
+                return;
+            }
+        }
+        DEntry *e = probe(dkey(b, 1));
+        int m = e && e->pn == 0 ? e->best : -1;
+        if (b->p4cnt[def][P4_FIVE] == 1) m = find_p4(def, P4_FIVE);
+        if (m < 0 || b->cell[m] != EMPTY) { Z.fail = 1; return; }
+        zadd(m);
+        board_move_color(b, m, att);
+        zwalk(0, ply + 1);
+        board_undo(b);
+        return;
+    }
+    int ch[MAX_CH], nch;
+    D.zone.n = 0;
+    D.zone_all = 0;
+    int na = b->p4cnt[att][P4_FIVE];
+    int st = gen_and(ch, &nch);
+    if (st < 0 || D.zone_all) { Z.fail = 1; return; }
+    if (na) {
+        for (int q = 0; q < NCELL; q++)
+            if (b->cell[q] == EMPTY && b->pat4[att][q] == P4_FIVE) zadd(q);
+    } else {
+        for (int i = 0; i < D.zone.n; i++) zadd(D.zone.cells[i]);
+    }
+    if (st > 0) return;
+    int save[MAX_CH];
+    memcpy(save, ch, sizeof(int) * nch);
+    for (int i = 0; i < nch && !Z.fail; i++) {
+        zadd(save[i]);
+        board_move_color(b, save[i], def);
+        zwalk(1, ply + 1);
+        board_undo(b);
+    }
+}
+
+int dfpn_vct_zone(Board *b, int attacker, int *cells, int max) {
+    // dfpn_vct の直後 (同じ盤・同じ攻め側) に呼ぶ。D の状態はそのまま使う
+    if (D.b != b || D.att != attacker) return -1;
+    memset(Z.mark, 0, sizeof Z.mark);
+    memset(Z.seen, 0, sizeof Z.seen);
+    Z.out = cells;
+    Z.n = 0;
+    Z.max = max;
+    Z.steps = 0;
+    Z.fail = 0;
+    long nodes = D.nodes;
+    D.root_n = b->nmoves;
+    zwalk(1, 0);
+    D.nodes = nodes;
+    return Z.fail ? -1 : Z.n;
 }

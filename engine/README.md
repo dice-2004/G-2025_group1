@@ -22,6 +22,7 @@ python3 bench/match.py g2 legacy --rule renju    # 対局 (bench/README.md)
 | `src/vcf.c/.h` | VCF (四の連続) / VCT (四と活三の連続) 詰み探索。連珠の禁じ手を両側で考慮。置換表つき。API は `vcf_solve` / `vct_solve` / `tss_solve` (パス時の相手の詰み) / `vcf_defenses` (相手の VCF の受け) / `vct_defenses` (相手の VCF・VCT の受け) |
 | `src/tz.c/.h` | 脅威圏: 手番側がパスしたら相手に VCF があるか (`tz_probe`)、あればその手順を崩し得る点 (圏、平均 4 点) を返す。手順はハッシュで覚え、直近の手順を別の局面で再生して使い回す。VCT の受けの省略 (`g_and_zone`) と、探索の調整値 `p_tz` / `p_nmp` / `p_own_vcf` (既定無効) で使う。健全性は `g2-test tzcheck <rule>` |
 | `src/dfpn.c/.h` | 証明数探索 (df-pn) の VCT `dfpn_vct`。受けの候補は脅威圏 (達四の点ごとの勝ち手順の圏の共通部分、またはパスしたときの VCF の圏) と受け側の四。ルートで上限時間の `p_vct_pct` % (既定 20) まで使う (`p_vct_dfpn=1`、既定)。`g2-tss dfpn <rule> [nodes]` |
+| `src/l3.c/.h` | λ3 の証明数探索 `l3_win` (試作、既定では使わない)。脅威 = 打って相手がパスしたら VCT がある手 (静かな手を含む)。受けの候補は VCT の証明の圏 (`dfpn_vct_zone`) と受け側の三・四。`p_dfver_l3=1` で選んだ手の確かめに使う。`g2-tss l3 / l3opp <rule> [nodes] [ms]`、`g2-tss l3count`、`g2-tss zonecheck` |
 | `src/eval.c/.h` | 評価の表: 4 方向のパターンの組 (12^4) → 点数。盤面の評価は空点の点数の和 (Board.vsum を差分更新) の手番側 − 相手側。重みは `tests/tune_eval.py` で調整 |
 | `src/search.c/.h` | 本探索: 反復深化 + PVS + aspiration、置換表、強制手、killer/history、LMR、ルートで VCF/VCT と相手 VCF への受け。調整用の値は `INFO p_<名前> <値>` (`search_set_param`) |
 | `src/book.c/.h` | 開局ブックの表引き `book_probe` (15 路、黒白とも 6 手目まで)。8 対称を正規化したキーで `book_data.c` を二分探索。連珠 (禁じ手ありのルール) と自由 (standard も共用) の 2 表。空点でない手・黒の禁じ手・五/達四の点がある局面では使わない。`INFO book 0` で無効、`INFO book 2` で相手の活三への受けにも使う |

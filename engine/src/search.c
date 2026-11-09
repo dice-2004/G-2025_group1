@@ -16,6 +16,7 @@
 
 #include "eval.h"
 #include "dfpn.h"
+#include "l3.h"
 #include "tz.h"
 #include "vcf.h"
 
@@ -248,6 +249,7 @@ static struct {
     int smp_pick;       // 1 = 補助スレッドの結果 (勝ちの読み切り・より深い反復) も使う
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
+    int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
@@ -299,6 +301,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "smp_pick")) sp.smp_pick = (int)v;
     else if (!strcmp(name, "dfdef_pct")) sp.dfdef_pct = (int)v;
     else if (!strcmp(name, "dfver_pct")) sp.dfver_pct = (int)v;
+    else if (!strcmp(name, "dfver_l3")) sp.dfver_l3 = (int)v;
     else if (!strcmp(name, "leaf_vcf")) sp.leaf_vcf = (int)v;
     else if (!strcmp(name, "leaf_vcf_depth")) sp.leaf_vcf_depth = (int)v;
     else if (!strcmp(name, "tz")) sp.tz = (int)v;
@@ -806,7 +809,14 @@ static void verify_move(Ctx *c, Board *b, int op, RootMove *root, int nr, int ha
         if (per < 2) return;
         DfpnResult r;
         board_move(b, cand[i]);
-        int lose = dfpn_vct(b, op, 1L << 40, per, &r);
+        int lose;
+        if (sp.dfver_l3) {
+            L3Result lr;
+            lose = l3_win(b, op, 1L << 40, per, &lr);
+            r.nodes = lr.nodes;
+            r.aborted = lr.aborted;
+        } else
+            lose = dfpn_vct(b, op, 1L << 40, per, &r);
         board_undo(b);
         if (verbose) fprintf(stderr, "verify %d,%d: %s (%ld nodes)\n", pos_x(cand[i]), pos_y(cand[i]), lose ? "opponent VCT" : r.aborted ? "unknown" : "safe", r.nodes);
         if (!lose) {

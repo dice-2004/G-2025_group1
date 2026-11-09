@@ -22,6 +22,10 @@ typedef struct {
 // max_nodes / max_ms (0 = 時間の制限なし) のどちらかに達したら打ち切る
 int dfpn_vct(Board *b, int attacker, long max_nodes, int max_ms, DfpnResult *res);
 
+// 直前の dfpn_vct の証明 (同じ盤・同じ attacker で勝ち) の圏: 受け側の石がこの外に増えても勝ちは (ほぼ) 変わらない。
+// cells に空点も石の点も入れる。戻り値は個数、-1 = 絞れない (証明木が大きすぎる・圏を絞れない VCF がある)
+int dfpn_vct_zone(Board *b, int attacker, int *cells, int max);
+
 // 調整用: VCF の確認 1 回のノード数の上限 (既定 100、INFO p_dfpn_vcf)、三を探す範囲 (攻め側の直前の何手の周りか、0 = 全体、既定 2)
 extern long g_dfpn_vcf_nodes;
 extern int g_dfpn_zone_k;
