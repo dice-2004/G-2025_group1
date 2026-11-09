@@ -245,7 +245,11 @@ static struct {
     int tact_own;       // 自分のこの形 (Pattern4) 以上を作る手を「戦術的」(LMP・LMR をしない) とする
     int tact_def;       // 相手のこの形以上の点をふさぐ手を「戦術的」とする
     int vct_dfpn;       // 1 = ルートの VCT (vct_pct) を証明数探索 (dfpn.c) で調べる (既定。0 = vct_solve)
+    int smp_pick;       // 1 = 補助スレッドの結果 (勝ちの読み切り・より深い反復) も使う
+    int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
+    int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
 } sp = {
+    .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
     .cand_min = 0, .ext_three = 1, .vctdef_pct = 0, .unstable_pct = 100,
@@ -292,6 +296,9 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "vctdef_pct")) sp.vctdef_pct = (int)v;
     else if (!strcmp(name, "unstable_pct")) sp.unstable_pct = (int)v;
     else if (!strcmp(name, "threads")) search_set_threads((int)v);
+    else if (!strcmp(name, "smp_pick")) sp.smp_pick = (int)v;
+    else if (!strcmp(name, "dfdef_pct")) sp.dfdef_pct = (int)v;
+    else if (!strcmp(name, "dfver_pct")) sp.dfver_pct = (int)v;
     else if (!strcmp(name, "leaf_vcf")) sp.leaf_vcf = (int)v;
     else if (!strcmp(name, "leaf_vcf_depth")) sp.leaf_vcf_depth = (int)v;
     else if (!strcmp(name, "tz")) sp.tz = (int)v;
@@ -722,6 +729,8 @@ static void iterate(Ctx *c, RootMove *root, int nr, const SearchLimits *lim, Sea
             res->depth = depth;
             prev_score = best;
             if (c->id == 0) log_info(c, depth, best, bestpv, bestpvlen, lim->verbose);
+            // 補助スレッドが勝ちを読み切ったら全員止める (その手を主スレッドが使う)
+            if (sp.smp_pick && c->id > 0 && best > SCORE_WIN_MIN) __atomic_store_n(&g_stop, 1, __ATOMIC_RELAXED);
         }
         // 次の反復のために並べ替え (最善手を先頭、他は点の順。安定ソート)
         for (int i = 1; i < nr; i++) {
@@ -756,6 +765,61 @@ static void *helper_main(void *arg) {
     return NULL;
 }
 
+// 相手の VCT への受け (df-pn): 相手がパスしたら VCT がある局面なら、ルートの候補を順に打って相手の VCT が
+// 証明された手 (負けが確定) を外す。時間が尽きて調べられなかった手・証明できなかった手は残す。全部負けなら外さない。
+// 時間は上限時間の dfdef_pct % (その 1/4 で相手の VCT の有無を調べる)
+static void dfpn_defenses(Ctx *c, Board *b, int op, RootMove *root, int *nr, long hard, int verbose) {
+    double t_end = c->t0 + hard * sp.dfdef_pct / 100.0;
+    DfpnResult r;
+    int budget0 = (int)(hard * sp.dfdef_pct / 400);
+    if (budget0 < 1 || !dfpn_vct(b, op, 1L << 40, budget0, &r)) return;
+    RootMove keep[MAX_MOVES];
+    int nk = 0, lost = 0, n = *nr;
+    for (int i = 0; i < n; i++) {
+        double left = t_end - now_ms();
+        int per = (int)(left / (n - i < 8 ? n - i : 8));
+        if (per >= 1) {
+            board_move(b, root[i].pos);
+            int lose = dfpn_vct(b, op, 1L << 40, per, &r);
+            board_undo(b);
+            if (lose) { lost++; continue; }
+        }
+        keep[nk++] = root[i];
+    }
+    if (verbose) fprintf(stderr, "opponent has VCT: %d / %d root moves proven lost\n", lost, n);
+    if (nk > 0 && lost > 0) {
+        memcpy(root, keep, sizeof(RootMove) * nk);
+        *nr = nk;
+    }
+}
+
+// 探索で選んだ手を打った後に相手の VCT がないかを df-pn で確かめ、負けが証明されたら次の候補 (前の反復の点の順) を
+// 確かめる。残り時間の半分ずつを使い、証明できなかった手 (勝ちがない・打ち切り) を打つ。全部負けなら元の手のまま
+static void verify_move(Ctx *c, Board *b, int op, RootMove *root, int nr, int hard_ms, SearchResult *res, int verbose) {
+    int cand[MAX_MOVES], nc = 0;
+    cand[nc++] = res->move;
+    for (int i = 0; i < nr; i++)
+        if (root[i].pos != res->move) cand[nc++] = root[i].pos;
+    for (int i = 0; i < nc; i++) {
+        double left = c->t0 + hard_ms - now_ms();
+        int per = (int)(i + 1 < nc ? left / 2 : left);
+        if (per < 2) return;
+        DfpnResult r;
+        board_move(b, cand[i]);
+        int lose = dfpn_vct(b, op, 1L << 40, per, &r);
+        board_undo(b);
+        if (verbose) fprintf(stderr, "verify %d,%d: %s (%ld nodes)\n", pos_x(cand[i]), pos_y(cand[i]), lose ? "opponent VCT" : r.aborted ? "unknown" : "safe", r.nodes);
+        if (!lose) {
+            if (i > 0) {
+                res->move = cand[i];
+                res->pvlen = 0;
+                res->reason = "verified";
+            }
+            return;
+        }
+    }
+}
+
 void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     Ctx *c = &ctxs[0];
     if (!lmr_table_ok) lmr_init();
@@ -766,6 +830,8 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     double t0 = now_ms();
     ctx_reset(c, b, 0, t0);
     c->hard_ms = lim->hard_ms > 0 ? lim->hard_ms : 1 << 30;
+    // 選んだ手の確かめ (dfver_pct) の時間を探索の上限から取っておく
+    if (sp.dfver_pct > 0 && lim->hard_ms > 0) c->hard_ms = lim->hard_ms * (100 - sp.dfver_pct) / 100;
     c->max_nodes = lim->max_nodes;
     memset(res, 0, sizeof *res);
     res->move = -1;
@@ -865,6 +931,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         res->reason = "lost";
         return;
     }
+    if (sp.dfdef_pct > 0 && ndefs < 0 && nr > 1) dfpn_defenses(c, b, op, root, &nr, hard, lim->verbose);
     res->move = root[0].pos;
     if (nr == 1) { res->reason = "only-move"; return; }
 
@@ -880,6 +947,8 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         h->lim = *lim;
         h->lim.soft_ms = 0;
         h->lim.verbose = 0;
+        memset(&h->res, 0, sizeof h->res);
+        h->res.move = -1;
         started[t] = pthread_create(&th[t], NULL, helper_main, h) == 0;
     }
     iterate(c, root, nr, lim, res);
@@ -889,7 +958,22 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         if (!started[t]) continue;
         pthread_join(th[t], NULL);
         res->nodes += ctxs[t].nodes;
+        // 補助スレッドの結果を使う: 勝ちを読み切った、または主スレッドより深い反復を終えて点が下がらない
+        const SearchResult *hr = &helpers[t].res;
+        if (!sp.smp_pick || hr->depth <= 0 || hr->move < 0) continue;
+        int win = hr->score > SCORE_WIN_MIN && res->score <= SCORE_WIN_MIN;
+        int deeper = hr->depth > res->depth && hr->score >= res->score && res->score <= SCORE_WIN_MIN;
+        if (win || deeper) {
+            if (lim->verbose) fprintf(stderr, "thread %d: depth %d score %d move %d,%d\n", t, hr->depth, hr->score, pos_x(hr->move), pos_y(hr->move));
+            res->move = hr->move;
+            res->score = hr->score;
+            res->depth = hr->depth;
+            res->pvlen = hr->pvlen;
+            memcpy(res->pv, hr->pv, sizeof(int) * hr->pvlen);
+        }
     }
     res->seldepth = c->seldepth;
+    if (sp.dfver_pct > 0 && lim->hard_ms > 0 && res->move >= 0 && res->score < SCORE_WIN_MIN)
+        verify_move(c, b, op, root, nr, lim->hard_ms, res, lim->verbose);
     res->ms = (int)(now_ms() - c->t0);
 }
