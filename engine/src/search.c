@@ -21,6 +21,7 @@
 #include "ts.h"
 #include "tp.h"
 #include "fvcf.h"
+#include "policy_data.h"
 #include "tz.h"
 #include "vcf.h"
 
@@ -254,6 +255,7 @@ static struct {
     int tact_def;       // 相手のこの形以上の点をふさぐ手を「戦術的」とする
     int def_own4;       // 0 = 相手の活三を受ける節点で、自分に VCF がなければ受けにならない自分のただの四を読まない
     int def_vcf_nodes, def_vcf_depth, def_vcf_min, def_own4_depth;   // その VCF の確かめのノード数・深さ
+    int policy;         // 1 = 手の並べ方に policy_data.c の表を使う
     int def_line;       // 1 = 相手の活三への受けを、達四の点を通る線の上の点 (と自分の四) に絞る
     int vct_dfpn;       // 1 = ルートの VCT (vct_pct) を証明数探索 (dfpn.c) で調べる (既定。0 = vct_solve)
     int smp_pick;       // 1 = 補助スレッドの結果 (勝ちの読み切り・より深い反復) も使う
@@ -286,7 +288,7 @@ static struct {
     .tz_nodes = 300, .tz_ext = 0, .nmp = 0, .nmp_depth = 3,
     .nmp_r = 2, .own_vcf = 0, .ext_four = 0, .ext_limit = 4,
     .lmr_log = 0, .lmr_pv = 66, .tact_own = P4_FLEX3, .tact_def = P4_FLEX3,
-    .vct_dfpn = 1, .def_line = 0, .def_own4 = 0, .def_vcf_nodes = 300, .def_vcf_depth = 16, .def_vcf_min = 99, .def_own4_depth = 2,
+    .vct_dfpn = 1, .def_line = 0, .policy = 0, .def_own4 = 0, .def_vcf_nodes = 300, .def_vcf_depth = 16, .def_vcf_min = 99, .def_own4_depth = 2,
 };
 
 int search_soft_pct(void) { return sp.soft_pct; }
@@ -404,6 +406,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "tact_def")) sp.tact_def = (int)v;
     else if (!strcmp(name, "vct_dfpn")) sp.vct_dfpn = (int)v;
     else if (!strcmp(name, "def_line")) sp.def_line = (int)v;
+    else if (!strcmp(name, "policy")) sp.policy = (int)v;
     else if (!strcmp(name, "def_own4")) sp.def_own4 = (int)v;
     else if (!strcmp(name, "def_vcf_nodes")) sp.def_vcf_nodes = (int)v;
     else if (!strcmp(name, "def_vcf_depth")) sp.def_vcf_depth = (int)v;
@@ -437,6 +440,35 @@ typedef struct {
 } Move;
 
 #define DEF_SCALE 52    // 守り (相手の点) の重み /64
+
+// 手の並べ方の表 (policy_data.c、Rapfi の最善手に合わせたパターンの組ごとの点) を pattern_index で引ける形に広げたもの
+static int16_t pol_tab[3][2][PIDX_COUNT];
+static int pol_ok;
+static void policy_init(void) {
+    static int16_t ws[3][2][PIDX_COUNT];
+    for (int i = 0; i < g_policy_count; i++) {
+        const PolicyEntry *e = &g_policy_entries[i];
+        if (e->color >= 1 && e->color <= 2 && e->spidx >= 0 && e->spidx < PIDX_COUNT) ws[e->color][e->role][e->spidx] = (int16_t)e->w;
+    }
+    for (int i = 0; i < PIDX_COUNT; i++) {
+        uint8_t p[4] = {(uint8_t)(i / (P_COUNT * P_COUNT * P_COUNT)), (uint8_t)(i / (P_COUNT * P_COUNT) % P_COUNT),
+                        (uint8_t)(i / P_COUNT % P_COUNT), (uint8_t)(i % P_COUNT)};
+        for (int a = 1; a < 4; a++)
+            for (int j = a; j > 0 && p[j - 1] > p[j]; j--) { uint8_t t = p[j]; p[j] = p[j - 1]; p[j - 1] = t; }
+        int si = pattern_index(p);
+        for (int c = 1; c <= 2; c++)
+            for (int r = 0; r < 2; r++) pol_tab[c][r][i] = ws[c][r][si];
+    }
+    pol_ok = 1;
+}
+
+static inline int cheb_dist(int a, int b) {
+    int dx = pos_x(a) - pos_x(b), dy = pos_y(a) - pos_y(b);
+    if (dx < 0) dx = -dx;
+    if (dy < 0) dy = -dy;
+    int d = dx > dy ? dx : dy;
+    return d > 6 ? 6 : d;
+}
 
 // 相手の四・活三への防ぎ手か: 相手がそこに打つとその線で四以上になる点
 static inline int blocks_threat(const Board *b, int op, int q) {
@@ -472,6 +504,8 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
     x1 = x1 + 2 < b->size ? x1 + 2 : b->size - 1, y1 = y1 + 2 < b->size ? y1 + 2 : b->size - 1;
     const int16_t *vme = g_cell_value[me], *vop = g_cell_value[op];
     const int *hist = c->history[me];
+    int polon = sp.policy && b->nmoves >= 2;
+    int lastm = polon ? b->moves[b->nmoves - 1] : 0, mylast = polon ? b->moves[b->nmoves - 2] : 0;
     int defl = op_threat && sp.def_line;
     if (defl) {
         // 相手の活三 (達四・四四の点) への受けは、その点を通る四の線の上で相手が四を作れる点だけ (他の点では線は変わらない)
@@ -503,6 +537,13 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
             if (c->drop4 && (a == P4_BLOCK4 || a == P4_BLOCK4_PLUS) && !blocks_threat(b, op, q)) continue;
             if (tzon && a < P4_BLOCK4 && c->tzmark[q] != c->tzgen) continue;
             int s = vme[board_pidx(b, me, q)] + vop[board_pidx(b, op, q)] * DEF_SCALE / 64;
+            if (polon) {
+                // 表の点 (1 logit = 256) を今の点の尺度 (100 ≒ 1 logit) に直す
+                int pv = s * g_policy_base_scale / 100 + pol_tab[me][0][board_pidx(b, me, q)] +
+                         pol_tab[me][1][board_pidx(b, op, q)] + g_policy_dist_last[cheb_dist(q, lastm)] +
+                         g_policy_dist_mine[cheb_dist(q, mylast)];
+                s = pv * 100 / 256;
+            }
             out[n].value = s;
             s = s * 16 + hist[q] / 64;
             if (q == ttmove) s += 1 << 28;
@@ -1074,6 +1115,7 @@ static void verify_move(Ctx *c, Board *b, int op, RootMove *root, int nr, int ha
 void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     Ctx *c = &ctxs[0];
     if (!lmr_table_ok) lmr_init();
+    if (!pol_ok) policy_init();
     tt_alloc();
     tt_used = 1;
     tt_gen++;

@@ -403,6 +403,52 @@ static int moverank(Rule rule) {
     return 0;
 }
 
+// 手の並べ方 (policy) の当てはめ用: 各行 "手順<TAB>手" について、候補手ごとに
+// "行番号 手番の色 自分の4方向パターン(昇順の添字) 相手の(同) 直前の相手の手との距離 自分の前の手との距離 正解か 今の候補手の点" を出す
+static int sorted_pidx4(const uint8_t pats[4]) {
+    uint8_t p[4] = {pats[0], pats[1], pats[2], pats[3]};
+    for (int i = 1; i < 4; i++)
+        for (int j = i; j > 0 && p[j - 1] > p[j]; j--) { uint8_t t = p[j]; p[j] = p[j - 1]; p[j - 1] = t; }
+    return pattern_index(p);
+}
+
+static int cheb(int a, int b) {
+    if (a < 0 || b < 0) return 9;
+    int dx = abs(pos_x(a) - pos_x(b)), dy = abs(pos_y(a) - pos_y(b));
+    return dx > dy ? dx : dy;
+}
+
+static int polfeat(Rule rule) {
+    static Board b;
+    char line[8192];
+    pattern_init(&rule);
+    int row = 0;
+    while (fgets(line, sizeof line, stdin)) {
+        char *tab = strchr(line, '\t');
+        if (!tab) continue;
+        *tab = 0;
+        int tx, ty;
+        if (sscanf(tab + 1, "%d,%d", &tx, &ty) != 2) continue;
+        board_init(&b, 15, &rule);
+        char *s = line;
+        int x, y, k;
+        while (sscanf(s, " %d,%d%n", &x, &y, &k) == 2) { board_move(&b, to_pos(x, y)); s += k; }
+        if (b.nmoves < 2) continue;
+        int me = board_side(&b), op = opp_color(me), target = to_pos(tx, ty);
+        int last = b.moves[b.nmoves - 1], mylast = b.moves[b.nmoves - 2];
+        if (target < 0 || b.cell[target] != EMPTY || !b.near[target]) continue;
+        for (int q = 0; q < NCELL; q++) {
+            if (b.cell[q] != EMPTY || !b.near[q]) continue;
+            int dl = cheb(q, last), dm = cheb(q, mylast);
+            int v = g_cell_value[me][board_pidx(&b, me, q)] + g_cell_value[op][board_pidx(&b, op, q)] * 52 / 64;
+            printf("%d %d %d %d %d %d %d %d\n", row, me, sorted_pidx4(b.pat[me][q]), sorted_pidx4(b.pat[op][q]),
+                   dl > 6 ? 6 : dl, dm > 6 ? 6 : dm, q == target, v);
+        }
+        row++;
+    }
+    return 0;
+}
+
 static int timed(Rule rule, int ms, int threads) {
     static Board b;
     char line[8192];
@@ -496,6 +542,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "lambda3")) return lambda3(rule, argc > 3 ? atoi(argv[3]) : 20, argc > 4 ? atoi(argv[4]) : 400);
     if (!strcmp(argv[1], "evalmoves")) return evalmoves(rule);
     if (!strcmp(argv[1], "moverank")) return moverank(rule);
+    if (!strcmp(argv[1], "polfeat")) return polfeat(rule);
     if (!strcmp(argv[1], "timed")) return timed(rule, argc > 3 ? atoi(argv[3]) : 1000, argc > 4 ? atoi(argv[4]) : 1);
     if (!strcmp(argv[1], "msdump")) return msdump(rule);
     if (!strcmp(argv[1], "tzcheck")) return tzcheck(rule);

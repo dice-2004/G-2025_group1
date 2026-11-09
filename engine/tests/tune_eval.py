@@ -74,12 +74,14 @@ def rapfi_targets(gid, ply, movestr, n, nodes, cache):
     rng = np.random.default_rng(7)
     idx = np.sort(rng.choice(len(gid), size=min(n, len(gid)), replace=False))
     pos = [" ".join(movestr[int(gid[i])][:ply[i]]) for i in idx]
-    labels = {}
+    labels, full = {}, {}
     if cache and os.path.exists(cache):
         for l in open(cache):
             k, v = l.rstrip("\n").split("\t")
-            labels[k] = v
-    todo = [p for p in pos if p not in labels]
+            labels[k] = v.split()[0] if v.split() else "None"   # "評価 Rapfi の手" (古いキャッシュは評価だけ)
+            if len(v.split()) > 1:
+                full[k] = v
+    todo = [p for p in pos if p not in labels or p not in full]
     if todo:
         # 1 局面ずつキャッシュに追記する (途中で止まっても続きから再開できる)
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
@@ -89,7 +91,7 @@ def rapfi_targets(gid, ply, movestr, n, nodes, cache):
         with open(cache, "a") as out:
             for k, (p, r) in enumerate(zip(todo, proc.stdout)):
                 labels[p] = r.split()[0] if r.split() else "None"
-                out.write("%s\t%s\n" % (p, labels[p]))
+                out.write("%s\t%s\n" % (p, r.strip() or "None"))   # 評価と Rapfi の手 (tune_policy.py が使う)
                 out.flush()
                 if (k + 1) % 500 == 0:
                     print("labeled %d / %d" % (k + 1, len(todo)), flush=True)
