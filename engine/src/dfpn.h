@@ -29,5 +29,6 @@ int dfpn_vct_zone(Board *b, int attacker, int *cells, int max);
 // 調整用: VCF の確認 1 回のノード数の上限 (既定 100、INFO p_dfpn_vcf)、三を探す範囲 (攻め側の直前の何手の周りか、0 = 全体、既定 2)
 extern long g_dfpn_vcf_nodes;
 extern int g_dfpn_zone_k;
+extern int g_dfpn_flags;
 
 #endif

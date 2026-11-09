@@ -9,6 +9,7 @@
 
 long g_dfpn_vcf_nodes = 100;   // 長い VCF はルートの vcf_solve が別に調べる。小さいほうが同じ時間で詰みを多く見つける
 int g_dfpn_zone_k = 2;
+int g_dfpn_flags = 0;   // 調査用: 1 = OR の VCF の確認をしない、2 = AND の受け側の VCF の確認をしない
 
 #define INF 100000000u
 #define DTT_BITS 19
@@ -122,7 +123,7 @@ static int gen_or(int *ch, int *nch, int *best) {
         ch[(*nch)++] = q;
         return 0;
     }
-    if (tz_gate(b, att)) {
+    if (!(g_dfpn_flags & 1) && tz_gate(b, att)) {
         TzZone z;
         if (tz_probe_att(b, att, g_dfpn_vcf_nodes, &z) && z.first >= 0) { *best = z.first; return 1; }
     }
@@ -196,7 +197,7 @@ static int gen_and(int *ch, int *nch) {
     D.zone = acc;
     D.zone_all = all;
     // 受け側が先に VCF で勝てるなら脅威は通らない
-    if (tz_gate(b, def)) {
+    if (!(g_dfpn_flags & 2) && tz_gate(b, def)) {
         TzZone zd;
         if (tz_probe_att(b, def, g_dfpn_vcf_nodes, &zd)) return -1;
     }

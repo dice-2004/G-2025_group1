@@ -167,7 +167,7 @@ static int cmd_zonecheck(Rule rule, long nodes) {
     return 0;
 }
 
-static int cmd_dfpn(Rule rule, long nodes, int opp) {
+static int cmd_dfpn(Rule rule, long nodes, int opp, int ms) {
     static Board b;
     char line[8192];
     double total = 0;
@@ -177,7 +177,7 @@ static int cmd_dfpn(Rule rule, long nodes, int opp) {
         int att = opp ? opp_color(board_side(&b)) : board_side(&b);
         DfpnResult r;
         double t0 = now_sec();
-        dfpn_vct(&b, att, nodes, 0, &r);
+        dfpn_vct(&b, att, nodes, ms, &r);
         double dt = now_sec() - t0;
         total += dt;
         if (r.win) printf("win %d,%d | nodes=%ld %.1fms\n", pos_x(r.move), pos_y(r.move), r.nodes, dt * 1000);
@@ -294,8 +294,9 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "defend")) return cmd_defend(rule, argc > 3 ? atol(argv[3]) : 200000, 0);
     if (!strcmp(argv[1], "vctdefend")) return cmd_defend(rule, argc > 3 ? atol(argv[3]) : 1000000, 1);
     if (getenv("DFPN_VCF")) g_dfpn_vcf_nodes = atol(getenv("DFPN_VCF"));
+    if (getenv("DFPN_FLAGS")) g_dfpn_flags = atoi(getenv("DFPN_FLAGS"));
     if (getenv("DFPN_ZONE")) g_dfpn_zone_k = atoi(getenv("DFPN_ZONE"));
-    if (!strcmp(argv[1], "dfpn")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 0);
+    if (!strcmp(argv[1], "dfpn")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 0, argc > 4 ? atoi(argv[4]) : 0);
     if (getenv("L3_VCT")) g_l3_vct_nodes = atol(getenv("L3_VCT"));
     if (getenv("L3_QUIET")) g_l3_quiet_nodes = atol(getenv("L3_QUIET"));
     if (getenv("L3_DEPTH")) g_l3_vct_depth = atoi(getenv("L3_DEPTH"));
@@ -303,12 +304,13 @@ int main(int argc, char **argv) {
       if (getenv("L3_ORMODE")) g_l3_or_mode = atoi(getenv("L3_ORMODE"));
       if (getenv("L3_OR")) g_l3_or_nodes = atol(getenv("L3_OR")); }
     { extern int g_l3_def_min; if (getenv("L3_DEF")) g_l3_def_min = atoi(getenv("L3_DEF")); }
+    if (getenv("L3_PLY")) g_l3_max_ply = atoi(getenv("L3_PLY"));
     if (getenv("L3_MIN")) g_l3_quiet_min = atoi(getenv("L3_MIN"));
     if (!strcmp(argv[1], "l3count")) return cmd_l3count(rule, argc > 3 ? atol(argv[3]) : 2000, argc > 4 ? atoi(argv[4]) : 0);
     if (!strcmp(argv[1], "zonecheck")) return cmd_zonecheck(rule, argc > 3 ? atol(argv[3]) : 20000);
     if (!strcmp(argv[1], "l3")) return cmd_l3(rule, argc > 3 ? atol(argv[3]) : 100000, 0, argc > 4 ? atoi(argv[4]) : 0);
     if (!strcmp(argv[1], "l3opp")) return cmd_l3(rule, argc > 3 ? atol(argv[3]) : 100000, 1, argc > 4 ? atoi(argv[4]) : 0);
-    if (!strcmp(argv[1], "dfpnopp")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 1);
+    if (!strcmp(argv[1], "dfpnopp")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 1, argc > 4 ? atoi(argv[4]) : 0);
     if (argc < 4) return 2;
     int mode = !strcmp(argv[3], "vct") ? TSS_VCT : TSS_VCF;
     int depth = argc > 4 ? atoi(argv[4]) : (mode == TSS_VCF ? 30 : 10);

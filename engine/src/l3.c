@@ -12,7 +12,8 @@
 long g_l3_vct_nodes = 20000;    // AND の局面の圏を作る dfpn_vct
 long g_l3_quiet_nodes = 2000;   // 手の確認 (tss_solve の VCT、浅い反復深化)
 int g_l3_vct_depth = 6;
-int g_l3_def_min = P4_FLEX3;   // 受け側の反撃の手として候補に入れる pat4 の下限
+int g_l3_def_min = P4_FLEX3;
+int g_l3_max_ply = 0;   // 0 = 制限なし。k なら攻め側の λ3 の手は根から k 手まで (それより深くは VCT で勝つか負け)   // 受け側の反撃の手として候補に入れる pat4 の下限
 int g_l3_or_mode = 0;      // OR の局面の VCT の確認: 0 = tss と dfpn、1 = tss だけ、2 = dfpn だけ
 long g_l3_or_nodes = 2000;
 long g_l3_stat[6];
@@ -49,6 +50,7 @@ static _Thread_local struct {
     Board *b;
     int att, def, forb, root_n;
     long nodes, max_nodes, vct_calls;
+    int ply;
     double deadline;
     int aborted;
 } L;
@@ -134,6 +136,7 @@ static int gen_or(int *ch, int *nch, int *best) {
     double t0 = now_ms();
     if ((g_l3_or_mode != 2 && vct_quick(att, g_l3_or_nodes)) || (g_l3_or_mode != 1 && vct(att, g_l3_or_nodes * 2))) { g_l3_ms[0] += now_ms() - t0; return 1; }
     double t1 = now_ms(); g_l3_ms[0] += t1 - t0;
+    if (g_l3_max_ply > 0 && L.ply >= 2 * g_l3_max_ply) return -1;
     int sc[MAX_CH], n = 0;
     for (int q = 0; q < NCELL && !L.aborted; q++) {
         if (b->cell[q] != EMPTY || !b->near[q]) continue;
@@ -243,6 +246,7 @@ static void mid(int is_or, int ply, uint32_t thpn, uint32_t thdn, uint32_t *opn,
     if (e && (e->pn == 0 || e->dn == 0)) { *opn = e->pn; *odn = e->dn; return; }
     if (++L.nodes > L.max_nodes || (L.deadline > 0 && now_ms() > L.deadline)) { L.aborted = 1; *opn = e ? e->pn : 1; *odn = e ? e->dn : 1; return; }
     int ch[MAX_CH], nch, best = -1;
+    L.ply = ply;
     int st = gen_cached(is_or, ch, &nch, &best);
     if (L.aborted) { *opn = e ? e->pn : 1; *odn = e ? e->dn : 1; return; }
     if (st == 0 && ply >= MAX_DEPTH) st = -1;
