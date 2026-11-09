@@ -7,9 +7,11 @@
 #include <time.h>
 
 #include "eval.h"
+#include "fvcf.h"
 #include "tz.h"
 
 long g_ts_vcf_nodes = 200;
+int g_ts_light = 0;         // 1 = 静かな手の確認を盤に打たずに fvcf.c の重ね盤で (p_fvcf=1 のとき)。結果は同じで速さも変わらないので既定は 0
 long g_ts_quiet_nodes = 30;    // 静かな手の「パスしたら VCF」の確認のノード上限
 int g_ts_threat_min = P4_BLOCK3;
 int g_ts_loc = 3;
@@ -156,10 +158,15 @@ static int or_node(int depth, int ply) {
             if (p4 < P4_BLOCK4 && !near_attack(q)) continue;
             if (!tlegal(att, q)) continue;
             if (phase == 1) {
-                board_move_color(b, q, att);
-                TzZone zq;
-                int ok = tz_gate(b, att) && tz_probe_att(b, att, g_ts_quiet_nodes, &zq);
-                board_undo(b);
+                int ok;
+                if (g_fvcf && g_ts_light) {
+                    ok = tz_probe_extra(b, att, q, g_ts_quiet_nodes);   // 盤に打たずに (fvcf.c の重ね盤)
+                } else {
+                    board_move_color(b, q, att);
+                    TzZone zq;
+                    ok = tz_gate(b, att) && tz_probe_att(b, att, g_ts_quiet_nodes, &zq);
+                    board_undo(b);
+                }
                 if (!ok) continue;
             }
             int s = va[board_pidx(b, att, q)] + vd[board_pidx(b, def, q)] / 2 + (p4 >= P4_BLOCK4 ? 1 << 20 : 0);

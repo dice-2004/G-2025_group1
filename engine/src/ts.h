@@ -27,6 +27,6 @@ void ts_hint_clear(void);
 
 // 調整用: 中の VCF の確認のノード上限 (200)、脅威の手の pat4 の下限 (P4_BLOCK3)、静かな脅威を探す線の範囲 (3)
 extern long g_ts_vcf_nodes, g_ts_quiet_nodes;
-extern int g_ts_threat_min, g_ts_loc, g_ts_flags;
+extern int g_ts_threat_min, g_ts_loc, g_ts_flags, g_ts_light;
 
 #endif

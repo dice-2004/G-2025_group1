@@ -72,7 +72,7 @@ typedef struct {
     uint64_t hash;
     uint32_t gen;
     int ov[MAX_OV];                 // 重ね盤に打った手
-    int nov;
+    int nov, root_nov;              // root_nov = 根の局面で重ね盤に置いてある石の数 (fvcf_extra_begin の 1 個)
     // 根の五の点 (盤 b から)
     int root_af, root_nd, root_df[2];
     uint8_t cell[NCELL];
@@ -82,6 +82,10 @@ typedef struct {
     uint8_t p4a[NCELL];
     int useset;                     // 0 = 四の点の集合を保たない (手順の再生)
     uint32_t zgen, zst[NCELL];      // 圏の点の重複除け
+    // VCF の形の着手で変えた攻め側のパターン (戻すときに表を引き直さずに書き戻す)
+    struct { int16_t q; uint8_t d, pa, p4a; } chg[16384];
+    int nchg;
+    int chg_mark[MAX_OV];
     uint32_t fs[NCELL];             // fs[q] == gen なら q は四の点の集合に入っている
     int16_t fidx[NCELL];
     int16_t fl[NCELL];
@@ -140,6 +144,11 @@ static inline void set_update(int q) {
 static inline void refresh(int q, int d) {
     uint8_t np = g_pattern_table[S.att][S.key[q][d]];
     if (np == S.pa[q][d]) return;
+    int c = S.nchg++;
+    S.chg[c].q = (int16_t)q;
+    S.chg[c].d = (uint8_t)d;
+    S.chg[c].pa = S.pa[q][d];
+    S.chg[c].p4a = S.p4a[q];
     S.pa[q][d] = np;
     S.p4a[q] = g_p4_table[pattern_index(S.pa[q])];
     set_update(q);
@@ -150,6 +159,7 @@ static inline __attribute__((always_inline)) void put_m(int p, int color, const 
     if (vcf && S.fs[p] == S.gen) set_del(p);
     S.cell[p] = (uint8_t)color;
     S.hash ^= Z[color][p];
+    if (vcf) S.chg_mark[S.nov] = S.nchg;
     S.ov[S.nov++] = p;
     for (int d = 0; d < 4; d++) {
         int off = DIR_OFFSET[d];
@@ -179,21 +189,19 @@ static inline __attribute__((always_inline)) void undo_m(const int vcf) {
         int off = DIR_OFFSET[d];
         for (int k = 1; k <= 5; k++) {
             int q = p + k * off;
-            if (S.cell[q] != WALL) {
-                S.key[q][d] &= ~(3u << (2 * key_slot(-k)));
-                if (vcf && S.cell[q] == EMPTY) refresh(q, d);
-            }
+            if (S.cell[q] != WALL) S.key[q][d] &= ~(3u << (2 * key_slot(-k)));
             q = p - k * off;
-            if (S.cell[q] != WALL) {
-                S.key[q][d] &= ~(3u << (2 * key_slot(k)));
-                if (vcf && S.cell[q] == EMPTY) refresh(q, d);
-            }
+            if (S.cell[q] != WALL) S.key[q][d] &= ~(3u << (2 * key_slot(k)));
         }
     }
     if (!vcf) return;
-    // 石のあったマスは置いている間パターンを保っていないので作り直す
-    for (int d = 0; d < 4; d++) S.pa[p][d] = g_pattern_table[S.att][S.key[p][d]];
-    S.p4a[p] = g_p4_table[pattern_index(S.pa[p])];
+    // 置いたときに変えたパターンを逆順に書き戻す。石のあったマスのパターンは置いている間変えていないのでそのまま
+    for (int m = S.chg_mark[S.nov]; S.nchg > m;) {
+        int c = --S.nchg, q = S.chg[c].q;
+        S.pa[q][S.chg[c].d] = S.chg[c].pa;
+        S.p4a[q] = S.chg[c].p4a;
+        set_update(q);
+    }
     set_update(p);
 }
 
@@ -325,7 +333,7 @@ static void tt_store(uint64_t key, int depth, int win, int best) {
 
 static int win_at(uint64_t key, int depth, int best) {
     tt_store(key, depth, 1, best);
-    if (S.nov == 0) S.root_best = best;
+    if (S.nov == S.root_nov) S.root_best = best;
     return 1;
 }
 
@@ -335,7 +343,7 @@ static int a_node(int depth) {
     if (++S.nodes > S.max_nodes) { S.aborted = 1; return 0; }
     int f[2], ndef;
     uint64_t key = S.hash ^ SALT[S.att];
-    if (S.nov == 0) {
+    if (S.nov == S.root_nov) {
         if (S.root_af >= 0) return win_at(key, depth, S.root_af);
         ndef = S.root_nd;
         f[0] = S.root_df[0];
@@ -347,7 +355,7 @@ static int a_node(int depth) {
     Ent *e = &tt[key & (TT_SIZE - 1)];
     if (e->key == key) {
         if (e->result == E_WIN) {
-            if (S.nov == 0) S.root_best = e->best;
+            if (S.nov == S.root_nov) S.root_best = e->best;
             return 1;
         }
         if (e->depth >= depth) return 0;
@@ -498,21 +506,15 @@ static void setup(Board *b, int attacker, int useset) {
     S.root_best = -1;
     S.hash = b->hash;
     S.nov = 0;
+    S.nchg = 0;
+    S.root_nov = 0;
     S.nf = 0;
     S.useset = useset;
     memcpy(S.cell, b->cell, sizeof S.cell);
 }
 
-int fvcf_solve(Board *b, int attacker, int max_depth, long max_nodes, TssResult *res) {
-    pthread_once(&z_once, z_init);
-    if (!ensure_tt()) {
-        if (res) memset(res, 0, sizeof *res), res->move = -1;
-        return 0;
-    }
-    setup(b, attacker, 1);
-    S.max_nodes = max_nodes;
-
-    // 根: 五の点と四の点 (盤の集計で、探す点を全部見つけたら走査をやめる)
+// 根の五の点と四の点を盤 b から (盤の集計で、探す点を全部見つけたら走査をやめる)
+static void root_scan(Board *b) {
     const int16_t *ca = b->p4cnt[S.att], *cd = b->p4cnt[S.def];
     int want_af = ca[P4_FIVE] > 0, want_df = cd[P4_FIVE] < 2 ? cd[P4_FIVE] : 2;
     int want = ca[P4_BLOCK4] + ca[P4_BLOCK4_PLUS] + ca[P4_BLOCK4_FLEX3] + ca[P4_FLEX4];
@@ -527,7 +529,13 @@ int fvcf_solve(Board *b, int attacker, int max_depth, long max_nodes, TssResult 
             if (want_df && b->pat4[S.def][p] == P4_FIVE) { S.root_df[S.root_nd++] = p; want_df--; }
             if (want > 0 && is_four(b->pat4[S.att][p])) { set_add(p); want--; }
         }
+}
 
+static int run_solve(int max_depth, long max_nodes, TssResult *res) {
+    S.nodes = 0;
+    S.max_nodes = max_nodes;
+    S.aborted = 0;
+    S.root_best = -1;
     int win = a_node(max_depth);
     if (res) {
         res->win = win;
@@ -543,28 +551,30 @@ int fvcf_solve(Board *b, int attacker, int max_depth, long max_nodes, TssResult 
     return win;
 }
 
+int fvcf_solve(Board *b, int attacker, int max_depth, long max_nodes, TssResult *res) {
+    pthread_once(&z_once, z_init);
+    if (!ensure_tt()) {
+        if (res) memset(res, 0, sizeof *res), res->move = -1;
+        return 0;
+    }
+    setup(b, attacker, 1);
+    root_scan(b);
+    return run_solve(max_depth, max_nodes, res);
+}
+
 // tz.c の replay と同じ (重ね盤の上で)。重ね盤は key だけを保ち、五の点は直前の手を通る線だけを見る:
 //   - 根に攻め側の五の点があれば tz.c も最初に打ち切る。その後の攻め側の五の点は攻め側の直前の手を通る線にしかなく
 //     (受け側が止めた後は残らない)、受け側の五の点は根のもの (攻め側の石では増えない) か受け側の直前の手を通る線のもの
 //     (受け側が打つ前には残っていない) だけなので、tz.c の盤全体の数と同じになる。
 //   - 2 本の線は 1 点でしか交わらないので、直前の手を通る線上の点はちょうど 1 回ずつ (方向・距離の順に) 数えられる
 static inline void zadd(TzZone *z, int q) {
-    if (q < 0 || q >= NCELL || S.cell[q] != EMPTY || S.zst[q] == S.zgen || z->n >= TZ_MAX_CELLS) return;
+    if (!z || q < 0 || q >= NCELL || S.cell[q] != EMPTY || S.zst[q] == S.zgen || z->n >= TZ_MAX_CELLS) return;
     S.zst[q] = S.zgen;
     z->cells[z->n++] = q;
 }
 
-int fvcf_replay(Board *b, int att, const int16_t *line, int n, TzZone *z) {
-    pthread_once(&z_once, z_init);
-    z->n = 0;
-    z->first = n > 0 ? line[0] : -1;
-    z->plies = 1;
-    if (b->p4cnt[att][P4_FIVE]) return 0;   // tz.c: 根に攻め側の五の点、直前の攻めの手がないので 0
-    setup(b, att, 0);
-    if (++S.zgen == 0) {
-        memset(S.zst, 0, sizeof S.zst);
-        S.zgen = 1;
-    }
+// 手順の再生の本体。z = NULL なら圏を作らない。vcf = 1 なら重ね盤は VCF の形 (fvcf_extra_begin の後)
+static inline __attribute__((always_inline)) int replay_core(Board *b, const int16_t *line, int n, TzZone *z, const int vcf) {
     int def = S.def;
     int played = 0, ok = 0, i = 0;
     int nd = b->p4cnt[def][P4_FIVE];        // 受け側の五の点の数
@@ -579,7 +589,7 @@ int fvcf_replay(Board *b, int att, const int16_t *line, int n, TzZone *z) {
         if (nd >= 2 || (nd == 1 && !a_is_d5)) break;
         if (!legal(S.att, a)) break;
         zadd(z, a);
-        put_r(a, S.att);
+        put_m(a, S.att, vcf);
         played++;
         if (nd - a_is_d5 > 0) break;         // 受け側の五の点が残る
         int af[8];
@@ -598,12 +608,75 @@ int fvcf_replay(Board *b, int att, const int16_t *line, int n, TzZone *z) {
             for (int k = -4; k <= 4; k++) zadd(z, q + k * DIR_OFFSET[d]);
         }
         if (i < n) i++;
-        put_r(q, def);
+        put_m(q, def, vcf);
         played++;
         ndf = line_fives(def, q, df, 8);
         nd = ndf;
     }
-    z->plies = played + 1;
-    while (played--) undo_r();
+    if (z) z->plies = played + 1;
+    while (played--) undo_m(vcf);
     return ok;
+}
+
+int fvcf_replay(Board *b, int att, const int16_t *line, int n, TzZone *z) {
+    pthread_once(&z_once, z_init);
+    z->n = 0;
+    z->first = n > 0 ? line[0] : -1;
+    z->plies = 1;
+    if (b->p4cnt[att][P4_FIVE]) return 0;   // tz.c: 根に攻め側の五の点、直前の攻めの手がないので 0
+    setup(b, att, 0);
+    if (++S.zgen == 0) {
+        memset(S.zst, 0, sizeof S.zst);
+        S.zgen = 1;
+    }
+    return replay_core(b, line, n, z, 0);
+}
+
+// ---- 盤に打たずに、攻め側の石を 1 つ足した局面を調べる (ts の静かな手の確認) ----
+
+// 足した後の tz_gate とハッシュ (盤も重ね盤も使わずに、足した石を通る線の空点のパターンだけを引き直す)
+int fvcf_extra_gate(Board *b, int att, int extra, uint64_t *hash) {
+    pthread_once(&z_once, z_init);
+    int def = opp_color(att);
+    if (b->cell[extra] != EMPTY || b->p4cnt[att][P4_FIVE] || b->p4cnt[def][P4_FIVE] || b->pat4[att][extra] >= P4_BLOCK4) return -1;
+    *hash = b->hash ^ Z[att][extra];
+    // 足した点は四の点ではなかったので、変わるのは足した石を通る線の空点だけ
+    int c4 = b->p4cnt[att][P4_BLOCK4], c4p = b->p4cnt[att][P4_BLOCK4_PLUS], c43 = b->p4cnt[att][P4_BLOCK4_FLEX3];
+    for (int d = 0; d < 4; d++) {
+        int off = DIR_OFFSET[d];
+        for (int k = -5; k <= 5; k++) {
+            int q = extra + k * off;
+            if (k == 0 || b->cell[q] != EMPTY) continue;
+            uint8_t pt[4];
+            memcpy(pt, b->pat[att][q], 4);
+            pt[d] = g_pattern_table[att][b->key[q][d] | (uint32_t)att << (2 * key_slot(-k))];
+            int o = b->pat4[att][q], nw = g_p4_table[pattern_index(pt)];
+            if (o == nw) continue;
+            c4 += (nw == P4_BLOCK4) - (o == P4_BLOCK4);
+            c4p += (nw == P4_BLOCK4_PLUS) - (o == P4_BLOCK4_PLUS);
+            c43 += (nw == P4_BLOCK4_FLEX3) - (o == P4_BLOCK4_FLEX3);
+        }
+    }
+    return c4 + c4p + c43 >= 2 || c4p || c43;
+}
+
+// 手順の再生の準備 (並びだけの重ね盤に extra を置く)。この後 fvcf_extra_replay を何度でも
+void fvcf_extra_replay_begin(Board *b, int att, int extra) {
+    setup(b, att, 0);
+    put_r(extra, att);
+    S.root_nov = 1;
+}
+
+int fvcf_extra_replay(const int16_t *line, int n) { return replay_core(S.b, line, n, NULL, 0); }
+
+int fvcf_extra_solve(Board *b, int att, int extra, int max_depth, long max_nodes, TssResult *res) {
+    if (!ensure_tt()) {
+        if (res) memset(res, 0, sizeof *res), res->move = -1;
+        return 0;
+    }
+    setup(b, att, 1);
+    root_scan(b);
+    put_v(extra, att);
+    S.root_nov = 1;
+    return run_solve(max_depth, max_nodes, res);
 }

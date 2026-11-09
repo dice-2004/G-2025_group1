@@ -32,6 +32,10 @@ int tz_probe(Board *b, long max_nodes, TzZone *z);
 // attacker を指定する版 (手番側の VCF も調べられる。手番側なら z->plies は勝ちまでの手数)
 int tz_probe_att(Board *b, int attacker, long max_nodes, TzZone *z);
 
+// tz_gate(b + extra, att) && tz_probe_att(b + extra, att, max_nodes, z) と同じ真偽 (b + extra は att の石 extra を足した盤)。
+// 盤には打たない (fvcf.c の重ね盤)。足した盤のキャッシュ・最近の手順も同じように使い、同じように覚える
+int tz_probe_extra(Board *b, int att, int extra, long max_nodes);
+
 // att の VCF 手順 line (攻めから、攻め・受けが交互) を今の盤で確かめて圏を作る (戻り値は tz_probe と同じ。0 = 成り立たない)。
 // 手番は見ない (受け側の手番の局面で「受け側がパスしたら」の手順として使う)
 int tz_line_zone(Board *b, int att, const int *line, int n, TzZone *z);

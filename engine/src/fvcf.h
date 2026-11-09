@@ -17,6 +17,16 @@ int fvcf_solve(Board *b, int attacker, int max_depth, long max_nodes, TssResult 
 // tz.c の手順の再生 (att の VCF 手順 line を今の盤で確かめて圏を作る) と同じ。戻り値も同じ
 int fvcf_replay(Board *b, int att, const int16_t *line, int n, TzZone *z);
 
+// 盤に打たずに、盤 b に att の石 extra を足した局面を調べる (ts の静かな手の確認用)。
+// fvcf_extra_gate: 戻り値は tz_gate(足した盤, att)、*hash は足した盤のハッシュ。-1 = この形では使えない
+//   (五の点がある、extra が四の点など。呼び出し側は盤に打つ版を使う)。
+// fvcf_extra_replay_begin の後の fvcf_extra_replay は足した盤での fvcf_replay (圏は作らない) の戻り値と同じ。
+// fvcf_extra_solve は足した盤での fvcf_solve と同じ (gate が -1 でないときだけ呼ぶ)
+int fvcf_extra_gate(Board *b, int att, int extra, uint64_t *hash);
+void fvcf_extra_replay_begin(Board *b, int att, int extra);
+int fvcf_extra_replay(const int16_t *line, int n);
+int fvcf_extra_solve(Board *b, int att, int extra, int max_depth, long max_nodes, TssResult *res);
+
 // 置換表を空にする (tss_clear と同じ時に呼ぶ)
 void fvcf_clear(void);
 // 呼び出し元のスレッドの番号 (tss_set_thread と同じ番号)

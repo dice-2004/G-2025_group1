@@ -157,6 +157,53 @@ static void remember(CacheEntry *e, uint64_t key, int result, const int16_t *lin
     if (n) memcpy(e->line, line, sizeof(int16_t) * n);
 }
 
+int tz_probe_extra(Board *b, int att, int extra, long max_nodes) {
+    uint64_t h;
+    int g = fvcf_extra_gate(b, att, extra, &h);
+    if (g < 0) {
+        board_move_color(b, extra, att);
+        TzZone z;
+        int ok = tz_gate(b, att) && tz_probe_att(b, att, max_nodes, &z);
+        board_undo(b);
+        return ok;
+    }
+    if (!g || !ensure()) return 0;
+    S->st.probes++;
+    uint64_t key = h ^ SALT[att];
+    CacheEntry *e = &S->cache[key & (CACHE_SIZE - 1)];
+    if (e->key == key && e->result != C_EMPTY) {
+        S->st.cache_hits++;
+        return e->result != C_NONE;
+    }
+    int prepared = 0;
+    for (int k = 0; k < RING; k++) {
+        int idx = (S->ring_head[att] - 1 - k + RING) % RING;
+        if (!S->ring_n[att][idx]) continue;
+        if (!prepared) { fvcf_extra_replay_begin(b, att, extra); prepared = 1; }
+        if (fvcf_extra_replay(S->ring[att][idx], S->ring_n[att][idx])) {
+            S->st.replay_hits++;
+            remember(e, key, C_HAS, S->ring[att][idx], S->ring_n[att][idx]);
+            return 1;
+        }
+    }
+    S->st.solves++;
+    TssResult tr;
+    fvcf_extra_solve(b, att, extra, 30, max_nodes, &tr);
+    if (!tr.win) {
+        remember(e, key, C_NONE, NULL, 0);
+        return 0;
+    }
+    S->st.found++;
+    int n = tr.nline < TZ_LINE_MAX ? tr.nline : TZ_LINE_MAX;
+    int16_t line[TZ_LINE_MAX];
+    for (int i = 0; i < n; i++) line[i] = (int16_t)tr.line[i];
+    remember(e, key, C_HAS, line, n);
+    memcpy(S->ring[att][S->ring_head[att]], line, sizeof(int16_t) * n);
+    S->ring_n[att][S->ring_head[att]] = n;
+    S->ring_head[att] = (S->ring_head[att] + 1) % RING;
+    return 1;
+}
+
 int tz_probe(Board *b, long max_nodes, TzZone *z) {
     return tz_probe_att(b, opp_color(board_side(b)), max_nodes, z);
 }

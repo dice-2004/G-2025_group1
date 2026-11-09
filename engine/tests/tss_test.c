@@ -506,6 +506,7 @@ int main(int argc, char **argv) {
     { extern int g_ts_step, g_ts_start; if (getenv("TS_STEP")) g_ts_step = atoi(getenv("TS_STEP")); if (getenv("TS_START")) g_ts_start = atoi(getenv("TS_START")); }
     if (getenv("TS_LOC")) g_ts_loc = atoi(getenv("TS_LOC"));
     if (getenv("FVCF")) g_fvcf = atoi(getenv("FVCF"));
+    if (getenv("TS_LIGHT")) g_ts_light = atoi(getenv("TS_LIGHT"));
     if (!strcmp(argv[1], "fvcfcheck"))
         return cmd_fvcfcheck(rule, argc > 3 ? atol(argv[3]) : 100000, argc > 4 ? atoi(argv[4]) : 30, argc > 5 ? atoi(argv[5]) : 0);
     if (!strcmp(argv[1], "fvcfrand"))
