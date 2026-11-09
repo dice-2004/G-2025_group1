@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """空点の値の表 (4 方向のパターンの組ごと) を Rapfi の評価に合わせて補正する。
 
-  python3 engine/tests/tune_table.py [--cache engine/build/rapfi_labels.tsv] [--min-count 200] [--l2 0.3]
+  python3 engine/tests/tune_table.py [--cache engine/cache/rapfi_labels.tsv] [--min-count 200] [--l2 0.3]
 
 今の評価 (eval.c の線 + 組み合わせの和) はそのままにして、4 方向のパターンの組 (方向の順序は無視) と色ごとに
 補正値 delta を足す。評価 = 今の評価 + Σ(手番側の空点の delta) − opp_scale/64 · Σ(相手側の空点の delta)。
@@ -20,7 +20,7 @@ RAPFI_K = 300.0
 LINE_NAMES = ["DEAD", "OL", "B1", "F1", "B2", "F2", "B3", "F3", "B4", "F4", "D4", "F5"]
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--cache", default=os.path.join(ENGINE, "build", "rapfi_labels.tsv"))
+ap.add_argument("--cache", default=os.path.join(ENGINE, "cache", "rapfi_labels.tsv"))
 ap.add_argument("--rule", type=int, default=4)
 ap.add_argument("--min-count", type=int, default=200, help="この局面数以上に現れる組だけ調整する")
 ap.add_argument("--l2", type=float, default=1.0)

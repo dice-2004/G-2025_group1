@@ -24,7 +24,7 @@ ap.add_argument("--engine", default=os.path.join(HERE, "..", "build", "pbrain-g2
 ap.add_argument("--tc", type=int, default=1000)
 ap.add_argument("--info", nargs="*", default=[])
 ap.add_argument("--nodes", type=int, default=300000)
-ap.add_argument("--cache", default=os.path.join(HERE, "..", "build", "drops_labels.tsv"))
+ap.add_argument("--cache", default=os.path.join(HERE, "..", "cache", "drops_labels.tsv"))
 ap.add_argument("-j", type=int, default=4)
 ap.add_argument("-v", action="store_true")
 a = ap.parse_args()

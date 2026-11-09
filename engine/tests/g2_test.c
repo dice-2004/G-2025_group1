@@ -362,6 +362,47 @@ static int lambda3(Rule rule, int ms, int ncand) {
 }
 
 // 時間を決めて探索し、各行 "move score depth nodes ms" を出す (詰みを何局面で見つけるかなどの測定用)
+// 標準入力の各行 "手順<TAB>手" について、手の並べ方の順位を出す: 候補手の点 (攻め + 守り*52/64、探索の手の並べ方と同じ) での順位と、
+// 打った後の静的評価での順位 (1 が最上位)。Rapfi の最善手が G2 の並べ方で何番目かを見る
+static int moverank(Rule rule) {
+    static Board b;
+    char line[8192];
+    pattern_init(&rule);
+    while (fgets(line, sizeof line, stdin)) {
+        char *tab = strchr(line, '\t');
+        if (!tab) continue;
+        *tab = 0;
+        int tx, ty;
+        if (sscanf(tab + 1, "%d,%d", &tx, &ty) != 2) continue;
+        board_init(&b, 15, &rule);
+        char *s = line;
+        int x, y, k;
+        while (sscanf(s, " %d,%d%n", &x, &y, &k) == 2) { board_move(&b, to_pos(x, y)); s += k; }
+        int me = board_side(&b), op = opp_color(me), target = to_pos(tx, ty);
+        int tv = 0, te = 0, n = 0, rv = 1, re = 1, found = 0;
+        static int val[NCELL], ev[NCELL];
+        int pos[NCELL];
+        for (int q = 0; q < NCELL; q++) {
+            if (b.cell[q] != EMPTY || !b.near[q]) continue;
+            val[n] = g_cell_value[me][board_pidx(&b, me, q)] + g_cell_value[op][board_pidx(&b, op, q)] * 52 / 64;
+            board_move(&b, q);
+            ev[n] = -evaluate(&b);
+            board_undo(&b);
+            pos[n] = q;
+            if (q == target) { tv = val[n]; te = ev[n]; found = 1; }
+            n++;
+        }
+        if (!found) { printf("-1 -1 %d\n", n); continue; }
+        for (int i = 0; i < n; i++) {
+            if (pos[i] == target) continue;
+            rv += val[i] > tv;
+            re += ev[i] > te;
+        }
+        printf("%d %d %d\n", rv, re, n);
+    }
+    return 0;
+}
+
 static int timed(Rule rule, int ms, int threads) {
     static Board b;
     char line[8192];
@@ -454,6 +495,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "features")) return features(rule);
     if (!strcmp(argv[1], "lambda3")) return lambda3(rule, argc > 3 ? atoi(argv[3]) : 20, argc > 4 ? atoi(argv[4]) : 400);
     if (!strcmp(argv[1], "evalmoves")) return evalmoves(rule);
+    if (!strcmp(argv[1], "moverank")) return moverank(rule);
     if (!strcmp(argv[1], "timed")) return timed(rule, argc > 3 ? atoi(argv[3]) : 1000, argc > 4 ? atoi(argv[4]) : 1);
     if (!strcmp(argv[1], "msdump")) return msdump(rule);
     if (!strcmp(argv[1], "tzcheck")) return tzcheck(rule);
