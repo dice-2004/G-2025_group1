@@ -218,6 +218,10 @@ int evaluate(const Board *b) {
         if (bm >> k & 1) v += th[0][k];
         if (bo >> k & 1) v += th[1][k];
     }
+    if (w->race) {   // 脅威の速さの比べ (eval.h、既定は無効)
+        int m = eval_threat_level(b->p4cnt[me]), o = eval_threat_level(b->p4cnt[op]);
+        v += o >= m ? w->race_own[m] : -w->race_opp[o];
+    }
     if (v > 20000) v = 20000;
     if (v < -20000) v = -20000;
     return (int)v;
@@ -418,6 +422,9 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strcmp(name, "table")) g_eval_params.use_table = (int)v;
+    else if (!strcmp(name, "race")) g_eval_params.race = (int)v;
+    else if (!strncmp(name, "race_own", 8) && name[8] >= '0' && name[8] < '0' + EVAL_RACE_LEVELS) g_eval_params.race_own[name[8] - '0'] = (int)v;
+    else if (!strncmp(name, "race_opp", 8) && name[8] >= '0' && name[8] < '0' + EVAL_RACE_LEVELS) g_eval_params.race_opp[name[8] - '0'] = (int)v;
     else if (!strncmp(name, "threat", 6) && strlen(name) == 9) {
         // threat<手番 0=黒 1=白><0=手番側 1=相手側><種類>  例: threat010
         int a = name[6] - '0', s2 = name[7] - '0', k = name[8] - '0';

@@ -404,6 +404,21 @@ static int cmd_fvcfrand(Rule rule, int games, unsigned seed, long nodes, int siz
 
 // 調査用: 各局面で、両方の色について「打ってパスしたら VCF」の点 (λ2 の脅威の点) を数える。
 // 出力: 手順の後ろの欄 (勝者など) をそのまま付けて「黒の点数 白の点数 黒の四の点 白の四の点 評価(黒から) 時間ms」
+// 調査用: 局面ごとに 手番側から見た評価、黒の p4cnt[0..P4_COUNT-1]、白の p4cnt (評価の脅威の組み合わせの検討用)
+static int cmd_p4dump(Rule rule) {
+    static Board b;
+    char line[8192];
+    while (fgets(line, sizeof line, stdin)) {
+        board_init(&b, 15, &rule);
+        if (load_moves(&b, line) < 0) { printf("error\n"); continue; }
+        printf("%d %d", board_side(&b), evaluate(&b));
+        for (int c = BLACK; c <= WHITE; c++)
+            for (int k = 0; k < P4_COUNT; k++) printf(" %d", b.p4cnt[c][k]);
+        printf("\n");
+    }
+    return 0;
+}
+
 static int cmd_potential(Rule rule, long nodes, int lo) {
     static Board b;
     char line[8192];
@@ -565,6 +580,7 @@ int main(int argc, char **argv) {
     if (getenv("TS_LOC")) g_ts_loc = atoi(getenv("TS_LOC"));
     if (getenv("FVCF")) g_fvcf = atoi(getenv("FVCF"));
     if (getenv("TS_LIGHT")) g_ts_light = atoi(getenv("TS_LIGHT"));
+    if (!strcmp(argv[1], "p4dump")) return cmd_p4dump(rule);
     if (!strcmp(argv[1], "potential")) return cmd_potential(rule, argc > 3 ? atol(argv[3]) : 30, argc > 4 ? atoi(argv[4]) : P4_FLEX2);
     if (!strcmp(argv[1], "fvcfcheck"))
         return cmd_fvcfcheck(rule, argc > 3 ? atol(argv[3]) : 100000, argc > 4 ? atoi(argv[4]) : 30, argc > 5 ? atoi(argv[5]) : 0);

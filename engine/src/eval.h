@@ -23,6 +23,20 @@ static inline int eval_threat_bits(const int16_t *cnt) {
            (f3 >= 4) << THREAT_F3MANY;   // 活三を作れる点が多い (2 本以上の二)
 }
 
+// 色 c の一番速い脅威の段階 (空点の Pattern4 の数から): 0 = 五の点、1 = 達四の点 (活三がある)、2 = 四三・三三の点、
+// 3 = 四の点と活三の点の両方、4 = 活三の点、5 = 四の点、6 = なし (EVAL_RACE_LEVELS 段階)
+#define EVAL_RACE_LEVELS 7
+static inline int eval_threat_level(const int16_t *c) {
+    if (c[P4_FIVE]) return 0;
+    if (c[P4_FLEX4]) return 1;
+    if (c[P4_BLOCK4_FLEX3] || c[P4_FLEX3_2X]) return 2;
+    int f4 = c[P4_BLOCK4] + c[P4_BLOCK4_PLUS], f3 = c[P4_FLEX3] + c[P4_FLEX3_PLUS];
+    if (f4 && f3) return 3;
+    if (f3) return 4;
+    if (f4) return 5;
+    return 6;
+}
+
 // 調整できる重み (eval.c の既定値。tune 用に書き換え可能)
 typedef struct {
     int line[P_COUNT];          // 線パターンごと
@@ -32,6 +46,10 @@ typedef struct {
     // 脅威の加点 [手番が黒=0/白=1][手番側=0/相手側=1][脅威の種類 THREAT_*]。空点の形の数 (Board.p4cnt) から O(1) で出す
     int threat[2][2][THREAT_COUNT];
     int use_table;      // 1 = eval_table.c の補正を使う (連珠のみ)
+    // 脅威の速さの比べ (race、1 = 使う): 手番側の段階 m、相手の段階 o (eval_threat_level) で、
+    // o >= m (手番側の脅威が同じか速い。手番側が先に打てる) なら + race_own[m]、o < m (相手が速い) なら − race_opp[o]
+    int race;
+    int race_own[EVAL_RACE_LEVELS], race_opp[EVAL_RACE_LEVELS];
 } EvalParams;
 
 // 空点の値の補正 (tests/tune_table.py で作る eval_table.c)。pidx は 4 方向のパターンを小さい順に並べた組
