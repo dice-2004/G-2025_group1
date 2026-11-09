@@ -1,6 +1,7 @@
 // 評価で手を並べる αβ の脅威探索 (説明は ts.h)
 #include "ts.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -35,6 +36,8 @@ typedef struct {
     int8_t nq;      // 静かな脅威の手の数 (-1 = まだ作っていない)
     int16_t mv[QC_MOVES];
 } QEntry;
+
+static _Thread_local uint16_t g_hint[NCELL];   // 前の証明の攻め側の手 (兄弟の手の確かめで先に読む)
 
 static _Thread_local struct {
     QEntry *qc;
@@ -161,6 +164,7 @@ static int or_node(int depth, int ply) {
             }
             int s = va[board_pidx(b, att, q)] + vd[board_pidx(b, def, q)] / 2 + (p4 >= P4_BLOCK4 ? 1 << 20 : 0);
             if (q == tm) s += 1 << 24;
+            if (g_hint[q]) s += (1 << 21) + g_hint[q];
             if (n >= MAX_CH) break;
             int j = n++;
             while (j > 0 && sc[j - 1] < s) { ch[j] = ch[j - 1]; sc[j] = sc[j - 1]; j--; }
@@ -316,3 +320,145 @@ static int run(Board *b, int attacker, int max_depth, long max_nodes, int max_ms
     }
     return win;
 }
+
+// ---- 証明の圏 (ts_zone) ----
+static _Thread_local struct {
+    uint8_t mark[NCELL];
+    int *out, n, max, fail;
+    long steps;
+    uint64_t seen[4096];
+} Z;
+
+static void zadd(int q) {
+    if (q < 0 || q >= NCELL || Z.mark[q]) return;
+    if (Z.n >= Z.max) { Z.fail = 1; return; }
+    Z.mark[q] = 1;
+    Z.out[Z.n++] = q;
+}
+
+static void zadd_zone(const TzZone *z) {
+    for (int i = 0; i < z->n; i++) zadd(z->cells[i]);
+    zadd(z->first);
+}
+
+static int zseen(uint64_t key) {
+    uint64_t *s = &Z.seen[key & 4095];
+    if (*s == key) return 1;
+    *s = key;
+    return 0;
+}
+
+static void zwalk(int is_or, int ply) {
+    Board *b = T.b;
+    int att = T.att, def = T.def;
+    if (Z.fail) return;
+    if (++Z.steps > 30000 || ply > 120) { Z.fail = 5; return; }
+    if (zseen(tkey(is_or))) return;
+    if (is_or) {
+        if (b->p4cnt[att][P4_FIVE]) { zadd(find_p4(att, P4_FIVE)); return; }
+        if (b->p4cnt[def][P4_FIVE] == 1) {
+            int q = find_p4(def, P4_FIVE);
+            zadd(q);
+            board_move_color(b, q, att);
+            zwalk(0, ply + 1);
+            board_undo(b);
+            return;
+        }
+        if (tz_gate(b, att)) {
+            TzZone z;
+            int r = tz_probe_att(b, att, 20000, &z);
+            if (r == 1) { zadd_zone(&z); return; }
+            // r == 2 (止める点が禁じ手で圏を絞れない VCF): 置換表の手をたどる
+        }
+        TsEntry *e = &T.tt[tkey(1) & (TTS_SIZE - 1)];
+        int m = e->key == tkey(1) && e->depth == 0x7fff ? e->move : -1;
+        if (m < 0) {
+            // 圏の作り直しで受けの候補が探索の時と少し違うことがある (VCF の手順の再利用による)。その局面だけ読み直す
+            T.aborted = 0;
+            T.max_nodes = T.nodes + 20000;
+            T.deadline = 0;
+            for (int d = 1; d <= 12 && !T.aborted; d++)
+                if (or_node(d, ply)) break;
+            m = e->key == tkey(1) && e->depth == 0x7fff ? e->move : -1;
+            if (m < 0 && b->p4cnt[att][P4_FIVE] == 0) {
+                // 勝ちが VCF (TT に手がない形) のこともある
+                TzZone z;
+                int r2 = tz_gate(b, att) ? tz_probe_att(b, att, 20000, &z) : 0;
+                if (r2 == 1) { zadd_zone(&z); return; }
+                if (r2 == 2) { Z.fail = 6; return; }
+            }
+        }
+        if (m < 0 || b->cell[m] != EMPTY) { Z.fail = 3; return; }
+        if (g_hint[m] < 60000) g_hint[m]++;
+        zadd(m);
+        board_move_color(b, m, att);
+        zwalk(0, ply + 1);
+        board_undo(b);
+        return;
+    }
+    int na = b->p4cnt[att][P4_FIVE];
+    if (na >= 2) {
+        for (int q = 0; q < NCELL; q++)
+            if (b->cell[q] == EMPTY && b->pat4[att][q] == P4_FIVE) zadd(q);
+        return;
+    }
+    if (na == 1) {
+        int f = find_p4(att, P4_FIVE);
+        zadd(f);
+        if (!tlegal(def, f)) return;
+        board_move_color(b, f, def);
+        zwalk(1, ply + 1);
+        board_undo(b);
+        return;
+    }
+    TzZone acc, z;
+    acc.n = 0;
+    int have = 0;
+    for (int q = 0; q < NCELL; q++) {
+        if (b->cell[q] != EMPTY || b->pat4[att][q] != P4_FLEX4 || !tlegal(att, q)) continue;
+        if (tz_line_zone(b, att, &q, 1, &z) != 1) continue;
+        zadd_zone(&z);   // 各達四の手順の圏 (外に受け側の石があっても、その達四で勝つ)
+        if (!have) { acc = z; have = 1; continue; }
+        int m = 0;
+        for (int k = 0; k < acc.n; k++)
+            if (zone_has(&z, acc.cells[k])) acc.cells[m++] = acc.cells[k];
+        acc.n = m;
+    }
+    if (!have) {
+        int r = tz_gate(b, att) ? tz_probe_att(b, att, g_ts_vcf_nodes, &z) : 0;
+        if (r != 1) { Z.fail = 2; return; }
+        acc = z;
+        zadd_zone(&z);
+    }
+    int ch[MAX_CH], n = 0;
+    for (int q = 0; q < NCELL; q++) {
+        if (b->cell[q] != EMPTY || !b->near[q]) continue;
+        int inz = b->pat4[def][q] >= P4_BLOCK4 || zone_has(&acc, q);
+        if (!inz || !tlegal(def, q)) continue;
+        if (n >= MAX_CH) { Z.fail = 4; return; }
+        ch[n++] = q;
+    }
+    for (int i = 0; i < n && !Z.fail; i++) {
+        zadd(ch[i]);
+        board_move_color(b, ch[i], def);
+        zwalk(1, ply + 1);
+        board_undo(b);
+    }
+}
+
+int ts_zone(Board *b, int attacker, int *cells, int max) {
+    if (!T.tt || T.b != b || T.att != attacker) return -1;
+    memset(Z.mark, 0, sizeof Z.mark);
+    memset(Z.seen, 0, sizeof Z.seen);
+    Z.out = cells;
+    Z.n = 0;
+    Z.max = max;
+    Z.fail = 0;
+    Z.steps = 0;
+    T.root_n = b->nmoves;
+    zwalk(1, 0);
+    if (Z.fail && getenv("TS_ZDEBUG")) fprintf(stderr, "ts_zone fail %d (steps %ld, n %d)\n", Z.fail, Z.steps, Z.n);
+    return Z.fail ? -1 : Z.n;
+}
+
+void ts_hint_clear(void) { memset(g_hint, 0, sizeof g_hint); }

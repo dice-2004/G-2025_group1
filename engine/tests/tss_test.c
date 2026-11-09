@@ -181,11 +181,38 @@ static int cmd_ts(Rule rule, int depth, int ms, int opp) {
         ts_win(&b, att, depth, 1L << 40, ms, &r);
         double dt = now_sec() - t0;
         total += dt;
+        if (r.win && getenv("TS_ZONE")) {
+            int zc[400], nz = ts_zone(&b, att, zc, 400);
+            printf("zone %d:", nz);
+            for (int i = 0; i < nz; i++) if (b.cell[zc[i]] == EMPTY) printf(" %d,%d", pos_x(zc[i]), pos_y(zc[i]));
+            printf("\n");
+        }
         if (r.win) printf("win %d,%d | depth=%d nodes=%ld %.1fms\n", pos_x(r.move), pos_y(r.move), r.depth, r.nodes, dt * 1000);
         else printf("nowin | depth=%d nodes=%ld%s %.1fms\n", r.depth, r.nodes, r.aborted ? " aborted" : "", dt * 1000);
         fflush(stdout);
     }
     fprintf(stderr, "time %.3f s\n", total);
+    return 0;
+}
+
+// 調査用: 1 行目の局面で相手 (手番側) の勝ちを ts で証明して証明の手を覚え、2 行目以降を覚えた手ありで調べる
+static int cmd_tssib(Rule rule, int ms) {
+    static Board b;
+    char line[8192];
+    int first = 1, zc[400];
+    ts_hint_clear();
+    while (fgets(line, sizeof line, stdin)) {
+        board_init(&b, 15, &rule);
+        if (load_moves(&b, line) < 0) continue;
+        int att = board_side(&b);
+        TsResult r;
+        double t0 = now_sec();
+        int w = ts_win(&b, att, 40, 1L << 40, ms, &r);
+        int nz = (w && first && !getenv("TS_NOHINT")) ? ts_zone(&b, att, zc, 400) : 0;
+        printf("%s nodes=%ld %.1fms%s\n", w ? "win  " : "nowin", r.nodes, (now_sec() - t0) * 1000, first ? (nz >= 0 ? " (hints)" : " (no zone)") : "");
+        first = 0;
+        fflush(stdout);
+    }
     return 0;
 }
 
@@ -339,6 +366,7 @@ int main(int argc, char **argv) {
     if (getenv("TS_LOC")) g_ts_loc = atoi(getenv("TS_LOC"));
     if (!strcmp(argv[1], "ts")) return cmd_ts(rule, argc > 3 ? atoi(argv[3]) : 20, argc > 4 ? atoi(argv[4]) : 1000, 0);
     if (!strcmp(argv[1], "tsopp")) return cmd_ts(rule, argc > 3 ? atoi(argv[3]) : 20, argc > 4 ? atoi(argv[4]) : 1000, 1);
+    if (!strcmp(argv[1], "tssib")) return cmd_tssib(rule, argc > 3 ? atoi(argv[3]) : 3000);
     if (!strcmp(argv[1], "l3")) return cmd_l3(rule, argc > 3 ? atol(argv[3]) : 100000, 0, argc > 4 ? atoi(argv[4]) : 0);
     if (!strcmp(argv[1], "l3opp")) return cmd_l3(rule, argc > 3 ? atol(argv[3]) : 100000, 1, argc > 4 ? atoi(argv[4]) : 0);
     if (!strcmp(argv[1], "dfpnopp")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 1, argc > 4 ? atoi(argv[4]) : 0);
