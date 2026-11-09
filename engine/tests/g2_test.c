@@ -17,6 +17,7 @@
 #include "../src/board.h"
 #include "../src/eval.h"
 #include "../src/search.h"
+#include "../src/dfpn.h"
 #include "../src/tz.h"
 #include "../src/vcf.h"
 
@@ -289,6 +290,77 @@ static int features(Rule rule) {
     return 0;
 }
 
+// 各行の局面で、近くの空点に打った後の静的評価 (打った側から見た値) を良い順に出す (評価の確認用)
+static int evalmoves(Rule rule) {
+    static Board b;
+    char line[8192];
+    pattern_init(&rule);
+    while (fgets(line, sizeof line, stdin)) {
+        board_init(&b, 15, &rule);
+        char *s = line;
+        int x, y, k;
+        while (sscanf(s, " %d,%d%n", &x, &y, &k) == 2) { board_move(&b, to_pos(x, y)); s += k; }
+        int mv[MAX_MOVES], val[MAX_MOVES], n = 0;
+        for (int q = 0; q < NCELL; q++) {
+            if (b.cell[q] != EMPTY || !b.near[q]) continue;
+            board_move(&b, q);
+            mv[n] = q;
+            val[n++] = -evaluate(&b);
+            board_undo(&b);
+        }
+        for (int i = 0; i < n; i++)
+            for (int j = i + 1; j < n; j++)
+                if (val[j] > val[i]) { int t = val[i]; val[i] = val[j]; val[j] = t; t = mv[i]; mv[i] = mv[j]; mv[j] = t; }
+        printf("static %d:", evaluate(&b));
+        for (int i = 0; i < n && i < 15; i++) printf(" %d,%d=%d", pos_x(mv[i]), pos_y(mv[i]), val[i]);
+        printf("\n");
+    }
+    return 0;
+}
+
+// λ3 の脅威の数: 各行の局面で、手番側の候補 w ごとに、相手の手 m のうち「m の後に手番側がパスすると相手に VCT
+// (df-pn) がある」ものの数を出す。lambda3 <rule> <1 回の ms (負ならノード数)> <候補の数>
+static int lambda3(Rule rule, int ms, int ncand) {
+    static Board b;
+    char line[8192];
+    pattern_init(&rule);
+    while (fgets(line, sizeof line, stdin)) {
+        board_init(&b, 15, &rule);
+        char *s = line;
+        int x, y, k;
+        while (sscanf(s, " %d,%d%n", &x, &y, &k) == 2) { board_move(&b, to_pos(x, y)); s += k; }
+        int me = board_side(&b), op = opp_color(me);
+        int cand[MAX_MOVES], nc = 0;
+        for (int q = 0; q < NCELL; q++)
+            if (b.cell[q] == EMPTY && b.near[q]) cand[nc++] = q;
+        for (int i = 0; i < nc && i < ncand; i++) {
+            int w = cand[i];
+            board_move(&b, w);
+            DfpnResult r;
+            int direct = ms < 0 ? dfpn_vct(&b, op, -ms * 4L, 0, &r) : dfpn_vct(&b, op, 1L << 40, ms * 4, &r);
+            int cnt = 0, tot = 0;
+            char buf[2048] = "";
+            if (!direct) {
+                for (int q = 0; q < NCELL; q++) {
+                    if (b.cell[q] != EMPTY || !b.near[q]) continue;
+                    if (op == BLACK && rule_has_forbidden(&b.rule) && board_is_forbidden(&b, q)) continue;
+                    board_move(&b, q);
+                    tot++;
+                    if (ms < 0 ? dfpn_vct(&b, op, -ms, 0, &r) : dfpn_vct(&b, op, 1L << 40, ms, &r)) {
+                        cnt++;
+                        snprintf(buf + strlen(buf), sizeof buf - strlen(buf), " %d,%d", pos_x(q), pos_y(q));
+                    }
+                    board_undo(&b);
+                }
+            }
+            printf("%d,%d: %s threats %d / %d%s\n", pos_x(w), pos_y(w), direct ? "VCT" : "-", cnt, tot, buf);
+            fflush(stdout);
+            board_undo(&b);
+        }
+    }
+    return 0;
+}
+
 // 時間を決めて探索し、各行 "move score depth nodes ms" を出す (詰みを何局面で見つけるかなどの測定用)
 static int timed(Rule rule, int ms, int threads) {
     static Board b;
@@ -372,6 +444,8 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "forbid")) return forbid(rule);
     if (!strcmp(argv[1], "bench")) return bench(rule);
     if (!strcmp(argv[1], "features")) return features(rule);
+    if (!strcmp(argv[1], "lambda3")) return lambda3(rule, argc > 3 ? atoi(argv[3]) : 20, argc > 4 ? atoi(argv[4]) : 400);
+    if (!strcmp(argv[1], "evalmoves")) return evalmoves(rule);
     if (!strcmp(argv[1], "timed")) return timed(rule, argc > 3 ? atoi(argv[3]) : 1000, argc > 4 ? atoi(argv[4]) : 1);
     if (!strcmp(argv[1], "msdump")) return msdump(rule);
     if (!strcmp(argv[1], "tzcheck")) return tzcheck(rule);
