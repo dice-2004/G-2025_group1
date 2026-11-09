@@ -52,6 +52,7 @@ void pattern_init(const Rule *rule);
 // key: 中心以外の 10 マスの並び。color の石を中心に置いたときのパターン
 extern uint8_t g_pattern_table[3][KEY_COUNT];   // [color][key]、color は 1,2 のみ有効
 static inline int pattern_of(int color, uint32_t key) { return g_pattern_table[color][key]; }
+extern uint8_t g_pattern2[KEY_COUNT];   // [key] 黒のパターン | 白のパターン << 4 (差分更新で 1 回の表引きで済ませる)
 
 // 中心から offset (-5..-1, 1..5) のマスのキー内ビット位置
 static inline int key_slot(int offset) { return offset < 0 ? offset + 5 : offset + 4; }
