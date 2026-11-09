@@ -20,6 +20,7 @@
 #include "../src/board.h"
 #include "../src/dfpn.h"
 #include "../src/fvcf.h"
+#include "../src/search.h"
 #include "../src/l3.h"
 #include "../src/ts.h"
 #include "../src/tz.h"
@@ -401,6 +402,56 @@ static int cmd_fvcfrand(Rule rule, int games, unsigned seed, long nodes, int siz
     return fc_bad != 0;
 }
 
+// 調査用: 各局面で、両方の色について「打ってパスしたら VCF」の点 (λ2 の脅威の点) を数える。
+// 出力: 手順の後ろの欄 (勝者など) をそのまま付けて「黒の点数 白の点数 黒の四の点 白の四の点 評価(黒から) 時間ms」
+static int cmd_potential(Rule rule, long nodes, int lo) {
+    static Board b;
+    char line[8192];
+    double total = 0;
+    while (fgets(line, sizeof line, stdin)) {
+        char tail[256] = "";
+        char *tab = strchr(line, '\t');
+        if (tab) { snprintf(tail, sizeof tail, "%s", tab + 1); tail[strcspn(tail, "\r\n")] = 0; *tab = 0; }
+        board_init(&b, 15, &rule);
+        if (load_moves(&b, line) < 0) continue;
+        int cnt[3] = {0}, f4[3] = {0};
+        double t0 = now_sec();
+        for (int c = BLACK; c <= WHITE; c++) {
+            for (int q = 0; q < NCELL; q++) {
+                if (b.cell[q] != EMPTY || !b.near[q]) continue;
+                int p4 = b.pat4[c][q];
+                if (p4 >= P4_BLOCK4 && p4 != P4_FIVE) f4[c]++;
+                if (p4 < lo || p4 >= P4_FLEX3) continue;
+                if (c == BLACK && board_is_forbidden(&b, q)) continue;
+                if (nodes < 0) {   // 調査用: 足した石を通る線の空点に、四四・四三・達四の点ができるか (パターンだけ)
+                    int hit = 0;
+                    for (int d = 0; d < 4 && !hit; d++)
+                        for (int k = -5; k <= 5 && !hit; k++) {
+                            int r = q + k * DIR_OFFSET[d];
+                            if (k == 0 || b.cell[r] != EMPTY) continue;
+                            uint8_t pt[4];
+                            memcpy(pt, b.pat[c][r], 4);
+                            pt[d] = g_pattern_table[c][b.key[r][d] | (uint32_t)c << (2 * key_slot(-k))];
+                            int nw = g_p4_table[pattern_index(pt)];
+                            if ((nw == P4_FLEX4 || nw == P4_BLOCK4_FLEX3) && nw != b.pat4[c][r]) hit = 1;
+                        }
+                    cnt[c] += hit;
+                } else if (nodes == 0) {   // 調査用: VCF は調べずに足した後の tz_gate だけ
+                    uint64_t h;
+                    cnt[c] += fvcf_extra_gate(&b, c, q, &h) > 0;
+                } else if (tz_probe_extra(&b, c, q, nodes)) cnt[c]++;
+            }
+        }
+        double dt = now_sec() - t0;
+        total += dt;
+        int ev = evaluate(&b);
+        if (board_side(&b) == WHITE) ev = -ev;
+        printf("%d %d %d %d %d %.2f\t%s\n", cnt[BLACK], cnt[WHITE], f4[BLACK], f4[WHITE], ev, dt * 1000, tail);
+    }
+    fprintf(stderr, "time %.3f s\n", total);
+    return 0;
+}
+
 static int cmd_puzzles(const char *file, long nodes) {
     FILE *fp = fopen(file, "r");
     if (!fp) { perror(file); return 2; }
@@ -507,6 +558,7 @@ int main(int argc, char **argv) {
     if (getenv("TS_LOC")) g_ts_loc = atoi(getenv("TS_LOC"));
     if (getenv("FVCF")) g_fvcf = atoi(getenv("FVCF"));
     if (getenv("TS_LIGHT")) g_ts_light = atoi(getenv("TS_LIGHT"));
+    if (!strcmp(argv[1], "potential")) return cmd_potential(rule, argc > 3 ? atol(argv[3]) : 30, argc > 4 ? atoi(argv[4]) : P4_FLEX2);
     if (!strcmp(argv[1], "fvcfcheck"))
         return cmd_fvcfcheck(rule, argc > 3 ? atol(argv[3]) : 100000, argc > 4 ? atoi(argv[4]) : 30, argc > 5 ? atoi(argv[5]) : 0);
     if (!strcmp(argv[1], "fvcfrand"))

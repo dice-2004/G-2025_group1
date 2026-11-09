@@ -19,6 +19,7 @@
 #include "l3.h"
 #include "rz.h"
 #include "ts.h"
+#include "tp.h"
 #include "fvcf.h"
 #include "tz.h"
 #include "vcf.h"
@@ -166,6 +167,7 @@ void search_clear_tt(void) {
     tt_used = 0;
     tt_gen = 0;
     tz_clear();
+    tp_clear();
 }
 
 static double now_ms(void) {
@@ -254,11 +256,13 @@ static struct {
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
     int ts_tree, ts_tree_depth, ts_tree_plies, ts_tree_eval;   // 本探索の中の ts: ノード上限 (0 = 使わない)、残りの深さの下限、攻めの手数、静的評価の下限
+    int tpo, tpo_depth, tpo_own, tpo_opp;   // 脅威の潜在力で手を並べる (1 = 加点、2 = 加点して戦術手扱い)、残りの深さの下限、加点
+    int tp, tp_min_depth;   // 脅威の潜在力 (tp.c) を根から tp 手目の局面の値に足す (0 = 使わない)、その局面の残りの深さの下限
     int ts_pct;         // ルートで自分の勝ちを αβ の脅威探索 (ts.c) で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_ts;       // 選んだ手の確かめ (dfver_pct): 1 = df-pn と ts に半分ずつ、2 = ts だけ
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
-    .ts_tree = 0, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
+    .ts_tree = 0, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
@@ -312,6 +316,17 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "dfver_l3")) sp.dfver_l3 = (int)v;
     else if (!strcmp(name, "rz")) sp.rz = (int)v;
     else if (!strcmp(name, "ts_pct")) sp.ts_pct = (int)v;
+    else if (!strcmp(name, "tp")) sp.tp = (int)v;
+    else if (!strcmp(name, "tpo")) sp.tpo = (int)v;
+    else if (!strcmp(name, "tpo_depth")) sp.tpo_depth = (int)v;
+    else if (!strcmp(name, "tpo_own")) sp.tpo_own = (int)v;
+    else if (!strcmp(name, "tpo_opp")) sp.tpo_opp = (int)v;
+    else if (!strcmp(name, "tp_min_depth")) sp.tp_min_depth = (int)v;
+    else if (!strcmp(name, "tp_own")) g_tp_own = (int)v;
+    else if (!strcmp(name, "tp_opp")) g_tp_opp = (int)v;
+    else if (!strcmp(name, "tp_lo")) g_tp_lo = (int)v;
+    else if (!strcmp(name, "tp_cap")) g_tp_cap = (int)v;
+    else if (!strcmp(name, "tp_nodes")) g_tp_nodes = v;
     else if (!strcmp(name, "ts_tree")) sp.ts_tree = (int)v;
     else if (!strcmp(name, "ts_tree_depth")) sp.ts_tree_depth = (int)v;
     else if (!strcmp(name, "ts_tree_plies")) sp.ts_tree_plies = (int)v;
@@ -458,8 +473,19 @@ static const int LMP_COUNT[5] = {0, 6, 10, 16, 24};
 
 
 long nmp_stat[4];   // 調べた回数 (g2-test speed が表示)
+static _Thread_local int tp_inside;   // 脅威の潜在力の補正を足している局面の中か
+
 static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     Board *b = c->b;
+    // 脅威の潜在力 (tp.c): 根から sp.tp 手目の局面では、補正の分だけ窓をずらして読み、値に補正を足す
+    if (sp.tp && ply == sp.tp && depth >= sp.tp_min_depth && !tp_inside && alpha > -SCORE_WIN_MIN && beta < SCORE_WIN_MIN &&
+        !b->p4cnt[BLACK][P4_FIVE] && !b->p4cnt[WHITE][P4_FIVE]) {
+        int corr = tp_correction(b);
+        tp_inside = 1;
+        int v = pvs(c, alpha - corr, beta - corr, depth, ply, is_pv);
+        tp_inside = 0;
+        return v > SCORE_WIN_MIN || v < -SCORE_WIN_MIN ? v : v + corr;
+    }
     int me = board_side(b), op = opp_color(me);
     c->pvlen[ply] = 0;
     c->nodes++;
@@ -571,6 +597,14 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
 
     Move list[MAX_MOVES];
     int n = gen_moves(c, list, me, op, op_threat, ttmove, ply, qmode && !op_threat, tzon);
+    // 脅威の潜在力 (tp.c): 手番側の λ2 の脅威の点と、相手の λ2 の脅威の点 (先にふさぐ) を先に読む
+    if (sp.tpo && !qmode && !op_threat && !tzon && depth >= sp.tpo_depth && tp_prepare(b) > 0)
+        for (int i = 0; i < n; i++) {
+            int m = tp_mark(list[i].pos);
+            if (!m || list[i].pos == ttmove) continue;
+            list[i].score += (m & 1 ? sp.tpo_own : 0) + (m & 2 ? sp.tpo_opp : 0);
+            if (sp.tpo == 2) list[i].tactical = 1;
+        }
     int best = stand, bestmove = -1, alpha0 = alpha, searched = 0;
     int rzon = sp.rz && !is_pv && !qmode && depth >= sp.rz_depth && !op_threat && !tzon;
     if (rzon) rz_reset(ply);
