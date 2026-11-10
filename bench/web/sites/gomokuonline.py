@@ -34,4 +34,6 @@ class Site(JsStateSite):
         p.select_option("#difficultySelect", level)
         p.click("#newGameBtn")
         p.wait_for_timeout(300)
+        # 2026-11 版 (v4.2.0) は選択欄が app.ai に繋がっておらず常に medium のまま。サイト自身の setDifficulty で設定する
+        p.evaluate("(lv) => { if (window.app.ai.difficulty !== lv) window.app.ai.setDifficulty(lv); }", level)
         assert p.evaluate("() => window.app.ai.difficulty") == level

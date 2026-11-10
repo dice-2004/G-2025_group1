@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """docs/benchmarks/web/games/*.jsonl を集計して Markdown の結果表を出す。
-  python3 bench/web/summary.py [--write docs/benchmarks/web/RESULTS.md]
+  python3 bench/web/summary.py [--dir <棋譜のフォルダ>] [--write docs/benchmarks/web/RESULTS.md]
+  --dir: 既定は docs/benchmarks/web/games (再測定ごとに games_<日付>/ に分けて保存している)
 """
 import glob
 import json
@@ -11,9 +12,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GAMES = os.path.join(os.path.dirname(os.path.dirname(HERE)), "docs", "benchmarks", "web", "games")
 
 
-def load():
+def load(games_dir=GAMES):
     rows = {}
-    for path in sorted(glob.glob(os.path.join(GAMES, "*.jsonl"))):
+    for path in sorted(glob.glob(os.path.join(games_dir, "*.jsonl"))):
         for line in open(path):
             r = json.loads(line)
             if r.get("reason") in ("harness-error", "site-timeout", "engine-start-error"):
@@ -34,7 +35,8 @@ def load():
 
 
 def table(rows):
-    out = ["| サイト | 難易度 | ルール | G2 の勝-分-敗 | 平均手数 | G2 の平均思考(秒) | 備考 |", "|---|---|---|---|---|---|---|"]
+    out = ["| サイト | 難易度 | ルール | G2 の勝-分-敗 | 黒番 | 白番 | 平均手数 | G2 の平均思考(秒) | 備考 |",
+           "|---|---|---|---|---|---|---|---|---|"]
     for (site, level, rule), e in sorted(rows.items()):
         g = e["games"]
         n = len(g)
@@ -53,13 +55,20 @@ def table(rows):
             note.append("審判不一致あり")
         if e["err"]:
             note.append("エラー %d 局を除外" % e["err"])
-        out.append("| %s | %s | %s | %d-%d-%d | %.0f | %.2f | %s |" % (
-            site, level, rule, e["w"], e["d"], e["l"], avg_moves, avg_t, " / ".join(note)))
+        by = []
+        for c in ("black", "white"):
+            gc = [x for x in g if x["engine_color"] == c]
+            w = sum(x["winner"] == c for x in gc)
+            d = sum(x["winner"] == "draw" for x in gc)
+            by.append("%d-%d-%d" % (w, d, len(gc) - w - d) if gc else "-")
+        out.append("| %s | %s | %s | %d-%d-%d | %s | %s | %.0f | %.2f | %s |" % (
+            site, level, rule, e["w"], e["d"], e["l"], by[0], by[1], avg_moves, avg_t, " / ".join(note)))
     return "\n".join(out)
 
 
 if __name__ == "__main__":
-    md = table(load())
+    gdir = sys.argv[sys.argv.index("--dir") + 1] if "--dir" in sys.argv else GAMES
+    md = table(load(gdir))
     if "--write" in sys.argv:
         path = sys.argv[sys.argv.index("--write") + 1]
         with open(path, "w") as f:

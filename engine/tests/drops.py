@@ -23,9 +23,12 @@ ap.add_argument("--name", default="g2")
 ap.add_argument("--nodes", type=int, default=300000)
 ap.add_argument("--min", type=int, default=150)
 ap.add_argument("--all", action="store_true", help="勝った対局も含める")
-ap.add_argument("--cache", default=os.path.join(HERE, "..", "cache", "drops_labels.tsv"))
+ap.add_argument("--rule", default="renju", choices=["renju", "freestyle", "standard"], help="Rapfi に評価させるルール")
+ap.add_argument("--cache", default=None, help="既定は engine/cache/drops_labels.tsv (renju)、drops_labels_<rule>.tsv (それ以外)")
 ap.add_argument("-j", type=int, default=4)
 a = ap.parse_args()
+if a.cache is None:
+    a.cache = os.path.join(HERE, "..", "cache", "drops_labels.tsv" if a.rule == "renju" else "drops_labels_%s.tsv" % a.rule)
 
 
 def val(ev):
@@ -62,7 +65,7 @@ for pre, m, _, _ in items:
             keys.append(k)
 print("positions to label: %d (cached %d)" % (len(keys), len(cache)), file=sys.stderr)
 if keys:
-    rapfi_label.ARGS = Namespace(rule="renju", nodes=a.nodes)
+    rapfi_label.ARGS = Namespace(rule=a.rule, nodes=a.nodes)
     with Pool(a.j) as pool, open(a.cache, "a") as f:
         for k, lab in zip(keys, pool.imap(rapfi_label.label, keys)):
             cache[k] = lab

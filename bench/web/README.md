@@ -21,8 +21,11 @@ playgomokuonline.com)。2026-10-22 時点で全部到達できる。
 python3 bench/web/play.py gonu --level champion --rule renju --games 3 --tc 5000
 # 例: gomocalc (Rapfi NNUE) を 1 手 5 秒、先後交互
 python3 bench/web/play.py gomocalc --level 5000 --rule freestyle --games 4 --side both --tc 5000
-# 結果表
-python3 bench/web/summary.py --write docs/benchmarks/web/RESULTS.md
+# 結果表 (--dir で日付ごとのフォルダを指定。再測定は --out docs/benchmarks/web/games_<日付>/<site>_<level>_<rule>.jsonl に分けて保存)
+python3 bench/web/summary.py --dir docs/benchmarks/web/games_2026-11-10
+# 負け局の分類: Rapfi で最初の悪手を探し (bench/setup_rapfi.sh が要る)、その後の相手の手を四・三・受け・静かな手に分ける
+python3 engine/tests/drops.py docs/benchmarks/web/games_2026-11-10/gomocalc_*_renju.jsonl --rule renju > drops.tsv
+python3 bench/web/loss_types.py docs/benchmarks/web/games_2026-11-10/gomocalc_*_renju.jsonl --drops drops.tsv
 ```
 
 主なオプション: `--engine` (bench/engines.json の名前、`g2+p_xxx=値` も可)、`--tc` (エンジンの 1 手ms)、
