@@ -35,5 +35,16 @@ function fail(msg) { console.error('NG: ' + msg); process.exit(1); }
   // 黒 6,7 7,7 が横、8,6 8,5 が縦。8,7 に打つと横 6-7-8 と縦 5-6-7 の三三
   if (!g.g2_forbidden(8, 7)) fail('33 not forbidden');
   if (g.g2_forbidden(9, 9)) fail('false forbidden');
+  // wasm に埋め込んだ版 ("G2 <コミット>") と、思考の情報 (読み筋・理由) が読めるか
+  const mem = () => new Uint8Array(g.memory.buffer);
+  const cstr = (p) => { let e = p; while (mem()[e]) e++; return Buffer.from(mem().subarray(p, e)).toString(); };
+  const ver = cstr(g.g2_version());
+  if (process.env.G2_COMMIT && ver !== 'G2 ' + process.env.G2_COMMIT) fail(`version ${ver} != ${process.env.G2_COMMIT}`);
+  if (!/^G2 /.test(ver)) fail('version ' + ver);
+  g.g2_new_game(0, 15);
+  for (const [x, y] of [[7, 7], [8, 6], [9, 9], [6, 8], [3, 12]]) g.g2_play(x, y);
+  g.g2_think(300);
+  if (cstr(g.g2_reason()) !== 'search' || g.g2_pv(0) < 0 || g.g2_info(7) <= 0) fail('think info');
+  console.log(`${ver}: reason ${cstr(g.g2_reason())} seldepth ${g.g2_info(5)} pv0 ${g.g2_pv(0) & 31},${g.g2_pv(0) >> 5}`);
   console.log('OK');
 })().catch((e) => fail(e.stack || String(e)));

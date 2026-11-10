@@ -63,6 +63,14 @@
   button:disabled { opacity: .5; cursor: not-allowed; }
   .note { color: var(--muted); font-size: .8rem; margin: 0; }
   .note a { color: var(--accent); }
+  .info:empty { display: none; }
+  .stats { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 10px 0 0; font-size: .85rem; font-variant-numeric: tabular-nums; }
+  .stats dt { color: var(--muted); }
+  .stats dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .engine { font-size: .8rem; color: var(--muted); margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .engine a { color: var(--accent); }
+  .log { font-size: .78rem; color: var(--muted); max-height: 10em; overflow-y: auto; font-variant-numeric: tabular-nums; margin: 0; padding: 0; list-style: none; }
+  .log li { padding: 2px 0; border-bottom: 1px dashed var(--line); }
   .moves { font-size: .8rem; color: var(--muted); max-height: 7.5em; overflow-y: auto; word-break: break-all; font-variant-numeric: tabular-nums; }
 </style>
 </head>
@@ -78,6 +86,8 @@
       <div class="card">
         <div class="status" id="status">読み込み中…</div>
         <div class="info" id="info"></div>
+        <dl class="stats" id="stats" hidden></dl>
+        <div class="engine" id="engine">エンジン: 読み込み中…</div>
       </div>
       <div class="card">
         <h2>対局の設定</h2>
@@ -117,6 +127,10 @@
       <div class="card">
         <h2>手順</h2>
         <div class="moves" id="moves">—</div>
+      </div>
+      <div class="card">
+        <h2>G2 の思考の記録</h2>
+        <ul class="log" id="log"><li>まだありません</li></ul>
       </div>
       <p class="note">連珠では黒の三三・四四・長連が禁じ手です。あなたが黒番のとき、禁じ手の点に × を表示します。
         ビルド <span id="build"></span>。ソースは <a href="https://github.com/dice-2004/G-2025_group1/tree/claude/dev/engine" target="_blank" rel="noopener">GitHub</a>。</p>

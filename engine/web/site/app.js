@@ -10,6 +10,13 @@
   $('build').textContent = BUILD === '__BUILD__' ? 'dev' : BUILD;
   const canvas = $('board'), ctx = canvas.getContext('2d');
   const statusEl = $('status'), infoEl = $('info'), movesEl = $('moves');
+  const statsEl = $('stats'), logEl = $('log'), engineEl = $('engine');
+  const REASONS = {
+    search: '探索 (αβ)', vcf: '詰み探索 (VCF: 四の連続)', vct: '詰み探索 (VCT: 三と四の連続)', ts: '脅威探索',
+    five: '五を打つ', 'block-five': '相手の五を止める', flex4: '活四を作る', center: '初手 (天元)',
+    'only-move': '受けがこの 1 手だけ', verified: '詰みの受けを確かめた手', lost: '負けを読み切り', book: '開局ブック',
+  };
+  const fmtInt = (n) => n.toLocaleString('ja-JP');
 
   let worker = null;
   let moves = [];            // [[x, y], ...] 黒から交互
@@ -185,21 +192,52 @@
       if (r.x < 0) { result = 3; return; }
       await play(r.x, r.y);
       if (g !== game) return;
-      const i = r.info;
-      let text;
-      if (i.book) text = `G2: ${coord([r.x, r.y])}（開局ブック）`;
-      else {
-        const sc = i.score >= WIN_MIN ? '勝ちを読み切り' : i.score <= -WIN_MIN ? '負けを読み切り' : `評価 ${i.score > 0 ? '+' : ''}${i.score}`;
-        const nps = i.ms > 0 ? Math.round(i.knodes / i.ms * 1000) : 0;
-        text = i.depth > 0
-          ? `G2: ${coord([r.x, r.y])}　深さ ${i.depth}・${sc}・${(i.wall / 1000).toFixed(2)} 秒・${nps.toLocaleString()} 千ノード/秒`
-          : Math.abs(i.score) >= WIN_MIN ? `G2: ${coord([r.x, r.y])}　${sc}（詰み探索）` : `G2: ${coord([r.x, r.y])}`;
-      }
-      infoEl.textContent = text;
+      showThought(r, moves.length);
     } catch (e) {
       setStatus('エラー: ' + e.message, 'lose');
     } finally {
       if (g === game) { busy = false; updateStatus(); draw(); }
+    }
+  }
+
+  // 直前の思考を表に出し、記録に 1 行足す
+  function showThought(r, ply) {
+    const i = r.info, mv = coord([r.x, r.y]);
+    const reason = i.book ? REASONS.book : (REASONS[i.reason] || i.reason);
+    const sc = i.book ? '—' : i.score >= WIN_MIN ? `勝ちを読み切り (${i.score})` : i.score <= -WIN_MIN ? `負けを読み切り (${i.score})` : (i.score > 0 ? '+' : '') + i.score;
+    const nps = i.ms > 0 ? Math.round(i.nodes / i.ms * 1000) : 0;
+    const rows = [['手', `${ply}. ${mv}`], ['決め手', reason]];
+    if (!i.book) {
+      if (i.depth > 0) rows.push(['深さ', `${i.depth}（最大 ${i.seldepth}）`]);
+      rows.push(['評価 (G2 から見て)', sc], ['ノード数', fmtInt(i.nodes)], ['思考時間', `${(i.wall / 1000).toFixed(2)} 秒`]);
+      if (i.nodes > 0) rows.push(['速さ', `${fmtInt(nps)} ノード/秒`]);
+      if (i.pv.length > 1) rows.push(['読み筋', i.pv.slice(0, 12).map(coord).join(' ')]);
+    }
+    statsEl.replaceChildren(...rows.flatMap(([k, v]) => {
+      const dt = document.createElement('dt'), dd = document.createElement('dd');
+      dt.textContent = k; dd.textContent = v;
+      return [dt, dd];
+    }));
+    statsEl.hidden = false;
+    infoEl.textContent = '';
+    const li = document.createElement('li');
+    li.textContent = i.book ? `${ply}. ${mv} 開局ブック`
+      : `${ply}. ${mv} ${i.depth > 0 ? `深さ ${i.depth}/${i.seldepth} ` : ''}評価 ${sc} ${fmtInt(i.nodes)} ノード ${(i.wall / 1000).toFixed(2)} 秒${i.nodes > 0 ? ` ${fmtInt(nps)}/秒` : ''}`;
+    if (logEl.dataset.empty !== '0') { logEl.replaceChildren(); logEl.dataset.empty = '0'; }
+    logEl.append(li);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function showEngine(version) {
+    // wasm 自身が返す版 ("G2 <コミット>")。コミットなら GitHub へのリンクを付ける
+    const hash = (version.match(/\b[0-9a-f]{7,40}\b/) || [])[0];
+    engineEl.replaceChildren(`エンジン: ${version}（WebAssembly・1 スレッド・この端末で計算）`);
+    if (hash) {
+      const a = document.createElement('a');
+      a.href = `https://github.com/dice-2004/G-2025_group1/tree/${hash}/engine/src`;
+      a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = 'このコミットのソース';
+      engineEl.append(' ', a);
     }
   }
 
@@ -214,6 +252,10 @@
     const g = game;
     const s = await call({ type: 'new', rule, moves: [] });
     if (g !== game) return;
+    if (s.version) showEngine(s.version);
+    statsEl.hidden = true;
+    logEl.replaceChildren(Object.assign(document.createElement('li'), { textContent: 'まだありません' }));
+    logEl.dataset.empty = '1';
     applyState(s);
     updateStatus(); draw();
     aiMove();

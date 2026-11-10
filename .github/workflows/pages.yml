@@ -39,8 +39,8 @@ jobs:
         run: pip install ziglang==0.17.1
       - name: Build g2.wasm
         run: ZIG="python -m ziglang" sh engine/web/build.sh
-      - name: Smoke test (Node で数局面を考えさせる)
-        run: node engine/web/smoke_test.js engine/web/site/g2.wasm
+      - name: Smoke test (Node で数局面を考えさせる。埋め込んだコミットも確かめる)
+        run: G2_COMMIT=$(git rev-parse --short=7 HEAD) node engine/web/smoke_test.js engine/web/site/g2.wasm
       - name: Stamp build version
         run: |
           v="$(date -u +%Y%m%d)-$(echo "$GITHUB_SHA" | cut -c1-7)"

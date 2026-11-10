@@ -7,6 +7,13 @@ function boot(bytes) {
   ready = (async () => { g = await G2Wasi.loadG2(await bytes, () => {}); })();
 }
 
+function cstr(ptr) {
+  const mem = new Uint8Array(g.memory.buffer);
+  let end = ptr;
+  while (mem[end]) end++;
+  return new TextDecoder().decode(mem.subarray(ptr, end));
+}
+
 function state(size) {
   // 手番が黒のときの禁じ手 (連珠のみ) と、勝負の結果
   const forbidden = [];
@@ -23,7 +30,7 @@ self.onmessage = async (ev) => {
     if (m.type === 'new') {
       g.g2_new_game(m.rule, m.size);
       for (const [x, y] of m.moves || []) g.g2_play(x, y);
-      self.postMessage({ type: 'state', id: m.id, ...state(m.size) });
+      self.postMessage({ type: 'state', id: m.id, version: cstr(g.g2_version()), ...state(m.size) });
     } else if (m.type === 'play') {
       const ok = g.g2_play(m.x, m.y);
       self.postMessage({ type: 'state', id: m.id, ok: !!ok, ...state(m.size) });
@@ -34,7 +41,12 @@ self.onmessage = async (ev) => {
       const t0 = performance.now();
       const r = g.g2_think(m.ms);
       const wall = Math.round(performance.now() - t0);
-      const info = { score: g.g2_info(0), depth: g.g2_info(1), knodes: g.g2_info(2), ms: g.g2_info(3), book: !!g.g2_info(4), wall };
+      const pv = [];
+      for (let i = 0, p; (p = g.g2_pv(i)) >= 0; i++) pv.push([p & 31, p >> 5]);
+      const info = {
+        score: g.g2_info(0), depth: g.g2_info(1), ms: g.g2_info(3), book: !!g.g2_info(4),
+        seldepth: g.g2_info(5), nodes: g.g2_info(7), reason: cstr(g.g2_reason()), pv, wall,
+      };
       self.postMessage({ type: 'move', id: m.id, x: r < 0 ? -1 : r & 31, y: r < 0 ? -1 : r >> 5, info });
     }
   } catch (e) {

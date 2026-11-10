@@ -33,6 +33,8 @@
   Actions の初回実行はビルドと動作確認が成功し、公開だけ Pages 未有効で失敗 (想定どおり)
 - claude.ai のアーティファクト版も公開した (`engine/web/make_artifact.py` で 1 ファイルにまとめる。wasm を base64 で埋め込み 1.8MB)。
   https://claude.ai/artifact/CZdJbuBNsMpSExkEvfJ9uc 。自動更新されないので節目ごとに作り直す
+- 中で G2 が動いていると分かるように、wasm にビルド元のコミットを埋め込み (`g2_version`、ページに「エンジン: G2 <コミット>」とソースへのリンク)、
+  思考ごとに決め手 (探索・VCF・VCT・ブックなど)・深さ (最大の深さ)・評価・ノード数・時間・ノード/秒・読み筋を表示し、記録に残すようにした
 
 **次にやること**
 - Pages の設定後、Actions の公開が通るか確かめる

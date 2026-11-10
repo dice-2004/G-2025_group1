@@ -14,7 +14,7 @@ G2 エンジン (`engine/src`) を WebAssembly にして、ブラウザで対局
 
 | ファイル | 役割 |
 |---|---|
-| `g2_wasm.c` | wasm の入口 (`g2_new_game` / `g2_play` / `g2_undo` / `g2_forbidden` / `g2_result` / `g2_think` / `g2_info`) |
+| `g2_wasm.c` | wasm の入口 (`g2_new_game` / `g2_play` / `g2_undo` / `g2_forbidden` / `g2_result` / `g2_think` / `g2_info` / `g2_pv` / `g2_reason` / `g2_version`)。`g2_version` はビルド元のコミット (`build.sh` が `-DG2_COMMIT` で埋め込む) |
 | `build.sh` | `zig cc -target wasm32-wasi` でビルド (`site/g2.wasm`)。wasm32 は long が 32 ビットなので、ビルド用の写しで `1L << 40` を置き換える |
 | `smoke_test.js` | CI の動作確認 (3 ルールで合法手を返す・五を打つ・連珠の三三を禁じ手と判定する) |
 | `make_artifact.py` | `site/` を 1 つの HTML にまとめる (アーティファクト用) |

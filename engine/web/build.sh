@@ -14,9 +14,10 @@ cp src/*.c src/*.h "$TMP"/
 sed -i 's/1L << 40/0x7fffffffL/g' "$TMP"/*.c
 mkdir -p "$TMP/web" && cp web/g2_wasm.c "$TMP/web/"
 sed -i 's#"\.\./src/#"../#' "$TMP/web/g2_wasm.c"
+COMMIT=${G2_COMMIT:-$(git rev-parse --short=7 HEAD 2>/dev/null || echo unknown)}
 CORE=$(ls "$TMP"/*.c | grep -v -e /gomocup.c -e /class_entry.c)
 mkdir -p web/site
-$ZIG cc -target wasm32-wasi -O3 -std=c11 -D_POSIX_C_SOURCE=200809L \
+$ZIG cc -target wasm32-wasi -O3 -DG2_COMMIT="\"$COMMIT\"" -std=c11 -D_POSIX_C_SOURCE=200809L \
     -mexec-model=reactor -Wl,--export-dynamic -Wl,--initial-memory=134217728 -Wl,--max-memory=536870912 \
     $CORE "$TMP/web/g2_wasm.c" -o web/site/g2.wasm
-ls -l web/site/g2.wasm
+ls -l web/site/g2.wasm && echo "commit $COMMIT"

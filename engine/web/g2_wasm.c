@@ -62,16 +62,26 @@ EXPORT(g2_result) int g2_result(void) {
     return r == 3 ? 3 : 0;
 }
 
+// ビルド元のコミット (build.sh が -DG2_COMMIT=... で埋め込む)。UI が wasm から読んで表示する
+#ifndef G2_COMMIT
+#define G2_COMMIT "unknown"
+#endif
+EXPORT(g2_version) const char *g2_version(void) { return "G2 " G2_COMMIT; }
+
 // 直前の思考の情報 (UI の表示用)
-static int g_info[5];   // 0=評価 1=深さ 2=ノード数 (千単位) 3=ミリ秒 4=ブックの手なら 1
+enum { INFO_SCORE, INFO_DEPTH, INFO_KNODES, INFO_MS, INFO_BOOK, INFO_SELDEPTH, INFO_PVLEN, INFO_NODES, INFO_N };
+static int g_info[INFO_N];
+static SearchResult g_res;
 
 // 手番側の手を考える (盤には置かない)。戻り値 y * 32 + x、打てる手がなければ -1。
 // 時間の配分は think.c の plan_time と同じ (持ち時間から余裕を引き、soft_pct % で次の反復を止める)
 EXPORT(g2_think) int g2_think(int time_ms) {
     memset(g_info, 0, sizeof g_info);
+    memset(&g_res, 0, sizeof g_res);
+    g_res.reason = "book";
     int bm;
     if (book_probe(&g_board, &bm)) {
-        g_info[4] = 1;
+        g_info[INFO_BOOK] = 1;
         return pos_y(bm) * 32 + pos_x(bm);
     }
     int margin = time_ms / 20 + 30;
@@ -81,14 +91,25 @@ EXPORT(g2_think) int g2_think(int time_ms) {
     SearchLimits sl = {0};
     sl.hard_ms = hard;
     sl.soft_ms = hard * search_soft_pct() / 100;
-    static SearchResult res;
-    search_root(&g_board, &sl, &res);
-    g_info[0] = res.score;
-    g_info[1] = res.depth;
-    g_info[2] = (int)(res.nodes / 1000);
-    g_info[3] = res.ms;
-    if (res.move < 0) return -1;
-    return pos_y(res.move) * 32 + pos_x(res.move);
+    search_root(&g_board, &sl, &g_res);
+    g_info[INFO_SCORE] = g_res.score;
+    g_info[INFO_DEPTH] = g_res.depth;
+    g_info[INFO_KNODES] = (int)(g_res.nodes / 1000);
+    g_info[INFO_MS] = g_res.ms;
+    g_info[INFO_SELDEPTH] = g_res.seldepth;
+    g_info[INFO_PVLEN] = g_res.pvlen;
+    g_info[INFO_NODES] = (int)g_res.nodes;
+    if (g_res.move < 0) return -1;
+    return pos_y(g_res.move) * 32 + pos_x(g_res.move);
 }
 
-EXPORT(g2_info) int g2_info(int i) { return (i >= 0 && i < 5) ? g_info[i] : 0; }
+EXPORT(g2_info) int g2_info(int i) { return (i >= 0 && i < INFO_N) ? g_info[i] : 0; }
+
+// 読み筋の i 手目 (y * 32 + x)。範囲外は -1
+EXPORT(g2_pv) int g2_pv(int i) {
+    if (i < 0 || i >= g_res.pvlen || g_res.pv[i] < 0) return -1;
+    return pos_y(g_res.pv[i]) * 32 + pos_x(g_res.pv[i]);
+}
+
+// 手を決めた理由 ("search", "vcf", "five", "book" など。search.c の SearchResult.reason)
+EXPORT(g2_reason) const char *g2_reason(void) { return g_res.reason ? g_res.reason : ""; }
