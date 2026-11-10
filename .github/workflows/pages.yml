@@ -1,0 +1,64 @@
+# G2 のブラウザ版 (engine/web) の CI/CD
+#  - claude/dev への push: WASM をビルド → Node で動作確認 → GitHub Pages に公開
+#  - pull request: ビルドと動作確認だけ (公開しない)
+name: Web (GitHub Pages)
+
+on:
+  push:
+    branches: [claude/dev]
+    paths:
+      - 'engine/src/**'
+      - 'engine/web/**'
+      - '.github/workflows/pages.yml'
+  pull_request:
+    paths:
+      - 'engine/src/**'
+      - 'engine/web/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Install zig (C → wasm32-wasi のコンパイラ)
+        run: pip install ziglang==0.17.1
+      - name: Build g2.wasm
+        run: ZIG="python -m ziglang" sh engine/web/build.sh
+      - name: Smoke test (Node で数局面を考えさせる。埋め込んだコミットも確かめる)
+        run: G2_COMMIT=$(git rev-parse --short=7 HEAD) node engine/web/smoke_test.js engine/web/site/g2.wasm
+      - name: Stamp build version
+        run: |
+          v="$(date -u +%Y%m%d)-$(echo "$GITHUB_SHA" | cut -c1-7)"
+          sed -i "s/__BUILD__/$v/g" engine/web/site/index.html
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: engine/web/site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
