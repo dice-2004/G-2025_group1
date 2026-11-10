@@ -219,6 +219,16 @@ int evaluate(const Board *b) {
         if (bm >> k & 1) v += th[0][k];
         if (bo >> k & 1) v += th[1][k];
     }
+    if (w->cnt_f3_me | w->cnt_f3_op | w->cnt_b4_me | w->cnt_b4_op) {
+        const int16_t *cm = b->p4cnt[me], *co = b->p4cnt[op];
+        int f3m = cm[P4_FLEX3] + cm[P4_FLEX3_PLUS] + cm[P4_FLEX3_2X], f3o = co[P4_FLEX3] + co[P4_FLEX3_PLUS] + co[P4_FLEX3_2X];
+        int b4m = cm[P4_BLOCK4] + cm[P4_BLOCK4_PLUS] + cm[P4_BLOCK4_FLEX3], b4o = co[P4_BLOCK4] + co[P4_BLOCK4_PLUS] + co[P4_BLOCK4_FLEX3];
+        if (f3m > 8) f3m = 8;
+        if (f3o > 8) f3o = 8;
+        if (b4m > 8) b4m = 8;
+        if (b4o > 8) b4o = 8;
+        v += f3m * w->cnt_f3_me - f3o * w->cnt_f3_op + b4m * w->cnt_b4_me - b4o * w->cnt_b4_op;
+    }
     if (w->race) {   // 脅威の速さの比べ (eval.h、既定は無効)
         int m = eval_threat_level(b->p4cnt[me]), o = eval_threat_level(b->p4cnt[op]);
         v += o >= m ? w->race_own[m] : -w->race_opp[o];
@@ -267,6 +277,7 @@ static struct {
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
+    int def_scale;  // 手の並べ方の守り (相手の点) の重み /64
     int lmr_tact;   // >0: 戦術的な手 (四・三三・相手の活三への受けを除く) も searched >= lmr_tact なら 1 手浅く読む (切れなければ読み直す)
     int ttfirst;    // 1 = 置換表の手を手の生成の前に読み、切れなければ生成する (段階的な手の生成。速さだけ)
     int tfut, tfut_margin;   // 残り深さ 1 の節点で評価が alpha - tfut_margin 以下なら、四でない手 (1 = 自分のただの三も、2 = 相手の三の点の受けも) を読まない
@@ -289,7 +300,7 @@ static struct {
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
     .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .mcp = 0, .mcp_mul = 100, .mcp_tact = 0, .mcp_pv = 0, .fut = 0, .fut_margin = 250, .fut_depth = 99, .razor = 0, .razor_margin = 100, .razor_depth = 2, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
-    .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
+    .def_scale = 52, .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
     .vz = 0, .vz_depth = 4, .vz_nodes = 2000, .vz_keep = P4_BLOCK3, .vz_pv = 1, .vz_root = 0, .vz_root_nodes = 20000, .vz_tact = 0,
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
@@ -406,6 +417,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "tfut")) sp.tfut = (int)v;
     else if (!strcmp(name, "ttfirst")) sp.ttfirst = (int)v;
     else if (!strcmp(name, "lmr_tact")) sp.lmr_tact = (int)v;
+    else if (!strcmp(name, "def_scale")) sp.def_scale = (int)v;
     else if (!strcmp(name, "tfut_margin")) sp.tfut_margin = (int)v;
     else if (!strcmp(name, "vz_depth")) sp.vz_depth = (int)v;
     else if (!strcmp(name, "vz_nodes")) sp.vz_nodes = (int)v;
@@ -442,6 +454,10 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strcmp(name, "table")) g_eval_params.use_table = (int)v;
     else if (!strcmp(name, "race")) g_eval_params.race = (int)v;
+    else if (!strcmp(name, "cnt_f3_me")) g_eval_params.cnt_f3_me = (int)v;
+    else if (!strcmp(name, "cnt_f3_op")) g_eval_params.cnt_f3_op = (int)v;
+    else if (!strcmp(name, "cnt_b4_me")) g_eval_params.cnt_b4_me = (int)v;
+    else if (!strcmp(name, "cnt_b4_op")) g_eval_params.cnt_b4_op = (int)v;
     else if (!strncmp(name, "race_own", 8) && name[8] >= '0' && name[8] < '0' + EVAL_RACE_LEVELS) g_eval_params.race_own[name[8] - '0'] = (int)v;
     else if (!strncmp(name, "race_opp", 8) && name[8] >= '0' && name[8] < '0' + EVAL_RACE_LEVELS) g_eval_params.race_opp[name[8] - '0'] = (int)v;
     else if (!strncmp(name, "threat", 6) && strlen(name) == 9) {
@@ -465,7 +481,7 @@ typedef struct {
     int tactical;   // 三・四を作る、または相手の三・四の点をふさぐ
 } Move;
 
-#define DEF_SCALE 52    // 守り (相手の点) の重み /64
+#define DEF_SCALE sp.def_scale    // 守り (相手の点) の重み /64 (既定 52、INFO p_def_scale)
 
 // 手の並べ方の重み (policy_data.c、Rapfi の最善手に合わせた線パターン・Pattern4 の点) を pattern_index で引ける形に広げたもの。
 // [手番の色][0 = 自分のパターン、1 = 相手のパターン][pattern_index]。g_p4_table はルールで変わるので search_root で作り直す
