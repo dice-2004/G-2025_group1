@@ -3,12 +3,57 @@
 G2 エンジン (`engine/src`) を WebAssembly にして、ブラウザで対局できるようにした静的サイト。
 エンジンのコードは変えず、`g2_wasm.c` (盤の操作と思考を関数として出す入口) を足してビルドしている。
 
-- 公開: `claude/dev` に push すると GitHub Actions (`.github/workflows/pages.yml`) が
-  ビルド → Node で動作確認 → GitHub Pages に公開する。URL は https://dice-2004.github.io/G-2025_group1/
-- pull request ではビルドと動作確認だけ行う
-- claude.ai のアーティファクト版 (1 ファイル、wasm を base64 で埋め込み): https://claude.ai/artifact/CZdJbuBNsMpSExkEvfJ9uc
-  (自動では更新されない。節目ごとに `python3 engine/web/make_artifact.py <出力.html> <ビルド名>` で作り直して公開し直す。
-  見られるのは持ち主と共有した人だけ)
+- 公開 (本命): claude.ai のアーティファクト https://claude.ai/artifact/CZdJbuBNsMpSExkEvfJ9uc (リンクを知っていれば開ける)。
+  1 ファイル版 (wasm を base64 で埋め込み) を `make_artifact.py` で作り、Artifact ツールで同じ URL に公開し直す。自動では更新されないので節目ごとに更新する
+- CI: `claude/dev` への push と PR で、GitHub Actions (`.github/workflows/pages.yml`) が wasm をビルドして Node で動作確認する。
+  GitHub Pages への公開はリポジトリ変数 `PAGES_ENABLED=true` のときだけ (dice の判断で今は使わない)
+
+## アーティファクトの更新手順
+
+1. 変更をコミットする (wasm に埋め込むコミットを合わせるため、先にコミット)
+2. `ZIG="python3 -m ziglang" sh engine/web/build.sh && node engine/web/smoke_test.js`
+3. `python3 engine/web/make_artifact.py <出力.html> "$(date -u +%Y%m%d)-$(git rev-parse --short=7 HEAD)"`
+4. Artifact ツールで `url: https://claude.ai/artifact/CZdJbuBNsMpSExkEvfJ9uc` に公開。`capabilities` は省略すると前の宣言 (下の db・user) を引き継ぐ
+
+## 対局データ (自動収集)
+
+アーティファクト版は、対局の棋譜と G2 の思考の数字を、アーティファクトの db (claude.ai のアーティファクト内の保存領域) に自動で記録する。
+ページには「対局データ（棋譜と G2 の思考の数字）を G2 の改善に使います。」と表示する。名前・メールなどの個人情報は記録しない
+(保存先のパスに claude.ai の不透明な利用者 id が入るだけ)。
+
+- 記録する時: G2 が 6 手目以降の手を打つたびと、終局したとき (同じ対局は同じ文書に上書き)。途中で閉じた対局も最後の G2 の手まで残る
+- 記録できる人: db に書けるのは Contributor 以上 (アーティファクトの持ち主と、組織のメンバー)。
+  組織の外からリンクで開いた人・サインインしていない人の対局は記録されない (claude.ai の仕組み上の制限)
+- 宣言 (`capabilities`):
+  `{"db": {"rules": [{"path": "games", "read": "admin", "write": "admin"}, {"path": "games/{self}", "read": "interact", "write": "interact"}]}, "user": {}}`
+  (各自は自分の `games/<id>/...` だけ書ける。全員分を読めるのは持ち主と Editor)
+- 置き場所: `games/<利用者 id>` (目印の文書: `updated_at`, `last_game`)、`games/<利用者 id>/g/<対局 id>` (1 局 1 文書)
+
+### 取り出し方 (強化スレッド向け)
+
+Claude の `ArtifactData` ツールで、`url` に上のアーティファクトを渡して読む (dice の権限で読むので全員分が見える)。
+
+1. `action: "list"`, `collection: "games"` → 利用者ごとの目印の文書 (id が利用者 id)
+2. `action: "list"`, `collection: "games/<利用者 id>/g"` → その人の対局 (ページ送りは結果の続きの印を使う)
+
+### 1 局の形式 (`format: "g2-game/1"`)
+
+| フィールド | 内容 |
+|---|---|
+| `id` | 対局 id (開始時刻 + 乱数) |
+| `engine` | wasm が返した版 `"G2 <コミット>"` |
+| `page_build` | ページのビルド名 (日付-コミット) |
+| `rule` / `gomocup_rule` | `"renju"`/4, `"freestyle"`/0, `"standard"`/1 |
+| `board_size` | 15 |
+| `human` | 人の石 `"black"` / `"white"` |
+| `started_at` / `ended_at` | ISO 時刻 (`ended_at` は最後に記録した時刻) |
+| `result` | `"black"` / `"white"` / `"draw"` / `null` (終わっていない) |
+| `winner` | `"human"` / `"g2"` / `null` |
+| `undos` | 「待った」の回数 (手順は待ったの後の最終形だけ) |
+| `moves[]` | `ply` (1 から), `x`, `y` (左上が 0,0。Gomocup・pbrain-g2 と同じ座標), `coord` (例 `H8`、I を飛ばす列 + 下から数えた行), `by` (`"human"`/`"g2"`) |
+| `moves[].g2` | G2 の手だけ: `reason` (`search`/`vcf`/`vct`/`ts`/`book`/`five`/`block-five`/`flex4`/`only-move`/`verified`/`lost` など), `depth`, `seldepth`, `score` (G2 から見た評価、±29000 超は詰み), `nodes`, `ms` (探索の時間), `wall_ms` (Worker で測った時間), `think_ms` (持ち時間の設定), `pv` (読み筋、`coord` 表記)。ブックの手は `reason: "book"` と `think_ms` だけ |
+
+`x`,`y` の手順はそのまま `pbrain-g2` の `BOARD` や `g2-test` に渡せる。
 
 ## 構成
 

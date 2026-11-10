@@ -1,7 +1,8 @@
 # G2 のブラウザ版 (engine/web) の CI/CD
-#  - claude/dev への push: WASM をビルド → Node で動作確認 → GitHub Pages に公開
-#  - pull request: ビルドと動作確認だけ (公開しない)
-name: Web (GitHub Pages)
+#  - claude/dev への push・pull request: WASM をビルド → Node で動作確認
+#  - GitHub Pages への公開は、リポジトリ変数 PAGES_ENABLED が 'true' のときだけ (2026-11-10 時点では使わない。
+#    本命は claude.ai のアーティファクト版: engine/web/README.md)
+name: Web (WASM build)
 
 on:
   push:
@@ -50,7 +51,7 @@ jobs:
           path: engine/web/site
 
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && vars.PAGES_ENABLED == 'true'
     needs: build
     runs-on: ubuntu-latest
     permissions:

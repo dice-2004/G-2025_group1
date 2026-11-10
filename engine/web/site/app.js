@@ -28,6 +28,11 @@
   let hover = null;
   let nextId = 1;
   const pending = new Map();
+  // 棋譜の記録 (docs: engine/web/README.md の「対局データ」)
+  let thoughts = [];         // moves と同じ長さ。G2 の手なら思考の情報、あなたの手なら null
+  let engineVersion = '';
+  let rec = null;            // { id, started_at, undos, saved_key, indexed }
+  const RULE_NAMES = { 0: 'freestyle', 1: 'standard', 4: 'renju' };
 
   function call(msg) {
     return new Promise((resolve, reject) => {
@@ -173,12 +178,14 @@
   const canPlay = () => worker && !busy && !result && sideToMove() === human;
 
   // ---- 対局の進行 ----
-  async function play(x, y) {
+  async function play(x, y, info) {
     const g = game;
     const s = await call({ type: 'play', x, y });
     if (g !== game || !s.ok) return false;
     moves.push([x, y]);
+    thoughts.push(info || null);
     applyState(s);
+    if (result || (info && moves.length >= 6)) saveGame();   // 終局と、6 手目以降の G2 の手ごと (途中で閉じられても残る)
     return true;
   }
 
@@ -190,7 +197,7 @@
       const r = await call({ type: 'think', ms: Number($('time').value) });
       if (g !== game) return;
       if (r.x < 0) { result = 3; return; }
-      await play(r.x, r.y);
+      await play(r.x, r.y, { ...r.info, think_ms: Number($('time').value) });
       if (g !== game) return;
       showThought(r, moves.length);
     } catch (e) {
@@ -241,18 +248,86 @@
     }
   }
 
+  // ---- 棋譜 ----
+  function gameRecord() {
+    const res = result === 1 ? 'black' : result === 2 ? 'white' : result === 3 ? 'draw' : null;
+    return {
+      format: 'g2-game/1',
+      id: rec.id,
+      engine: engineVersion,
+      page_build: BUILD,
+      rule: RULE_NAMES[rule] || String(rule),
+      gomocup_rule: rule,
+      board_size: SIZE,
+      human: human === 1 ? 'black' : 'white',
+      started_at: rec.started_at,
+      ended_at: new Date().toISOString(),
+      result: res,
+      winner: !result || result === 3 ? null : result === human ? 'human' : 'g2',
+      undos: rec.undos,
+      moves: moves.map(([x, y], i) => {
+        const t = thoughts[i];
+        const m = { ply: i + 1, x, y, coord: coord([x, y]), by: (i % 2 === 0 ? 1 : 2) === human ? 'human' : 'g2' };
+        if (t) {
+          m.g2 = t.book ? { reason: 'book', think_ms: t.think_ms }
+            : { reason: t.reason, depth: t.depth, seldepth: t.seldepth, score: t.score, nodes: t.nodes, ms: t.ms,
+                wall_ms: t.wall, think_ms: t.think_ms, pv: t.pv.map(([a, b]) => coord([a, b])) };
+        }
+        return m;
+      }),
+    };
+  }
+
+  // 保存先: claude.ai のアーティファクトの db (games/<あなたの id>/g/<対局 id>)。外部には送らない
+  const store = (async () => {
+    try {
+      if (!window.claude || !window.claude.use) return null;
+      const [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]);
+      if (!db || !user) return null;
+      const uid = await user.id();
+      if (!uid) return null;
+      return { db, uid };
+    } catch (e) { return null; }
+  })();
+  let saving = Promise.resolve();
+  const saveNoteEl = $('savenote');
+
+  function saveGame() {
+    const key = moves.length + ':' + result;
+    if (!rec || moves.length === 0 || rec.saved_key === key) return;
+    rec.saved_key = key;
+    const data = gameRecord();
+    const first = !rec.indexed;
+    rec.indexed = true;
+    saving = saving.then(async () => {
+      const st = await store;
+      if (!st) return;
+      try {
+        await st.db.doc(`games/${st.uid}/g/${data.id}`).set(data);
+        if (first) await st.db.doc(`games/${st.uid}`).set({ updated_at: data.ended_at, last_game: data.id });
+      } catch (e) {
+        rec.indexed = !first && rec.indexed;   // 記録できない閲覧 (権限なし等) では黙って諦める
+      }
+    });
+  }
+
   async function newGame() {
     game++;
     rule = Number($('rule').value);
     human = Number($('human').value);
-    moves = []; forbidden = []; result = 0; busy = false;
+    moves = []; thoughts = []; forbidden = []; result = 0; busy = false;
+    rec = { id: new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14) + '-' + Math.random().toString(36).slice(2, 7),
+            started_at: new Date().toISOString(), undos: 0, saved_key: '', indexed: false };
     infoEl.textContent = '';
     if (!worker) startWorker();
     setStatus('準備中…', '');
     const g = game;
     const s = await call({ type: 'new', rule, moves: [] });
     if (g !== game) return;
-    if (s.version) showEngine(s.version);
+    if (s.version) { engineVersion = s.version; showEngine(s.version); }
+    store.then((st) => {
+      if (g === game) saveNoteEl.textContent = st ? '対局データ（棋譜と G2 の思考の数字）を G2 の改善に使います。' : '';
+    });
     statsEl.hidden = true;
     logEl.replaceChildren(Object.assign(document.createElement('li'), { textContent: 'まだありません' }));
     logEl.dataset.empty = '1';
@@ -272,6 +347,8 @@
     const s = await call({ type: 'undo', n });
     if (g !== game) return;
     moves.splice(moves.length - n, n);
+    thoughts.splice(thoughts.length - n, n);
+    rec.undos++;
     applyState(s);
     infoEl.textContent = '';
     updateStatus(); draw();
