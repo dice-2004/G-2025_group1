@@ -277,6 +277,7 @@ static struct {
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
+    int probcut, pc_depth, pc_margin, pc_red, pc_moves;   // ProbCut: 静かな節点で上位 pc_moves 手を pc_red 浅く beta+pc_margin の窓で読み、超えたら切る
     int def_scale;  // 手の並べ方の守り (相手の点) の重み /64
     int lmr_tact;   // >0: 戦術的な手 (四・三三・相手の活三への受けを除く) も searched >= lmr_tact なら 1 手浅く読む (切れなければ読み直す)
     int ttfirst;    // 1 = 置換表の手を手の生成の前に読み、切れなければ生成する (段階的な手の生成。速さだけ)
@@ -300,7 +301,7 @@ static struct {
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
     .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .mcp = 0, .mcp_mul = 100, .mcp_tact = 0, .mcp_pv = 0, .fut = 0, .fut_margin = 250, .fut_depth = 99, .razor = 0, .razor_margin = 100, .razor_depth = 2, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
-    .def_scale = 52, .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
+    .probcut = 0, .pc_depth = 5, .pc_margin = 300, .pc_red = 3, .pc_moves = 3, .def_scale = 52, .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
     .vz = 0, .vz_depth = 4, .vz_nodes = 2000, .vz_keep = P4_BLOCK3, .vz_pv = 1, .vz_root = 0, .vz_root_nodes = 20000, .vz_tact = 0,
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
@@ -418,6 +419,11 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "ttfirst")) sp.ttfirst = (int)v;
     else if (!strcmp(name, "lmr_tact")) sp.lmr_tact = (int)v;
     else if (!strcmp(name, "def_scale")) sp.def_scale = (int)v;
+    else if (!strcmp(name, "probcut")) sp.probcut = (int)v;
+    else if (!strcmp(name, "pc_depth")) sp.pc_depth = (int)v;
+    else if (!strcmp(name, "pc_margin")) sp.pc_margin = (int)v;
+    else if (!strcmp(name, "pc_red")) sp.pc_red = (int)v;
+    else if (!strcmp(name, "pc_moves")) sp.pc_moves = (int)v;
     else if (!strcmp(name, "tfut_margin")) sp.tfut_margin = (int)v;
     else if (!strcmp(name, "vz_depth")) sp.vz_depth = (int)v;
     else if (!strcmp(name, "vz_nodes")) sp.vz_nodes = (int)v;
@@ -841,6 +847,25 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         board_pass(b);
         if (c->stop) return 0;
         if (v >= beta) { nmp_stat[3]++; return v >= SCORE_WIN_MIN ? beta : v; }
+    }
+    // ProbCut: 相手の脅威がない節点では、上位の数手を浅く (pc_red 手少なく) beta + pc_margin の窓で読み、
+    // それを超えたら深く読んでも beta を超えるとみて切る (2 段まとめて浅く読む可変深度)
+    if (sp.probcut && !is_pv && !qmode && !op_threat && !tzon && depth >= sp.pc_depth && beta > -SCORE_WIN_MIN &&
+        beta + sp.pc_margin < SCORE_WIN_MIN) {
+        int rb = beta + sp.pc_margin, tries = 0;
+        Move pl[MAX_MOVES];
+        int pn = gen_moves(c, pl, me, op, 0, ttmove, ply, 0, 0);
+        for (int i = 0; i < pn && tries < sp.pc_moves; i++) {
+            pick_move(pl, i, pn);
+            int q = pl[i].pos;
+            if (restricted(b, me) && board_is_forbidden(b, q)) continue;
+            tries++;
+            board_move(b, q);
+            int v = -pvs(c, -rb, -rb + 1, depth - 1 - sp.pc_red, ply + 1, 0);
+            board_undo(b);
+            if (c->stop) return 0;
+            if (v >= rb) return v;
+        }
     }
 
     // 相手の活三を受ける節点: 自分に VCF があれば勝ち。なければ、受けにならない自分のただの四 (四三でなく、
