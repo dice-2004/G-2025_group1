@@ -278,6 +278,7 @@ static struct {
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
+    int qpot, qpot_depth, qpot_w, qpot_tact;   // 静かな手の脅威の材料 (打った後の自分の三・四の点の増え + 相手の三・四の点の減り) で並べ替える。qpot_tact 以上なら戦術的な手に
     int probcut, pc_depth, pc_margin, pc_red, pc_moves;   // ProbCut: 静かな節点で上位 pc_moves 手を pc_red 浅く beta+pc_margin の窓で読み、超えたら切る
     int def_scale;  // 手の並べ方の守り (相手の点) の重み /64
     int lmr_tact;   // >0: 戦術的な手 (四・三三・相手の活三への受けを除く) も searched >= lmr_tact なら 1 手浅く読む (切れなければ読み直す)
@@ -302,7 +303,7 @@ static struct {
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
     .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .mcp = 0, .mcp_mul = 100, .mcp_tact = 0, .mcp_pv = 0, .fut = 0, .fut_margin = 250, .fut_depth = 99, .razor = 0, .razor_margin = 100, .razor_depth = 2, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
-    .probcut = 0, .pc_depth = 5, .pc_margin = 300, .pc_red = 3, .pc_moves = 3, .def_scale = 52, .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
+    .qpot = 0, .qpot_depth = 3, .qpot_w = 1000, .qpot_tact = 99, .probcut = 0, .pc_depth = 5, .pc_margin = 300, .pc_red = 3, .pc_moves = 3, .def_scale = 52, .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
     .vz = 0, .vz_depth = 4, .vz_nodes = 2000, .vz_keep = P4_BLOCK3, .vz_pv = 1, .vz_root = 0, .vz_root_nodes = 20000, .vz_tact = 0,
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
@@ -421,6 +422,10 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "lmr_tact")) sp.lmr_tact = (int)v;
     else if (!strcmp(name, "def_scale")) sp.def_scale = (int)v;
     else if (!strcmp(name, "probcut")) sp.probcut = (int)v;
+    else if (!strcmp(name, "qpot")) sp.qpot = (int)v;
+    else if (!strcmp(name, "qpot_depth")) sp.qpot_depth = (int)v;
+    else if (!strcmp(name, "qpot_w")) sp.qpot_w = (int)v;
+    else if (!strcmp(name, "qpot_tact")) sp.qpot_tact = (int)v;
     else if (!strcmp(name, "pc_depth")) sp.pc_depth = (int)v;
     else if (!strcmp(name, "pc_margin")) sp.pc_margin = (int)v;
     else if (!strcmp(name, "pc_red")) sp.pc_red = (int)v;
@@ -686,6 +691,25 @@ static _Thread_local int tp_inside;   // 脅威の潜在力の補正を足して
 
 static _Thread_local int tpv_inside;  // 残り深さ 1 の局面の旗の補正を足している局面の中か
 
+// 脅威の材料: 三を作れる点と四を作れる点の数 (三三・四三の点は 2)
+static inline int threat_material(const Board *b, int c) {
+    const int16_t *k = b->p4cnt[c];
+    return k[P4_FLEX3] + k[P4_FLEX3_PLUS] + 2 * k[P4_FLEX3_2X] + k[P4_BLOCK4] + k[P4_BLOCK4_PLUS] + 2 * k[P4_BLOCK4_FLEX3];
+}
+// 静かな手 (どちらの三・四の点でもない) を、打った後の材料の増減 (自分の増え + 相手の減り) で並べ替える
+static void qpot_order(Board *b, Move *list, int n, int me, int op) {
+    int m0 = threat_material(b, me), o0 = threat_material(b, op);
+    for (int i = 0; i < n; i++) {
+        int q = list[i].pos;
+        if (list[i].tactical || b->pat4[me][q] >= P4_FLEX3 || b->pat4[op][q] >= P4_FLEX3) continue;
+        board_move(b, q);
+        int g = threat_material(b, me) - m0 + o0 - threat_material(b, op);
+        board_undo(b);
+        if (g > 0) list[i].score += g * sp.qpot_w;
+        if (g >= sp.qpot_tact) list[i].tactical = 1;
+    }
+}
+
 static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     Board *b = c->b;
     // tpv == 2: 葉ではなく残り深さ 1 の局面で 1 回だけ VCF の旗 (tp.c) を調べ、補正の分だけ窓をずらして読み、値に足す
@@ -898,6 +922,7 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         n = 1;
     } else
         n = gen_moves(c, list, me, op, op_threat, ttmove, ply, gmode, tzon);
+        if (sp.qpot && !op_threat && !qmode && depth >= sp.qpot_depth) qpot_order(b, list, n, me, op);
     c->drop4 = 0;
     if (vzon) {
         int m = 0;
@@ -1045,6 +1070,7 @@ moves_loop:
         ttstage = 2;
         c->drop4 = drop4;
         n = gen_moves(c, list, me, op, op_threat, ttmove, ply, gmode, tzon);
+        if (sp.qpot && !op_threat && !qmode && depth >= sp.qpot_depth) qpot_order(b, list, n, me, op);
         c->drop4 = 0;
         i0 = 0;
         for (int k = 0; k < n; k++)
