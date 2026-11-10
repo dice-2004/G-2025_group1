@@ -1,3 +1,4 @@
+/** @OnlyCurrentDoc */  // このスクリプトが付いているスプレッドシートだけを扱う (Google の承認もこの 1 枚だけになる)
 // G2 の対局データの記録先 (Google Apps Script のウェブアプリ)。GitHub Pages 版のページが棋譜を POST し、
 // 強化スレッドが GET で読み出す。Google スプレッドシートに 1 局 1 行で保存する (同じ対局 id は上書き)。
 // 設置手順は engine/web/README.md の「GitHub Pages 版の記録先」。秘密情報は使わない (URL を知っていれば誰でも書けて読める)。
