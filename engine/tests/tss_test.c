@@ -299,6 +299,69 @@ static int cmd_vzcheck(Rule rule, long nodes, long vnodes, int pad) {
     return 0;
 }
 
+
+// 静かな手の順序付けの物差し: "局面<TAB>Rapfi の手" の行ごとに、Rapfi の手が静かな手 (どちらの三・四の点でもない) なら、
+// 静かな候補の中での順位を、(A) G2 の点 (自分と相手のマスの値)、(B) 打った後の自分の三・四の点の増え、(C) B + 相手の三・四の点の減り、で数える
+#include "../src/eval.h"
+static int material(const Board *b, int c) {
+    const int16_t *k = b->p4cnt[c];
+    return k[P4_FLEX3] + k[P4_FLEX3_PLUS] + 2 * k[P4_FLEX3_2X] + k[P4_BLOCK4] + k[P4_BLOCK4_PLUS] + 2 * k[P4_BLOCK4_FLEX3];
+}
+static int cmd_potrank(Rule rule) {
+    static Board b;
+    char line[8192];
+    long n = 0, top1[6] = {0}, top3[6] = {0}, sumrank[6] = {0}, ncand = 0;
+    static const int RW[P_COUNT] = {0, 0, 0, 0, 1, 2, 2, 3, 0, 0, 0, 0};   // 規則の重み: 止め二 1、活二 2 (活三の点が増える)、止め三 2 (四の点)、活三 3
+    while (fgets(line, sizeof line, stdin)) {
+        char *tab = strchr(line, '\t');
+        if (!tab) continue;
+        *tab = 0;
+        int bx, by;
+        if (sscanf(tab + 1, "%d,%d", &bx, &by) != 2) continue;
+        board_init(&b, 15, &rule);
+        if (load_moves(&b, line) < 0) continue;
+        int me = board_side(&b), op = opp_color(me), best = to_pos(bx, by);
+        if (b.p4cnt[op][P4_FIVE] || b.p4cnt[op][P4_FLEX4] || b.p4cnt[me][P4_FIVE] || b.p4cnt[me][P4_FLEX4]) continue;
+        if (b.cell[best] != EMPTY || b.pat4[me][best] >= P4_FLEX3 || b.pat4[op][best] >= P4_FLEX3) continue;
+        int cand[NCELL], nc = 0, sc[6][NCELL];
+        int m0 = material(&b, me), o0 = material(&b, op);
+        for (int q = 0; q < NCELL; q++) {
+            if (b.cell[q] != EMPTY || !b.near[q] || b.pat4[me][q] >= P4_FLEX3 || b.pat4[op][q] >= P4_FLEX3) continue;
+            if (me == BLACK && rule_has_forbidden(&b.rule) && board_is_forbidden(&b, q)) continue;
+            int a = g_cell_value[me][board_pidx(&b, me, q)] + g_cell_value[op][board_pidx(&b, op, q)] * 52 / 64;
+            board_move(&b, q);
+            int dm = material(&b, me) - m0, dop = o0 - material(&b, op);
+            board_undo(&b);
+            sc[0][nc] = a;
+            sc[1][nc] = dm * 1000 + a / 10;
+            sc[2][nc] = (dm + dop) * 1000 + a / 10;
+            sc[3][nc] = a + 150 * dm + 150 * dop;
+            int rm = 0, ro = 0;
+            for (int d = 0; d < 4; d++) rm += RW[b.pat[me][q][d]], ro += RW[b.pat[op][q][d]];
+            sc[4][nc] = rm * 1000 + a / 10;
+            sc[5][nc] = (rm * 4 + ro * 3) * 1000 + a / 10;
+            cand[nc++] = q;
+        }
+        int bi = -1;
+        for (int i = 0; i < nc; i++) if (cand[i] == best) bi = i;
+        if (bi < 0) continue;
+        n++;
+        ncand += nc;
+        for (int k = 0; k < 6; k++) {
+            int r = 1;
+            for (int i = 0; i < nc; i++) if (sc[k][i] > sc[k][bi]) r++;
+            top1[k] += r == 1;
+            top3[k] += r <= 3;
+            sumrank[k] += r;
+        }
+    }
+    const char *nm[6] = {"G2 cell value", "own material gain", "own gain + opp loss", "value + 150*(gain+loss)", "rule pattern own", "rule pattern own+0.75opp"};
+    printf("quiet Rapfi moves %ld, avg candidates %.1f\n", n, n ? (double)ncand / n : 0);
+    for (int k = 0; k < 6; k++)
+        printf("  %-26s top1 %.3f top3 %.3f mean rank %.1f\n", nm[k], (double)top1[k] / n, (double)top3[k] / n, (double)sumrank[k] / n);
+    return 0;
+}
+
 static int cmd_defend(Rule rule, long nodes, int vct) {
     static Board b;
     char line[8192];
@@ -650,6 +713,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "tssib")) return cmd_tssib(rule, argc > 3 ? atoi(argv[3]) : 3000);
     if (!strcmp(argv[1], "l3")) return cmd_l3(rule, argc > 3 ? atol(argv[3]) : 100000, 0, argc > 4 ? atoi(argv[4]) : 0);
     if (!strcmp(argv[1], "l3opp")) return cmd_l3(rule, argc > 3 ? atol(argv[3]) : 100000, 1, argc > 4 ? atoi(argv[4]) : 0);
+    if (!strcmp(argv[1], "potrank")) return cmd_potrank(rule);
     if (!strcmp(argv[1], "vzcheck")) return cmd_vzcheck(rule, argc > 3 ? atol(argv[3]) : 2000, argc > 4 ? atol(argv[4]) : 200000, argc > 5 ? atoi(argv[5]) : 0);
     if (!strcmp(argv[1], "dfpnopp")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 1, argc > 4 ? atoi(argv[4]) : 0);
     if (argc < 4) return 2;

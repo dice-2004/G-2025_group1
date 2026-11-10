@@ -12,20 +12,29 @@ G2 エンジン (`engine/src`) を WebAssembly にして、ブラウザで対局
 ## GitHub Pages 版の記録先 (Google Apps Script)
 
 `collector/Code.gs` を Google スプレッドシートに付けたウェブアプリとして公開し、その URL を `site/config.js` の
-`G2_COLLECTOR_URL` に書く。秘密情報は使わない (URL は公開ページに載るので、誰でも書けて読める。中身は棋譜と思考の数字だけ)。
+`G2_COLLECTOR_URL` に書く (URL はページに載るので秘密ではない)。スプレッドシート自体は非公開のまま。
+スクリプトは `@OnlyCurrentDoc` で、触れるのはこのスプレッドシート 1 枚だけ。
+
+- 書き込み (POST、誰でも): ページが G2 の 6 手目以降の手ごとと終局時に送る (text/plain、応答は読まない)。シート `games` に 1 局 1 行、同じ対局 id は上書き。
+  弾くもの: 20 万字超、形の違うもの (盤外・重複・手番の食い違い・G2 の手に思考の情報がない・エンジン版の形・開始時刻が前後 1 日を外れる)、
+  全体で 1 分 120 回超、新しい対局が 1 時間 60 局超、1 局の上書き 150 回超、記録 2 万局超
+- 読み出し (GET、鍵が要る): `?key=<鍵>&since=<ISO 時刻>`。鍵はスクリプトのプロパティ `READ_KEY` (関数 `setup` で作られる。`resetKey` で作り直し)。
+  鍵が違えば何も返さない
+- 読み出しの手順: Claude のクラウド環境の環境変数 `G2_COLLECTOR_KEY` に鍵を入れておき (dice が設定)、
+  `python3 engine/web/fetch_games.py [--since <ISO 時刻>] [--out engine/web/games.jsonl]`。1 行 1 局の JSONL (`games.jsonl` はコミットしない)。
+  鍵はリポジトリ・メモリ・チャットに書かない
+- 残るリスク: ログインなしのページなので、形の正しい偽の棋譜は (上限の範囲で) 送れてしまう。読み出したデータは手がかりとして使い、
+  局面は G2・Rapfi で確かめ直す。止めたいときは Apps Script の「デプロイを管理」でアーカイブする
 
 設置 (dice が 1 回だけ):
 1. https://sheets.new で新しいスプレッドシートを作る
 2. 「拡張機能」→「Apps Script」。エディタの中身を `collector/Code.gs` に置き換えて保存
-3. 「デプロイ」→「新しいデプロイ」→ 種類「ウェブアプリ」、実行ユーザー「自分」、アクセス「全員」→ デプロイし、承認する
-4. 出てきた「ウェブアプリの URL」(`https://script.google.com/macros/s/.../exec`) を `site/config.js` に書く
+3. 上の関数の選択で `setup` を選んで「実行」し、承認する。実行ログに出た「読み出しの鍵」を、Claude のプロジェクト設定 → クラウド環境 →
+   環境変数に `G2_COLLECTOR_KEY=<鍵>` として入れる
+4. 「デプロイ」→「新しいデプロイ」→ 種類「ウェブアプリ」、実行ユーザー「自分」、アクセス「全員」→ デプロイ。
+   出てきた「ウェブアプリの URL」(`https://script.google.com/macros/s/.../exec`) を `site/config.js` に書く (Claude が行う)
 
-`Code.gs` を変えたときは、Apps Script で「デプロイを管理」→ 編集 → 新しいバージョン、で同じ URL のまま更新する。
-
-- 書き込み: ページが G2 の 6 手目以降の手ごとと終局時に POST (text/plain、応答は読まない)。シート `games` に 1 局 1 行、同じ対局 id は上書き
-- 読み出し: `python3 engine/web/fetch_games.py [--since <ISO 時刻>] [--out engine/web/games.jsonl]` (GET `?since=`)。1 行 1 局の JSONL。
-  `games.jsonl` はコミットしない (.gitignore)
-- 各局に `recorded_at` (記録先が最後に受けた時刻) が付く。形式は下の「1 局の形式」と同じ
+`Code.gs` を変えたときは、貼り直して保存し、「デプロイを管理」→ 編集 → バージョン「新しいバージョン」で同じ URL のまま更新する。
 
 ## アーティファクトの更新手順
 
