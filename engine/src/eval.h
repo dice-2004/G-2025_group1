@@ -49,6 +49,9 @@ typedef struct {
     // 脅威の速さの比べ (race、1 = 使う): 手番側の段階 m、相手の段階 o (eval_threat_level) で、
     // o >= m (手番側の脅威が同じか速い。手番側が先に打てる) なら + race_own[m]、o < m (相手が速い) なら − race_opp[o]
     int race;
+    // 三・四を作れる点の数 (上限 8) の重み: 自分の三の点 / 相手の三の点 / 自分の四の点 / 相手の四の点 (足す値、相手側は引く値)。
+    // Rapfi の評価との差を見ると、G2 は相手の三の点 (ふさぐべき伸びる方向) を軽く、自分の四の点 (止め三) を重く見ている
+    int cnt_f3_me, cnt_f3_op, cnt_b4_me, cnt_b4_op;
     int race_own[EVAL_RACE_LEVELS], race_opp[EVAL_RACE_LEVELS];
 } EvalParams;
 
