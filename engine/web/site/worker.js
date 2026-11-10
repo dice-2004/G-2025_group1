@@ -1,12 +1,11 @@
 // 思考用の Worker。盤の状態は wasm の中に持ち、UI からの命令を順に処理する
 const V = self.location.search;   // ?v=<ビルド> (キャッシュよけ)
-importScripts('wasi.js' + V);
+if (typeof G2Wasi === 'undefined') importScripts('wasi.js' + V);   // 1 ファイル版では前に連結済み
 
-let g = null;
-const ready = (async () => {
-  const res = await fetch('g2.wasm' + V);
-  g = await G2Wasi.loadG2(await res.arrayBuffer(), () => {});
-})();
+let g = null, ready = null;
+function boot(bytes) {
+  ready = (async () => { g = await G2Wasi.loadG2(await bytes, () => {}); })();
+}
 
 function state(size) {
   // 手番が黒のときの禁じ手 (連珠のみ) と、勝負の結果
@@ -17,6 +16,8 @@ function state(size) {
 
 self.onmessage = async (ev) => {
   const m = ev.data;
+  if (m.type === 'init') { boot(m.bytes); return; }   // 1 ファイル版: wasm の中身を受け取る
+  if (!ready) boot(fetch('g2.wasm' + V).then((r) => r.arrayBuffer()));
   try {
     await ready;
     if (m.type === 'new') {

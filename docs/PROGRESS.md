@@ -13,7 +13,7 @@
 | legacy の強さ | 連珠・1秒/手で Elo +883 (random=0)。1手読み貪欲ボットに 29.5/80、Rapfi 深さ2制限に 0/80 |
 | 開局ブック | 黒白とも 6 手目まで (連珠 150・自由 133 局面、2026-11-09 に縮小)。gomocalc 500ms 黒番 連珠 2-8 (深いブック 6-4、なし 1-9)・自由 7-3。[詳細](./benchmarks/2026-10-27_book.md) |
 | 新しい探索 (2026-11-09) | ルートで df-pn の VCT (dfpn.c、時間の 20%) の後に αβ の脅威探索 (ts.c、静かな「パスしたら VCF」の脅威を含む、時間の 20%) で自分の勝ちを探す (どちらも既定)。gomocalc 500ms 連珠 黒番 8-12 → 11-9、白番は 0-20 のまま。VCF は軽い盤 fvcf.c (結果は vcf.c と一致、VCF 1.5〜1.85 倍・ts 1.55 倍)。既定無効の試作: 脅威圏 tz.c、λ3 l3.c、反証の圏 rz.c、本探索の中の ts。[詳細](./benchmarks/2026-11-09_novel_search.md) |
-| ブラウザ版 (2026-11-10) | G2 を WebAssembly にして GitHub Pages で公開する仕組み (`engine/web`、`claude/dev` への push で自動ビルド・確認・公開)。https://dice-2004.github.io/G-2025_group1/ (Pages の設定待ち) |
+| ブラウザ版 (2026-11-10) | G2 を WebAssembly にして GitHub Pages で公開する仕組み (`engine/web`、`claude/dev` への push で自動ビルド・確認・公開)。https://dice-2004.github.io/G-2025_group1/ (Pages の設定待ち)。アーティファクト版 https://claude.ai/artifact/CZdJbuBNsMpSExkEvfJ9uc (手動更新) |
 | 次の目標 | rapfi-n100k に勝ち越す (評価の再調整・探索の枝刈り・VCT の使い方) |
 
 ## 2026-11-10 ブラウザで遊べる G2 と、その自動公開 (公開スレッド)
@@ -29,7 +29,10 @@
 
 **結果**
 - wasm 1.36MB。同じ局面・1 秒で、手元のネイティブ 104 万 nps に対し wasm (Node) 76 万 nps (約 73%)、Chromium でも 70〜75 万 nps
-- 公開には Pages の設定 (Source を GitHub Actions に、github-pages 環境に claude/dev を許可) が要る。dice に依頼済み
+- 公開には Pages の設定 (Source を GitHub Actions に、github-pages 環境に claude/dev を許可) が要る。dice に依頼済み。
+  Actions の初回実行はビルドと動作確認が成功し、公開だけ Pages 未有効で失敗 (想定どおり)
+- claude.ai のアーティファクト版も公開した (`engine/web/make_artifact.py` で 1 ファイルにまとめる。wasm を base64 で埋め込み 1.8MB)。
+  https://claude.ai/artifact/CZdJbuBNsMpSExkEvfJ9uc 。自動更新されないので節目ごとに作り直す
 
 **次にやること**
 - Pages の設定後、Actions の公開が通るか確かめる

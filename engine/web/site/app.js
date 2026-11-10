@@ -31,7 +31,14 @@
   }
 
   function startWorker() {
-    worker = new Worker('worker.js?v=' + encodeURIComponent(BUILD));
+    const inline = window.G2_INLINE;   // 1 ファイル版 (make_artifact.py) では Worker と wasm が埋め込まれている
+    if (inline) {
+      worker = new Worker(URL.createObjectURL(new Blob([inline.worker], { type: 'text/javascript' })));
+      const bytes = Uint8Array.from(atob(inline.wasm), (c) => c.charCodeAt(0));
+      worker.postMessage({ type: 'init', bytes: bytes.buffer }, [bytes.buffer]);
+    } else {
+      worker = new Worker('worker.js?v=' + encodeURIComponent(BUILD));
+    }
     worker.onmessage = (ev) => {
       const m = ev.data, p = pending.get(m.id);
       if (!p) return;
