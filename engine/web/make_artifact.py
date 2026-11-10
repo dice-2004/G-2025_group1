@@ -19,6 +19,7 @@ inline = {
     'wasm': base64.b64encode(open(os.path.join(site, 'g2.wasm'), 'rb').read()).decode(),
 }
 app = read('app.js').replace('</script', '<\\/script')
+body = re.sub(r'<script src="config\.js[^"]*"></script>\s*', '', body)
 body = re.sub(r'<script src="app\.js[^"]*"></script>',
               lambda _: '<script>window.G2_INLINE = ' + json.dumps(inline).replace('</', '<\\/') + ';</script>\n<script>\n' + app + '\n</script>', body)
 out = head.strip() + '\n' + body.strip() + '\n'

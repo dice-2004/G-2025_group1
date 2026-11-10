@@ -3,10 +3,29 @@
 G2 エンジン (`engine/src`) を WebAssembly にして、ブラウザで対局できるようにした静的サイト。
 エンジンのコードは変えず、`g2_wasm.c` (盤の操作と思考を関数として出す入口) を足してビルドしている。
 
-- 公開 (本命): claude.ai のアーティファクト https://claude.ai/artifact/CZdJbuBNsMpSExkEvfJ9uc (リンクを知っていれば開ける)。
-  1 ファイル版 (wasm を base64 で埋め込み) を `make_artifact.py` で作り、Artifact ツールで同じ URL に公開し直す。自動では更新されないので節目ごとに更新する
-- CI: `claude/dev` への push と PR で、GitHub Actions (`.github/workflows/pages.yml`) が wasm をビルドして Node で動作確認する。
-  GitHub Pages への公開はリポジトリ変数 `PAGES_ENABLED=true` のときだけ (dice の判断で今は使わない)
+- 公開 (予定の本命): GitHub Pages https://dice-2004.github.io/G-2025_group1/ 。`claude/dev` への push で GitHub Actions
+  (`.github/workflows/pages.yml`) がビルド → Node で動作確認 → 公開する (`engine/web/pages.enabled` があるときだけ公開。PR はビルドと確認だけ)。
+  対局データは Google Apps Script の記録先 (`collector/Code.gs`) に送る。組織外の人の対局も記録できる
+- 公開 (今): claude.ai のアーティファクト https://claude.ai/artifact/CZdJbuBNsMpSExkEvfJ9uc 。Pages 版の公開と記録を確かめたら消してよい (dice 2026-11-10)。
+  対局データはアーティファクトの db に記録するが、組織外の人の対局は記録できない
+
+## GitHub Pages 版の記録先 (Google Apps Script)
+
+`collector/Code.gs` を Google スプレッドシートに付けたウェブアプリとして公開し、その URL を `site/config.js` の
+`G2_COLLECTOR_URL` に書く。秘密情報は使わない (URL は公開ページに載るので、誰でも書けて読める。中身は棋譜と思考の数字だけ)。
+
+設置 (dice が 1 回だけ):
+1. https://sheets.new で新しいスプレッドシートを作る
+2. 「拡張機能」→「Apps Script」。エディタの中身を `collector/Code.gs` に置き換えて保存
+3. 「デプロイ」→「新しいデプロイ」→ 種類「ウェブアプリ」、実行ユーザー「自分」、アクセス「全員」→ デプロイし、承認する
+4. 出てきた「ウェブアプリの URL」(`https://script.google.com/macros/s/.../exec`) を `site/config.js` に書く
+
+`Code.gs` を変えたときは、Apps Script で「デプロイを管理」→ 編集 → 新しいバージョン、で同じ URL のまま更新する。
+
+- 書き込み: ページが G2 の 6 手目以降の手ごとと終局時に POST (text/plain、応答は読まない)。シート `games` に 1 局 1 行、同じ対局 id は上書き
+- 読み出し: `python3 engine/web/fetch_games.py [--since <ISO 時刻>] [--out engine/web/games.jsonl]` (GET `?since=`)。1 行 1 局の JSONL。
+  `games.jsonl` はコミットしない (.gitignore)
+- 各局に `recorded_at` (記録先が最後に受けた時刻) が付く。形式は下の「1 局の形式」と同じ
 
 ## アーティファクトの更新手順
 
@@ -16,6 +35,8 @@ G2 エンジン (`engine/src`) を WebAssembly にして、ブラウザで対局
 4. Artifact ツールで `url: https://claude.ai/artifact/CZdJbuBNsMpSExkEvfJ9uc` に公開。`capabilities` は省略すると前の宣言 (下の db・user) を引き継ぐ
 
 ## 対局データ (自動収集)
+
+(この節はアーティファクト版の db の話。Pages 版は上の記録先)
 
 アーティファクト版は、対局の棋譜と G2 の思考の数字を、アーティファクトの db (claude.ai のアーティファクト内の保存領域) に自動で記録する。
 ページには「対局データ（棋譜と G2 の思考の数字）を G2 の改善に使います。」と表示する。名前・メールなどの個人情報は記録しない
@@ -63,6 +84,9 @@ Claude の `ArtifactData` ツールで、`url` に上のアーティファクト
 |---|---|
 | `g2_wasm.c` | wasm の入口 (`g2_new_game` / `g2_play` / `g2_undo` / `g2_forbidden` / `g2_result` / `g2_think` / `g2_info` / `g2_pv` / `g2_reason` / `g2_version`)。`g2_version` はビルド元のコミット (`build.sh` が `-DG2_COMMIT` で埋め込む) |
 | `build.sh` | `zig cc -target wasm32-wasi` でビルド (`site/g2.wasm`)。wasm32 は long が 32 ビットなので、ビルド用の写しで `1L << 40` を置き換える |
+| `collector/Code.gs` | Pages 版の対局データの記録先 (Google Apps Script) |
+| `fetch_games.py` | 記録先から対局を読み出して JSONL に保存 |
+| `site/config.js` | 記録先の URL (`G2_COLLECTOR_URL`) |
 | `smoke_test.js` | CI の動作確認 (3 ルールで合法手を返す・五を打つ・連珠の三三を禁じ手と判定する) |
 | `make_artifact.py` | `site/` を 1 つの HTML にまとめる (アーティファクト用) |
 | `site/` | 公開する静的サイト。`index.html` + `app.js` (盤面 UI) + `worker.js` (Web Worker で思考) + `wasi.js` (最小の WASI) |

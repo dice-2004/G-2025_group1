@@ -1,8 +1,8 @@
 # G2 のブラウザ版 (engine/web) の CI/CD
 #  - claude/dev への push・pull request: WASM をビルド → Node で動作確認
-#  - GitHub Pages への公開は、リポジトリ変数 PAGES_ENABLED が 'true' のときだけ (2026-11-10 時点では使わない。
-#    本命は claude.ai のアーティファクト版: engine/web/README.md)
-name: Web (WASM build)
+#  - claude/dev への push では、engine/web/pages.enabled があれば GitHub Pages に公開する
+#    (Pages の設定が済むまではこのファイルを置かない。設定は engine/web/README.md)
+name: Web (build + GitHub Pages)
 
 on:
   push:
@@ -28,6 +28,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.flag.outputs.deploy }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -46,12 +48,15 @@ jobs:
         run: |
           v="$(date -u +%Y%m%d)-$(echo "$GITHUB_SHA" | cut -c1-7)"
           sed -i "s/__BUILD__/$v/g" engine/web/site/index.html
+      - id: flag
+        name: Pages に公開するか
+        run: echo "deploy=$([ -f engine/web/pages.enabled ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-pages-artifact@v4
         with:
           path: engine/web/site
 
   deploy:
-    if: github.event_name != 'pull_request' && vars.PAGES_ENABLED == 'true'
+    if: github.event_name != 'pull_request' && needs.build.outputs.deploy == 'true'
     needs: build
     runs-on: ubuntu-latest
     permissions:

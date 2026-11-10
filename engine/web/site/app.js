@@ -278,15 +278,32 @@
     };
   }
 
-  // 保存先: claude.ai のアーティファクトの db (games/<あなたの id>/g/<対局 id>)。外部には送らない
+  // 保存先 (どちらも外へは棋譜と思考の数字だけを送る。個人情報は送らない):
+  //  - GitHub Pages 版: config.js の G2_COLLECTOR_URL (Google Apps Script のウェブアプリ、collector/Code.gs) に POST
+  //  - claude.ai のアーティファクト版: アーティファクトの db (games/<利用者 id>/g/<対局 id>)
   const store = (async () => {
+    const url = window.G2_COLLECTOR_URL;
+    if (url && !window.G2_INLINE) {
+      return {
+        async save(data) {
+          const body = JSON.stringify(data);
+          // text/plain の単純な POST (CORS の事前確認なし)。応答は読まない
+          await fetch(url, { method: 'POST', mode: 'no-cors', body, keepalive: body.length < 60000 });
+        },
+      };
+    }
     try {
       if (!window.claude || !window.claude.use) return null;
       const [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]);
       if (!db || !user) return null;
       const uid = await user.id();
       if (!uid) return null;
-      return { db, uid };
+      return {
+        async save(data, first) {
+          await db.doc(`games/${uid}/g/${data.id}`).set(data);
+          if (first) await db.doc(`games/${uid}`).set({ updated_at: data.ended_at, last_game: data.id });
+        },
+      };
     } catch (e) { return null; }
   })();
   let saving = Promise.resolve();
@@ -303,10 +320,9 @@
       const st = await store;
       if (!st) return;
       try {
-        await st.db.doc(`games/${st.uid}/g/${data.id}`).set(data);
-        if (first) await st.db.doc(`games/${st.uid}`).set({ updated_at: data.ended_at, last_game: data.id });
+        await st.save(data, first);
       } catch (e) {
-        rec.indexed = !first && rec.indexed;   // 記録できない閲覧 (権限なし等) では黙って諦める
+        if (first) rec.indexed = false;   // 記録できない閲覧 (権限なし・通信失敗) では黙って諦める
       }
     });
   }
