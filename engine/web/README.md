@@ -23,7 +23,9 @@ G2 エンジン (`engine/src`) を WebAssembly にして、ブラウザで対局
 
 - 記録する時: G2 が 6 手目以降の手を打つたびと、終局したとき (同じ対局は同じ文書に上書き)。途中で閉じた対局も最後の G2 の手まで残る
 - 記録できる人: db に書けるのは Contributor 以上 (アーティファクトの持ち主と、組織のメンバー)。
-  組織の外からリンクで開いた人・サインインしていない人の対局は記録されない (claude.ai の仕組み上の制限)
+  組織の外からリンクで開いた人・サインインしていない人の対局は記録されない (claude.ai の仕組み上の制限: db は読むだけ、room にはつながれず、
+  アーティファクトのページは他のホストへの通信を止められている)。組織外の対局も集めたい場合の案は、GitHub Pages 版から外部の記録先
+  (Cloudflare Workers・Supabase など) に送ること (Pages の有効化と記録先のアカウントが dice に必要。未着手)
 - 宣言 (`capabilities`):
   `{"db": {"rules": [{"path": "games", "read": "admin", "write": "admin"}, {"path": "games/{self}", "read": "interact", "write": "interact"}]}, "user": {}}`
   (各自は自分の `games/<id>/...` だけ書ける。全員分を読めるのは持ち主と Editor)
