@@ -25,6 +25,8 @@
 #include "tz.h"
 #include "vcf.h"
 
+#define PH_CLASSES 1365   // 12 種の線パターン 4 つの重複組合せ
+
 // ---------------------------------------------------------------- 置換表
 
 // 複数スレッドで共有する。ロックは使わず、key には「局面のハッシュ ^ data」を入れて、
@@ -142,6 +144,7 @@ typedef struct {
     int killer[MAX_PLY][2];
     int pv[MAX_PLY][MAX_PLY];
     int pvlen[MAX_PLY];
+    int ph[3][2][PH_CLASSES];   // パターン履歴: [手番の色][0 = 自分の形、1 = 相手の形][4 方向の線パターンの組 (並べ替えて同じものは 1 つ)]
     int history[3][NCELL];  // 前の手の情報を少し残す (search_root で 1/4 に)
     uint32_t tzmark[NCELL]; // 脅威圏の点の印 (== tzgen なら圏内)。gen_moves の間だけ使う
     uint32_t tzgen;
@@ -163,7 +166,7 @@ void search_set_threads(int n) {
 // 全体を消すと 128MB の確保直後は数百 ms かかる (ページの割り当て) ので、ルールや評価が変わった時だけ消す
 void search_new_game(void) {
     tt_alloc();
-    for (int i = 0; i < MAX_THREADS; i++) memset(ctxs[i].history, 0, sizeof ctxs[i].history);
+    for (int i = 0; i < MAX_THREADS; i++) memset(ctxs[i].history, 0, sizeof ctxs[i].history), memset(ctxs[i].ph, 0, sizeof ctxs[i].ph);
 }
 
 void search_clear_tt(void) {
@@ -278,6 +281,8 @@ static struct {
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
+    int ph, ph_malus;   // パターン履歴 (探索中に覚える、形ごとの beta cut の成績) を手の並べ方に足す重み (/64、0 = 使わない)。ph_malus = 1 で cut した手より前に読んだ手を減点
+    int l3x, l3x_depth, l3x_min, l3x_top, l3x_ext, l3x_w;   // 準備手: 静かな手のうち材料の増え上位 l3x_top 手を打って、相手がパスしたら VCT (dfpn l3x 節点) があるか調べる。あれば戦術的な手にし、l3x_ext なら延長
     int qpot, qpot_depth, qpot_w, qpot_tact;   // 静かな手の脅威の材料 (打った後の自分の三・四の点の増え + 相手の三・四の点の減り) で並べ替える。qpot_tact 以上なら戦術的な手に
     int probcut, pc_depth, pc_margin, pc_red, pc_moves;   // ProbCut: 静かな節点で上位 pc_moves 手を pc_red 浅く beta+pc_margin の窓で読み、超えたら切る
     int def_scale;  // 手の並べ方の守り (相手の点) の重み /64
@@ -303,6 +308,8 @@ static struct {
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
     .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .mcp = 0, .mcp_mul = 100, .mcp_tact = 0, .mcp_pv = 0, .fut = 0, .fut_margin = 250, .fut_depth = 99, .razor = 0, .razor_margin = 100, .razor_depth = 2, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
+    .ph = 0, .ph_malus = 1,
+    .l3x = 0, .l3x_depth = 3, .l3x_min = 1, .l3x_top = 4, .l3x_ext = 1, .l3x_w = 1 << 20,
     .qpot = 0, .qpot_depth = 3, .qpot_w = 1000, .qpot_tact = 99, .probcut = 0, .pc_depth = 5, .pc_margin = 300, .pc_red = 3, .pc_moves = 3, .def_scale = 52, .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
     .vz = 0, .vz_depth = 4, .vz_nodes = 2000, .vz_keep = P4_BLOCK3, .vz_pv = 1, .vz_root = 0, .vz_root_nodes = 20000, .vz_tact = 0,
     .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
@@ -422,6 +429,14 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "lmr_tact")) sp.lmr_tact = (int)v;
     else if (!strcmp(name, "def_scale")) sp.def_scale = (int)v;
     else if (!strcmp(name, "probcut")) sp.probcut = (int)v;
+    else if (!strcmp(name, "ph")) sp.ph = (int)v;
+    else if (!strcmp(name, "ph_malus")) sp.ph_malus = (int)v;
+    else if (!strcmp(name, "l3x")) sp.l3x = (int)v;
+    else if (!strcmp(name, "l3x_depth")) sp.l3x_depth = (int)v;
+    else if (!strcmp(name, "l3x_min")) sp.l3x_min = (int)v;
+    else if (!strcmp(name, "l3x_top")) sp.l3x_top = (int)v;
+    else if (!strcmp(name, "l3x_ext")) sp.l3x_ext = (int)v;
+    else if (!strcmp(name, "l3x_w")) sp.l3x_w = (int)v;
     else if (!strcmp(name, "qpot")) sp.qpot = (int)v;
     else if (!strcmp(name, "qpot_depth")) sp.qpot_depth = (int)v;
     else if (!strcmp(name, "qpot_w")) sp.qpot_w = (int)v;
@@ -499,6 +514,25 @@ typedef struct {
 
 // 手の並べ方の重み (policy_data.c、Rapfi の最善手に合わせた線パターン・Pattern4 の点) を pattern_index で引ける形に広げたもの。
 // [手番の色][0 = 自分のパターン、1 = 相手のパターン][pattern_index]。g_p4_table はルールで変わるので search_root で作り直す
+// パターン履歴の組の番号: 4 方向の線パターンを並べ替えて同じになる組に同じ番号 (1365 通り)
+static uint16_t ph_class[PIDX_COUNT];
+static int ph_ok;
+static void ph_init(void) {
+    static int16_t id[PIDX_COUNT];
+    int n = 0;
+    memset(id, -1, sizeof id);
+    for (int i = 0; i < PIDX_COUNT; i++) {
+        uint8_t p[4] = {(uint8_t)(i / (P_COUNT * P_COUNT * P_COUNT)), (uint8_t)(i / (P_COUNT * P_COUNT) % P_COUNT), (uint8_t)(i / P_COUNT % P_COUNT), (uint8_t)(i % P_COUNT)};
+        for (int a = 0; a < 4; a++)
+            for (int k = a + 1; k < 4; k++)
+                if (p[k] < p[a]) { uint8_t t = p[a]; p[a] = p[k]; p[k] = t; }
+        int key = pattern_index(p);
+        if (id[key] < 0) id[key] = (int16_t)n++;
+        ph_class[i] = (uint16_t)id[key];
+    }
+    ph_ok = 1;
+}
+static inline void ph_add(int *h, int bonus) { *h += bonus - *h * (bonus < 0 ? -bonus : bonus) / 16384; }
 static int16_t pol_tab[3][2][PIDX_COUNT];
 static int pol_ok, pol_rule;
 static void policy_init(void) {
@@ -559,6 +593,9 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
     x1 = x1 + 2 < b->size ? x1 + 2 : b->size - 1, y1 = y1 + 2 < b->size ? y1 + 2 : b->size - 1;
     const int16_t *vme = g_cell_value[me], *vop = g_cell_value[op];
     const int *hist = c->history[me];
+    int phon = sp.ph && mode != 1;
+    const int (*ph)[PH_CLASSES] = c->ph[me];
+    if (phon && !ph_ok) ph_init();
     int polon = sp.policy && b->nmoves >= 2;
     int lastm = polon ? b->moves[b->nmoves - 1] : 0, mylast = polon ? b->moves[b->nmoves - 2] : 0;
     int defl = op_threat && sp.def_line;
@@ -601,6 +638,7 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
             }
             out[n].value = s;
             s = s * 16 + hist[q] / 64;
+            if (phon) s += (ph[0][ph_class[board_pidx(b, me, q)]] + ph[1][ph_class[board_pidx(b, op, q)]]) * sp.ph / 64;
             if (q == ttmove) s += 1 << 28;
             else if (k && (q == k[0] || q == k[1])) s += 1 << 12;
             out[n].pos = q;
@@ -695,6 +733,41 @@ static _Thread_local int tpv_inside;  // 残り深さ 1 の局面の旗の補正
 static inline int threat_material(const Board *b, int c) {
     const int16_t *k = b->p4cnt[c];
     return k[P4_FLEX3] + k[P4_FLEX3_PLUS] + 2 * k[P4_FLEX3_2X] + k[P4_BLOCK4] + k[P4_BLOCK4_PLUS] + 2 * k[P4_BLOCK4_FLEX3];
+}
+long l3x_stat[4];   // 準備手: 節点、調べた手、VCT の脅威になった手、延長した手
+// 準備手の印: 静かな手 (どちらの三・四の点でもない) のうち、材料の増えが l3x_min 以上で上位 l3x_top 手を打ち、
+// 相手がパスしたら自分に VCT があるか (dfpn) を調べる。あれば tactical = 2 (枝刈り・LMR しない、延長の印) にして先に読む
+static void prep_mark(Board *b, Move *list, int n, int me, int op) {
+    int m0 = threat_material(b, me), o0 = threat_material(b, op);
+    int idx[MAX_MOVES], gain[MAX_MOVES], k = 0;
+    for (int i = 0; i < n; i++) {
+        int q = list[i].pos;
+        if (list[i].tactical || b->pat4[me][q] >= P4_FLEX3 || b->pat4[op][q] >= P4_FLEX3) continue;
+        board_move(b, q);
+        int g = threat_material(b, me) - m0 + o0 - threat_material(b, op);
+        board_undo(b);
+        if (g < sp.l3x_min) continue;
+        int j = k++;
+        while (j > 0 && gain[j - 1] < g) { gain[j] = gain[j - 1]; idx[j] = idx[j - 1]; j--; }
+        gain[j] = g, idx[j] = i;
+    }
+    if (k == 0) return;
+    l3x_stat[0]++;
+    if (k > sp.l3x_top) k = sp.l3x_top;
+    for (int t = 0; t < k; t++) {
+        int i = idx[t];
+        if (restricted(b, me) && board_is_forbidden(b, list[i].pos)) continue;
+        DfpnResult r;
+        board_move(b, list[i].pos);
+        l3x_stat[1]++;
+        int w = dfpn_vct(b, me, sp.l3x, 0, &r);
+        board_undo(b);
+        if (w) {
+            l3x_stat[2]++;
+            list[i].tactical = 2;
+            list[i].score += sp.l3x_w;
+        }
+    }
 }
 // 静かな手 (どちらの三・四の点でもない) を、打った後の材料の増減 (自分の増え + 相手の減り) で並べ替える
 static void qpot_order(Board *b, Move *list, int n, int me, int op) {
@@ -922,7 +995,8 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         n = 1;
     } else
         n = gen_moves(c, list, me, op, op_threat, ttmove, ply, gmode, tzon);
-        if (sp.qpot && !op_threat && !qmode && depth >= sp.qpot_depth) qpot_order(b, list, n, me, op);
+    if (sp.qpot && !op_threat && !qmode && depth >= sp.qpot_depth) qpot_order(b, list, n, me, op);
+    if (sp.l3x && !op_threat && !qmode && !tzon && depth >= sp.l3x_depth) prep_mark(b, list, n, me, op);
     c->drop4 = 0;
     if (vzon) {
         int m = 0;
@@ -971,7 +1045,7 @@ moves_loop:
                     !rz_relevant(ply, q, sp.rz_rad, sp.rz_lines);
         if (rzout && sp.rz == 2) continue;
 
-        int a4 = b->pat4[me][q];
+        int a4 = b->pat4[me][q], prep = list[i].tactical == 2;
         board_move(b, q);
         int v, nd = depth - 1;
         // 活三を作る手 (相手は受けるしかない) の延長
@@ -985,6 +1059,7 @@ moves_loop:
         }
         if (ply + 1 < MAX_PLY) c->xhalf[ply + 1] = (uint8_t)carry;
         if (sp.ext_four && !qmode && a4 >= P4_BLOCK4 && a4 <= P4_BLOCK4_FLEX3 && ext_ok) nd = depth;
+        if (prep && sp.l3x_ext && ext_ok) nd = depth, l3x_stat[3]++;
         if (tzon && sp.tz_ext && ext_ok) nd = depth;
         if (searched == 0) {
             v = -pvs(c, -beta, -alpha, nd, ply + 1, is_pv);
@@ -1053,6 +1128,19 @@ moves_loop:
                         c->killer[ply][1] = c->killer[ply][0];
                         c->killer[ply][0] = q;
                     }
+                    if (sp.ph && !qmode) {
+                        // パターン履歴: cut した手の形 (自分・相手) に加点、その前に読んで cut しなかった手の形に減点
+                        int bonus = depth * depth * 16 < 1024 ? depth * depth * 16 : 1024;
+                        ph_add(&c->ph[me][0][ph_class[board_pidx(b, me, q)]], bonus);
+                        ph_add(&c->ph[me][1][ph_class[board_pidx(b, op, q)]], bonus);
+                        if (sp.ph_malus)
+                            for (int j = 0; j < i; j++) {
+                                int r = list[j].pos;
+                                if (b->cell[r] != EMPTY) continue;
+                                ph_add(&c->ph[me][0][ph_class[board_pidx(b, me, r)]], -bonus);
+                                ph_add(&c->ph[me][1][ph_class[board_pidx(b, op, r)]], -bonus);
+                            }
+                    }
                     int *h = &c->history[me][q];
                     *h += depth * depth * 32;
                     if (*h > (1 << 20)) {
@@ -1071,6 +1159,7 @@ moves_loop:
         c->drop4 = drop4;
         n = gen_moves(c, list, me, op, op_threat, ttmove, ply, gmode, tzon);
         if (sp.qpot && !op_threat && !qmode && depth >= sp.qpot_depth) qpot_order(b, list, n, me, op);
+        if (sp.l3x && !op_threat && !qmode && !tzon && depth >= sp.l3x_depth) prep_mark(b, list, n, me, op);
         c->drop4 = 0;
         i0 = 0;
         for (int k = 0; k < n; k++)
