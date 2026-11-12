@@ -241,6 +241,113 @@ static int cmd_dfpn(Rule rule, long nodes, int opp, int ms) {
     return 0;
 }
 
+// 二重 VCT (独立な勝ち筋の二重化) の調査: 手番側の手 t を打ち、(1) 相手がパスしたら VCT (証明 1、圏 Z1)、
+// (2) Z1 の空点を全部相手の石で埋めても VCT (証明 2) があれば、相手の 1 手の受けはどちらかの証明を崩せない (石が増えて損をしない) ので t は勝ち。
+// 入力: 手順 [TAB 調べる手 x,y]。調べる手がなければ石の近くの空点を全部。DVCHECK=<ノード> で、勝ちと出た t への受けを 1 手ずつ確かめて反例を数える
+static int dv_calls;
+static int dv_group(Board *b, int att, int def, const int *R, int n, long nodes, long *used) {
+    DfpnResult r;
+    int placed = 0, ok = 1;
+    for (int i = 0; i < n; i++) {
+        if (b->pat4[def][R[i]] >= P4_BLOCK4) { ok = n == 1; if (!ok) break; }   // 埋める途中で受け側の四になる点が出たら分けて調べる
+        board_move_color(b, R[i], def);
+        placed++;
+    }
+    int w = 0;
+    if (ok && placed == n) {
+        dv_calls++;
+        w = !b->p4cnt[def][P4_FIVE] && dfpn_vct(b, att, nodes, 0, &r);
+        *used += r.nodes;
+    }
+    for (int i = 0; i < placed; i++) board_undo(b);
+    if (w) return 1;
+    if (n == 1) return 0;
+    return dv_group(b, att, def, R, n / 2, nodes, used) && dv_group(b, att, def, R + n / 2, n - n / 2, nodes, used);
+}
+static int dvct_test(Board *b, int att, int t, long nodes, int *z1n, int *uncovered, long *used) {
+    static int cells[NCELL];
+    int def = opp_color(att);
+    DfpnResult r;
+    *z1n = 0, *uncovered = 0;
+    board_move_color(b, t, att);
+    int res = 0;
+    if (b->p4cnt[att][P4_FIVE] || b->p4cnt[att][P4_FLEX4]) res = 3;   // 四・達四の脅威 (普通の VCT の手)
+    else if (dfpn_vct(b, att, nodes, 0, &r)) {
+        *used += r.nodes;
+        res = 1;
+        int nz = dfpn_vct_zone(b, att, cells, NCELL);
+        if (nz >= 0) {
+            int R[NCELL], nr = 0;
+            for (int i = 0; i < nz; i++) {
+                int q = cells[i];
+                if (b->cell[q] != EMPTY) continue;
+                (*z1n)++;
+                if (b->pat4[def][q] >= P4_BLOCK4) { (*uncovered)++; continue; }   // 受け側の四・五になる点は束に入れない (別に調べる必要がある)
+                R[nr++] = q;
+            }
+            // 束の検査: R の点を全部受け側の石で埋めても VCT があれば R のどの受けもだめ。なければ二分する
+            dv_calls = 0;
+            if (nr > 0 && dv_group(b, att, def, R, nr, nodes, used)) res = 2;
+            *uncovered = dv_calls;   // (表示用に呼び出し回数を返す)
+        }
+    } else *used += r.nodes;
+    board_undo(b);
+    return res;
+}
+static int cmd_dvct(Rule rule, long nodes) {
+    static Board b;
+    char line[8192];
+    long npos = 0, nthreat = 0, ndouble = 0, ncand = 0, tgt_n = 0, tgt_thr = 0, tgt_dbl = 0, chk = 0, chk_bad = 0, used = 0;
+    long vnodes = getenv("DVCHECK") ? atol(getenv("DVCHECK")) : 0;
+    double t0 = now_sec();
+    while (fgets(line, sizeof line, stdin)) {
+        char *tab = strchr(line, '\t');
+        int tx = -1, ty = -1;
+        if (tab) { *tab = 0; sscanf(tab + 1, "%d,%d", &tx, &ty); }
+        board_init(&b, 15, &rule);
+        if (load_moves(&b, line) < 0) continue;
+        int att = board_side(&b), def = opp_color(att);
+        if (b.p4cnt[att][P4_FIVE] || b.p4cnt[def][P4_FIVE] || b.p4cnt[def][P4_FLEX4]) continue;
+        npos++;
+        char buf[1024]; int bl = 0; buf[0] = 0;
+        for (int q = 0; q < NCELL; q++) {
+            if (b.cell[q] != EMPTY || !b.near[q]) continue;
+            if (tx >= 0 && q != to_pos(tx, ty)) continue;
+            if (rule_has_forbidden(&b.rule) && att == BLACK && board_is_forbidden(&b, q)) continue;
+            int z1, unc;
+            int res = dvct_test(&b, att, q, nodes, &z1, &unc, &used);
+            ncand++;
+            if (tx >= 0) tgt_n++, tgt_thr += res >= 1, tgt_dbl += res == 2;
+            if (res >= 1 && res <= 2) nthreat++;
+            if (res == 2) {
+                ndouble++;
+                if (bl < 1000) bl += snprintf(buf + bl, sizeof buf - bl, " %d,%d(zone %d, calls %d)", pos_x(q), pos_y(q), z1, unc);
+                if (vnodes) {
+                    // 反例の確かめ: t の後、石の近くの受けを 1 手ずつ打って VCT が残るか
+                    board_move_color(&b, q, att);
+                    for (int r = 0; r < NCELL; r++) {
+                        if (b.cell[r] != EMPTY || !b.near[r] || b.pat4[def][r] >= P4_BLOCK4) continue;
+                        if (rule_has_forbidden(&b.rule) && def == BLACK && board_is_forbidden(&b, r)) continue;
+                        DfpnResult dr;
+                        board_move_color(&b, r, def);
+                        int w = dfpn_vct(&b, att, vnodes, 0, &dr);
+                        board_undo(&b);
+                        chk++;
+                        if (!w) { chk_bad++; if (bl < 1000) bl += snprintf(buf + bl, sizeof buf - bl, "[x %d,%d%s]", pos_x(r), pos_y(r), dr.aborted ? "?" : ""); }
+                    }
+                    board_undo(&b);
+                }
+            }
+        }
+        if (buf[0] || tx >= 0) printf("%ld:%s\n", npos, buf);
+        fflush(stdout);
+    }
+    printf("positions %ld, moves tested %ld, pass-VCT threats %ld, double-VCT %ld, dfpn nodes %ld, %.1f s\n", npos, ncand, nthreat, ndouble, used, now_sec() - t0);
+    if (tgt_n) printf("target moves %ld: threat %ld, double %ld\n", tgt_n, tgt_thr, tgt_dbl);
+    if (vnodes) printf("check: replies %ld, not refuted within %ld nodes: %ld\n", chk, vnodes, chk_bad);
+    return 0;
+}
+
 // 相手の VCT の圏の健全性: パスしたら相手に VCT があり圏が取れた局面で、圏の外の空点 (石の近く、自分の止め三以上を作る点・
 // 禁じ手を除く) に打った後も相手に VCT があるかを大きいノード数で確かめる。nodes = 圏を取る探索、vnodes = 確かめ
 static int cmd_vzcheck(Rule rule, long nodes, long vnodes, int pad) {
@@ -307,10 +414,43 @@ static int material(const Board *b, int c) {
     const int16_t *k = b->p4cnt[c];
     return k[P4_FLEX3] + k[P4_FLEX3_PLUS] + 2 * k[P4_FLEX3_2X] + k[P4_BLOCK4] + k[P4_BLOCK4_PLUS] + 2 * k[P4_BLOCK4_FLEX3];
 }
+// 窓の潜在力 (Erdős–Selfridge 型): q を通る方向 d の 5 連の窓のうち、相手の石・壁を含まないものについて lam^(自分の石の数) の和
+static double win_pot(const Board *b, int q, int d, int c, double lam) {
+    int off = DIR_OFFSET[d];
+    double s = 0;
+    for (int k = 0; k < 5; k++) {
+        int n = 0, ok = 1;
+        for (int j = k - 4; j <= k && ok; j++) {
+            if (j == 0) continue;
+            int r = q + j * off;
+            if (r < 0 || r >= NCELL) { ok = 0; break; }
+            int v = b->cell[r];
+            if (v == c) n++;
+            else if (v != EMPTY) ok = 0;
+        }
+        if (ok) { double t = 1; for (int i = 0; i < n; i++) t *= lam; s += t; }
+    }
+    return s;
+}
+// 盤全体の潜在力: phi1 = 生きている窓の lam^石数 の和 (空点ごとに数えるので窓 1 つを空点の数だけ数える)、
+// phi2 = 空点 f ごとの、方向の違う窓の組の積の和 (f がフォークの点になる見込み)
+static void board_pot(const Board *b, int c, double lam, double *phi1, double *phi2) {
+    double s1 = 0, s2 = 0;
+    for (int q = 0; q < NCELL; q++) {
+        if (b->cell[q] != EMPTY || !b->near[q]) continue;
+        double p[4], t = 0, x = 0;
+        for (int d = 0; d < 4; d++) p[d] = win_pot(b, q, d, c, lam), t += p[d];
+        for (int d = 0; d < 4; d++)
+            for (int e = d + 1; e < 4; e++) x += p[d] * p[e];
+        s1 += t, s2 += x;
+    }
+    *phi1 = s1, *phi2 = s2;
+}
 static int cmd_potrank(Rule rule) {
     static Board b;
     char line[8192];
-    long n = 0, top1[6] = {0}, top3[6] = {0}, sumrank[6] = {0}, ncand = 0;
+    long n = 0, top1[10] = {0}, top3[10] = {0}, sumrank[10] = {0}, ncand = 0;
+    double LAM = getenv("LAM") ? atof(getenv("LAM")) : 4, KAP = getenv("KAP") ? atof(getenv("KAP")) : 0.05, MU = getenv("MU") ? atof(getenv("MU")) : 0.8;
     static const int RW[P_COUNT] = {0, 0, 0, 0, 1, 2, 2, 3, 0, 0, 0, 0};   // 規則の重み: 止め二 1、活二 2 (活三の点が増える)、止め三 2 (四の点)、活三 3
     while (fgets(line, sizeof line, stdin)) {
         char *tab = strchr(line, '\t');
@@ -323,7 +463,9 @@ static int cmd_potrank(Rule rule) {
         int me = board_side(&b), op = opp_color(me), best = to_pos(bx, by);
         if (b.p4cnt[op][P4_FIVE] || b.p4cnt[op][P4_FLEX4] || b.p4cnt[me][P4_FIVE] || b.p4cnt[me][P4_FLEX4]) continue;
         if (b.cell[best] != EMPTY || b.pat4[me][best] >= P4_FLEX3 || b.pat4[op][best] >= P4_FLEX3) continue;
-        int cand[NCELL], nc = 0, sc[6][NCELL];
+        int cand[NCELL], nc = 0, sc[10][NCELL];
+        double m1, m2, o1, o2;
+        board_pot(&b, me, LAM, &m1, &m2), board_pot(&b, op, LAM, &o1, &o2);
         int m0 = material(&b, me), o0 = material(&b, op);
         for (int q = 0; q < NCELL; q++) {
             if (b.cell[q] != EMPTY || !b.near[q] || b.pat4[me][q] >= P4_FLEX3 || b.pat4[op][q] >= P4_FLEX3) continue;
@@ -331,6 +473,8 @@ static int cmd_potrank(Rule rule) {
             int a = g_cell_value[me][board_pidx(&b, me, q)] + g_cell_value[op][board_pidx(&b, op, q)] * 52 / 64;
             board_move(&b, q);
             int dm = material(&b, me) - m0, dop = o0 - material(&b, op);
+            double a1, a2, b1, b2;
+            board_pot(&b, me, LAM, &a1, &a2), board_pot(&b, op, LAM, &b1, &b2);
             board_undo(&b);
             sc[0][nc] = a;
             sc[1][nc] = dm * 1000 + a / 10;
@@ -340,6 +484,16 @@ static int cmd_potrank(Rule rule) {
             for (int d = 0; d < 4; d++) rm += RW[b.pat[me][q][d]], ro += RW[b.pat[op][q][d]];
             sc[4][nc] = rm * 1000 + a / 10;
             sc[5][nc] = (rm * 4 + ro * 3) * 1000 + a / 10;
+            {
+                double pm[4], po[4], sm = 0, so = 0, xm = 0, xo = 0;
+                for (int d = 0; d < 4; d++) pm[d] = win_pot(&b, q, d, me, LAM), po[d] = win_pot(&b, q, d, op, LAM), sm += pm[d], so += po[d];
+                for (int d = 0; d < 4; d++)
+                    for (int e = d + 1; e < 4; e++) xm += pm[d] * pm[e], xo += po[d] * po[e];
+                sc[6][nc] = (int)(100 * (sm + MU * so));
+                sc[7][nc] = (int)(100 * (sm + MU * so + KAP * (xm + MU * xo)));
+                sc[8][nc] = (int)(10 * ((a1 - m1) + MU * (o1 - b1)));
+                sc[9][nc] = (int)(((a2 - m2) + MU * (o2 - b2)));
+            }
             cand[nc++] = q;
         }
         int bi = -1;
@@ -347,7 +501,7 @@ static int cmd_potrank(Rule rule) {
         if (bi < 0) continue;
         n++;
         ncand += nc;
-        for (int k = 0; k < 6; k++) {
+        for (int k = 0; k < 10; k++) {
             int r = 1;
             for (int i = 0; i < nc; i++) if (sc[k][i] > sc[k][bi]) r++;
             top1[k] += r == 1;
@@ -355,9 +509,9 @@ static int cmd_potrank(Rule rule) {
             sumrank[k] += r;
         }
     }
-    const char *nm[6] = {"G2 cell value", "own material gain", "own gain + opp loss", "value + 150*(gain+loss)", "rule pattern own", "rule pattern own+0.75opp"};
+    const char *nm[10] = {"G2 cell value", "own material gain", "own gain + opp loss", "value + 150*(gain+loss)", "rule pattern own", "rule pattern own+0.75opp", "window potential", "window potential + fork", "trial: d(phi1)", "trial: d(phi2 fork)"};
     printf("quiet Rapfi moves %ld, avg candidates %.1f\n", n, n ? (double)ncand / n : 0);
-    for (int k = 0; k < 6; k++)
+    for (int k = 0; k < 10; k++)
         printf("  %-26s top1 %.3f top3 %.3f mean rank %.1f\n", nm[k], (double)top1[k] / n, (double)top3[k] / n, (double)sumrank[k] / n);
     return 0;
 }
@@ -674,6 +828,14 @@ int main(int argc, char **argv) {
     }
     if (!strcmp(argv[1], "puzzles")) return cmd_puzzles(argv[2], argc > 3 ? atol(argv[3]) : 2000000);
     Rule rule = parse_rule(argv[2]);
+    if (getenv("G2_PARAMS")) {   // 評価・探索の値を変える (例 G2_PARAMS="cross=16")
+        char buf[512], *save = NULL;
+        snprintf(buf, sizeof buf, "%s", getenv("G2_PARAMS"));
+        for (char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
+            char *eq = strchr(t, '=');
+            if (eq) { *eq = 0; search_set_param(t, atol(eq + 1)); }
+        }
+    }
     pattern_init(&rule);
     if (!strcmp(argv[1], "defend")) return cmd_defend(rule, argc > 3 ? atol(argv[3]) : 200000, 0);
     if (!strcmp(argv[1], "vctdefend")) return cmd_defend(rule, argc > 3 ? atol(argv[3]) : 1000000, 1);
@@ -714,6 +876,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "l3")) return cmd_l3(rule, argc > 3 ? atol(argv[3]) : 100000, 0, argc > 4 ? atoi(argv[4]) : 0);
     if (!strcmp(argv[1], "l3opp")) return cmd_l3(rule, argc > 3 ? atol(argv[3]) : 100000, 1, argc > 4 ? atoi(argv[4]) : 0);
     if (!strcmp(argv[1], "potrank")) return cmd_potrank(rule);
+    if (!strcmp(argv[1], "dvct")) return cmd_dvct(rule, argc > 3 ? atol(argv[3]) : 3000);
     if (!strcmp(argv[1], "vzcheck")) return cmd_vzcheck(rule, argc > 3 ? atol(argv[3]) : 2000, argc > 4 ? atol(argv[4]) : 200000, argc > 5 ? atoi(argv[5]) : 0);
     if (!strcmp(argv[1], "dfpnopp")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 1, argc > 4 ? atoi(argv[4]) : 0);
     if (argc < 4) return 2;

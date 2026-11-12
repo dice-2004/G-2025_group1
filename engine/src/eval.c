@@ -54,6 +54,14 @@ static int cell_value(const Rule *rule, int color, const uint8_t pats[4]) {
     if (p4 < 0) return 0;
     int v = w->combo[p4];
     for (int d = 0; d < 4; d++) v += w->line[pats[d]];
+    if (w->cross) {
+        //                                  DEAD OL B1 F1 B2 F2 B3 F3 B4 F4 D4 F5   (三・四は Pattern4 の加点で数えているので 0)
+        static const int S[P_COUNT] = {0, 0, 1, 2, 3, 6, 5, 0, 0, 0, 0, 0};
+        int x = 0;
+        for (int d = 0; d < 4; d++)
+            for (int e = d + 1; e < 4; e++) x += S[pats[d]] * S[pats[e]];
+        v += x * w->cross / 16;
+    }
     v += table_delta[color][sorted_pidx(pats)];
     return v > 32767 ? 32767 : v < -32767 ? -32767 : v;
 }

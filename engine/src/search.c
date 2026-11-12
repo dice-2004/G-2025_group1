@@ -282,6 +282,10 @@ static struct {
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
+    int tvct, tvct_depth, tvct_min, tvct_pv;   // 木の中の VCT: 残り深さ tvct_depth 以上で手番側に三・四の材料が tvct_min 以上あれば、df-pn (tvct ノード) で自分の VCT を調べ、あれば勝ちを返す
+    int ohist, okill;   // 敵の急所は我が急所: 相手の history (相手がそこに打って beta cut した実績) を自分の手の点に足す重み (/64)、相手の killer (1 手先の手数の killer) の点に足す値
+    int bdd, bdd_depth, bdd_after, bdd_r, bdd_maxd;   // 受けの束ね読み: 相手の活三への受け (自分の三・四にならない止める手) を全部同時に置いて読み、alpha 以下なら受けは全部だめ。bdd = 束の最大の石の数
+    int bd, bd_depth, bd_after, bd_r, bd_retry;   // 束ね読み: 非 PV の節点で bd_after 手読んだ後、残りの静かな手を bd 個まとめて同時に置き、(深さ − 1 − bd_r) で読んで alpha 以下なら全部捨てる (石が増えて損をしない性質)。失敗は bd_retry 回まで
     int sing, sing_depth, sing_margin, sing_mc;   // singular 延長: 置換表の手を除いて浅く読み、他の手が全部 (置換表の点 − sing_margin × 深さ / 8) に届かなければその手を 1 手延長。sing_mc = 1 なら届く手があり beta 以上のとき打ち切り (multi-cut)
     int iid;   // 置換表の手がない残り深さ iid 以上の節点で、先に浅く読んで最初に読む手を決める (0 = しない)
     int ph, ph_malus;   // パターン履歴 (探索中に覚える、形ごとの beta cut の成績) を手の並べ方に足す重み (/64、0 = 使わない)。ph_malus = 1 で cut した手より前に読んだ手を減点
@@ -311,6 +315,10 @@ static struct {
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
     .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .mcp = 0, .mcp_mul = 100, .mcp_tact = 0, .mcp_pv = 0, .fut = 0, .fut_margin = 250, .fut_depth = 99, .razor = 0, .razor_margin = 100, .razor_depth = 2, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
+    .tvct = 0, .tvct_depth = 2, .tvct_min = 2, .tvct_pv = 1,
+    .ohist = 0, .okill = 0,
+    .bdd = 0, .bdd_depth = 1, .bdd_after = 1, .bdd_r = 0, .bdd_maxd = 99,
+    .bd = 0, .bd_depth = 3, .bd_after = 3, .bd_r = 0, .bd_retry = 1,
     .sing = 0, .sing_depth = 5, .sing_margin = 16, .sing_mc = 0, .iid = 0,
     .ph = 0, .ph_malus = 1,
     .l3x = 0, .l3x_depth = 3, .l3x_min = 1, .l3x_top = 4, .l3x_ext = 1, .l3x_w = 1 << 20,
@@ -433,6 +441,22 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "lmr_tact")) sp.lmr_tact = (int)v;
     else if (!strcmp(name, "def_scale")) sp.def_scale = (int)v;
     else if (!strcmp(name, "probcut")) sp.probcut = (int)v;
+    else if (!strcmp(name, "tvct")) sp.tvct = (int)v;
+    else if (!strcmp(name, "tvct_depth")) sp.tvct_depth = (int)v;
+    else if (!strcmp(name, "tvct_min")) sp.tvct_min = (int)v;
+    else if (!strcmp(name, "tvct_pv")) sp.tvct_pv = (int)v;
+    else if (!strcmp(name, "ohist")) sp.ohist = (int)v;
+    else if (!strcmp(name, "okill")) sp.okill = (int)v;
+    else if (!strcmp(name, "bdd")) sp.bdd = (int)v;
+    else if (!strcmp(name, "bdd_depth")) sp.bdd_depth = (int)v;
+    else if (!strcmp(name, "bdd_after")) sp.bdd_after = (int)v;
+    else if (!strcmp(name, "bdd_r")) sp.bdd_r = (int)v;
+    else if (!strcmp(name, "bdd_maxd")) sp.bdd_maxd = (int)v;
+    else if (!strcmp(name, "bd")) sp.bd = (int)v;
+    else if (!strcmp(name, "bd_depth")) sp.bd_depth = (int)v;
+    else if (!strcmp(name, "bd_after")) sp.bd_after = (int)v;
+    else if (!strcmp(name, "bd_r")) sp.bd_r = (int)v;
+    else if (!strcmp(name, "bd_retry")) sp.bd_retry = (int)v;
     else if (!strcmp(name, "sing")) sp.sing = (int)v;
     else if (!strcmp(name, "sing_depth")) sp.sing_depth = (int)v;
     else if (!strcmp(name, "sing_margin")) sp.sing_margin = (int)v;
@@ -489,6 +513,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "fvcf")) g_fvcf = (int)v;
     else if (!strcmp(name, "ts_light")) g_ts_light = (int)v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
+    else if (!strcmp(name, "cross")) g_eval_params.cross = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strcmp(name, "table")) g_eval_params.use_table = (int)v;
     else if (!strcmp(name, "race")) g_eval_params.race = (int)v;
@@ -602,6 +627,7 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
     x1 = x1 + 2 < b->size ? x1 + 2 : b->size - 1, y1 = y1 + 2 < b->size ? y1 + 2 : b->size - 1;
     const int16_t *vme = g_cell_value[me], *vop = g_cell_value[op];
     const int *hist = c->history[me];
+    const int *ok2 = ply + 1 < MAX_PLY ? c->killer[ply + 1] : NULL;
     int phon = sp.ph && mode != 1;
     const int (*ph)[PH_CLASSES] = c->ph[me];
     if (phon && !ph_ok) ph_init();
@@ -647,6 +673,8 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
             }
             out[n].value = s;
             s = s * 16 + hist[q] / 64;
+            if (sp.ohist) s += c->history[op][q] / 64 * sp.ohist / 64;
+            if (sp.okill && ok2 && (q == ok2[0] || q == ok2[1])) s += sp.okill;
             if (phon) s += (ph[0][ph_class[board_pidx(b, me, q)]] + ph[1][ph_class[board_pidx(b, op, q)]]) * sp.ph / 64;
             if (q == ttmove) s += 1 << 28;
             else if (k && (q == k[0] || q == k[1])) s += 1 << 12;
@@ -743,6 +771,8 @@ static inline int threat_material(const Board *b, int c) {
     const int16_t *k = b->p4cnt[c];
     return k[P4_FLEX3] + k[P4_FLEX3_PLUS] + 2 * k[P4_FLEX3_2X] + k[P4_BLOCK4] + k[P4_BLOCK4_PLUS] + 2 * k[P4_BLOCK4_FLEX3];
 }
+long tvct_stat[3];  // 木の中の VCT: 呼んだ回数、勝ち、負けのノード
+long bd_stat[6];    // 束ね読み: 試した回数、成功、捨てた手の数、束の石の数の合計
 long sing_stat[3];  // singular: 確かめた回数、延長、multi-cut
 long l3x_stat[4];   // 準備手: 節点、調べた手、VCT の脅威になった手、延長した手
 // 準備手の印: 静かな手 (どちらの三・四の点でもない) のうち、材料の増えが l3x_min 以上で上位 l3x_top 手を打ち、
@@ -925,6 +955,25 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
             return v;
         }
     }
+    // 木の中の VCT (df-pn): 手番側に三・四の材料があれば、短い予算で自分の VCT を調べる。本探索は四で深さを使うので、
+    // 四と三の混ざった勝ちは「静かな手 1〜2 手の後」に置くと届かない。同じ予算で勝てなかった局面は覚えて呼び直さない
+    if (sp.tvct && !qmode && !op_threat && depth >= sp.tvct_depth && (sp.tvct_pv || !is_pv) && beta > -SCORE_WIN_MIN &&
+        threat_material(b, me) >= sp.tvct_min) {
+        uint64_t fk = b->hash ^ (uint64_t)sp.tvct * 0x9e3779b97f4a7c15ull ^ 0x5bd1e995u;
+        uint64_t *fe = &tsfail[fk & (TSFAIL_SIZE - 1)];
+        if (*fe != fk) {
+            DfpnResult dr;
+            tvct_stat[0]++;
+            if (dfpn_vct(b, me, sp.tvct, 0, &dr) && dr.move >= 0) {
+                tvct_stat[1]++;
+                int v = SCORE_WIN - ply - 12;
+                tt_store(b->hash, v, dr.move, 100, TT_LOWER, ply);
+                return v;
+            }
+            tvct_stat[2] += dr.nodes;
+            *fe = fk;
+        }
+    }
     // 脅威圏: パスしたら相手に VCF があるなら、その手順を崩し得る点と自分の四だけを読む (他は同じ手順で負け)
     // 手番側の VCF (本探索の深さでは届かない長い四の連続)
     if (sp.own_vcf && !qmode && depth >= sp.own_vcf && tz_gate(b, me)) {
@@ -1057,6 +1106,7 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     int tfon = sp.tfut && depth == 1 && !is_pv && !op_threat && !qmode && alpha > -SCORE_WIN_MIN && alpha < SCORE_WIN_MIN &&
                evaluate(b) + sp.tfut_margin <= alpha;
 
+    int bd_fail = 0;
     int pmax = 0, pmax_n = -1;   // lmr_pol: 候補手の点の最大 (段階的な生成で n が増えたら取り直す)
 
 moves_loop:
@@ -1081,6 +1131,42 @@ moves_loop:
                     !rz_relevant(ply, q, sp.rz_rad, sp.rz_lines);
         if (rzout && sp.rz == 2) continue;
 
+        // 束ね読み (null move の逆): 残りの静かな手を数個まとめて同時に置き、それでも alpha に届かなければ、
+        // 1 手ずつでも届かない (石が増えて損をしない) ので、1 回の探索で全部捨てる。届いたらこの節点では bd_retry 回までで諦めて 1 手ずつ読む
+        int bdm = !is_pv && !qmode && bd_fail < sp.bd_retry && alpha > -SCORE_WIN_MIN && ply + 1 < MAX_PLY
+                      ? (op_threat ? (sp.bdd && !tzon && depth >= sp.bdd_depth && depth <= sp.bdd_maxd && searched >= sp.bdd_after ? 2 : 0)
+                                   : (sp.bd && !tactical && depth >= sp.bd_depth && searched >= sp.bd_after ? 1 : 0)) : 0;
+        if (bdm) {
+            int m = 0, mmax = bdm == 2 ? sp.bdd : sp.bd, br = bdm == 2 ? sp.bdd_r : sp.bd_r;
+            for (int j = i; j < n && m < mmax; j++) {
+                if (j > i) pick_move(list, j, n);
+                int r = list[j].pos;
+                if (b->pat4[me][r] >= P4_FLEX3) break;
+                if (bdm == 1 && (list[j].tactical || b->pat4[op][r] >= P4_FLEX3)) break;
+                if (restricted(b, me) && board_is_forbidden(b, r)) break;
+                board_move_color(b, r, me);
+                m++;
+            }
+            if (m >= 2) {
+                if (!(m & 1)) board_pass(b);
+                c->xhalf[ply + 1] = 0;
+                int v = -pvs(c, -alpha - 1, -alpha, depth - 1 - br, ply + 1, 0);
+                if (!(m & 1)) board_pass(b);
+                for (int k = 0; k < m; k++) board_undo(b);
+                if (c->stop) return 0;
+                bd_stat[bdm == 2 ? 4 : 0]++;
+                bd_stat[3] += m;
+                if (v <= alpha) {
+                    bd_stat[bdm == 2 ? 5 : 1]++;
+                    bd_stat[2] += m;
+                    if (v > best) best = v;
+                    searched += m;
+                    i += m - 1;
+                    continue;
+                }
+                bd_fail++;
+            } else if (m == 1) board_undo(b);
+        }
         int a4 = b->pat4[me][q], prep = list[i].tactical == 2;
         board_move(b, q);
         int v, nd = depth - 1;

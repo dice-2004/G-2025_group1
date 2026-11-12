@@ -172,6 +172,10 @@ static int speed(Rule rule, int depth, int threads) {
            total_ms > 0 ? total_nodes / total_ms * 1000 : 0);
     extern long nmp_stat[4];
     if (nmp_stat[0]) printf("nmp: want %ld safe %ld tried %ld cut %ld\n", nmp_stat[0], nmp_stat[1], nmp_stat[2], nmp_stat[3]);
+    extern long tvct_stat[3];
+    if (tvct_stat[0]) printf("tvct: calls %ld wins %ld fail-nodes %ld\n", tvct_stat[0], tvct_stat[1], tvct_stat[2]);
+    extern long bd_stat[6];
+    if (bd_stat[0] || bd_stat[4]) printf("bd: tests %ld ok %ld pruned %ld stones %ld def-tests %ld def-ok %ld\n", bd_stat[0], bd_stat[1], bd_stat[2], bd_stat[3], bd_stat[4], bd_stat[5]);
     extern long sing_stat[3];
     if (sing_stat[0]) printf("sing: tests %ld ext %ld mc %ld\n", sing_stat[0], sing_stat[1], sing_stat[2]);
     extern long l3x_stat[4];
