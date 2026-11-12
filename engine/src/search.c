@@ -149,6 +149,7 @@ typedef struct {
     uint32_t tzmark[NCELL]; // 脅威圏の点の印 (== tzgen なら圏内)。gen_moves の間だけ使う
     uint32_t tzgen;
     int seval[MAX_PLY];     // 節点の静的評価 (手の数の枝刈り・futility の「評価が良くなっているか」用)
+    int excl[MAX_PLY + 1];  // singular 延長の確かめで読まない手 (その手数の節点、-1 = なし)
     uint8_t xhalf[MAX_PLY]; // ext_three == 2 の半手の延長の繰り越し (その手数の節点に渡る)
     int drop4;          // gen_moves: 相手の活三を受ける節点で、受けにならない自分のただの四を除く
 } Ctx;
@@ -281,6 +282,8 @@ static struct {
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
+    int sing, sing_depth, sing_margin, sing_mc;   // singular 延長: 置換表の手を除いて浅く読み、他の手が全部 (置換表の点 − sing_margin × 深さ / 8) に届かなければその手を 1 手延長。sing_mc = 1 なら届く手があり beta 以上のとき打ち切り (multi-cut)
+    int iid;   // 置換表の手がない残り深さ iid 以上の節点で、先に浅く読んで最初に読む手を決める (0 = しない)
     int ph, ph_malus;   // パターン履歴 (探索中に覚える、形ごとの beta cut の成績) を手の並べ方に足す重み (/64、0 = 使わない)。ph_malus = 1 で cut した手より前に読んだ手を減点
     int l3x, l3x_depth, l3x_min, l3x_top, l3x_ext, l3x_w;   // 準備手: 静かな手のうち材料の増え上位 l3x_top 手を打って、相手がパスしたら VCT (dfpn l3x 節点) があるか調べる。あれば戦術的な手にし、l3x_ext なら延長
     int qpot, qpot_depth, qpot_w, qpot_tact;   // 静かな手の脅威の材料 (打った後の自分の三・四の点の増え + 相手の三・四の点の減り) で並べ替える。qpot_tact 以上なら戦術的な手に
@@ -308,6 +311,7 @@ static struct {
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
     .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .mcp = 0, .mcp_mul = 100, .mcp_tact = 0, .mcp_pv = 0, .fut = 0, .fut_margin = 250, .fut_depth = 99, .razor = 0, .razor_margin = 100, .razor_depth = 2, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
+    .sing = 0, .sing_depth = 5, .sing_margin = 16, .sing_mc = 0, .iid = 0,
     .ph = 0, .ph_malus = 1,
     .l3x = 0, .l3x_depth = 3, .l3x_min = 1, .l3x_top = 4, .l3x_ext = 1, .l3x_w = 1 << 20,
     .qpot = 0, .qpot_depth = 3, .qpot_w = 1000, .qpot_tact = 99, .probcut = 0, .pc_depth = 5, .pc_margin = 300, .pc_red = 3, .pc_moves = 3, .def_scale = 52, .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
@@ -429,6 +433,11 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "lmr_tact")) sp.lmr_tact = (int)v;
     else if (!strcmp(name, "def_scale")) sp.def_scale = (int)v;
     else if (!strcmp(name, "probcut")) sp.probcut = (int)v;
+    else if (!strcmp(name, "sing")) sp.sing = (int)v;
+    else if (!strcmp(name, "sing_depth")) sp.sing_depth = (int)v;
+    else if (!strcmp(name, "sing_margin")) sp.sing_margin = (int)v;
+    else if (!strcmp(name, "sing_mc")) sp.sing_mc = (int)v;
+    else if (!strcmp(name, "iid")) sp.iid = (int)v;
     else if (!strcmp(name, "ph")) sp.ph = (int)v;
     else if (!strcmp(name, "ph_malus")) sp.ph_malus = (int)v;
     else if (!strcmp(name, "l3x")) sp.l3x = (int)v;
@@ -734,6 +743,7 @@ static inline int threat_material(const Board *b, int c) {
     const int16_t *k = b->p4cnt[c];
     return k[P4_FLEX3] + k[P4_FLEX3_PLUS] + 2 * k[P4_FLEX3_2X] + k[P4_BLOCK4] + k[P4_BLOCK4_PLUS] + 2 * k[P4_BLOCK4_FLEX3];
 }
+long sing_stat[3];  // singular: 確かめた回数、延長、multi-cut
 long l3x_stat[4];   // 準備手: 節点、調べた手、VCT の脅威になった手、延長した手
 // 準備手の印: 静かな手 (どちらの三・四の点でもない) のうち、材料の増えが l3x_min 以上で上位 l3x_top 手を打ち、
 // 相手がパスしたら自分に VCT があるか (dfpn) を調べる。あれば tactical = 2 (枝刈り・LMR しない、延長の印) にして先に読む
@@ -863,10 +873,12 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     }
 
     // 置換表
-    int ttmove = -1;
-    TTData e;
-    if (tt_probe(b->hash, &e)) {
+    int ttmove = -1, tthit = 0;
+    int excl = ply < MAX_PLY ? c->excl[ply] : -1;
+    TTData e = {0};
+    if (excl < 0 && tt_probe(b->hash, &e)) {
         ttmove = e.move;
+        tthit = 1;
         if (!is_pv && e.depth >= depth) {
             int v = value_from_tt(e.value, ply);
             if (e.flag == TT_EXACT || (e.flag == TT_LOWER && v >= beta) || (e.flag == TT_UPPER && v <= alpha))
@@ -983,6 +995,29 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     int vzon = sp.vz && !qmode && !op_threat && !tzon && depth >= sp.vz_depth && (sp.vz_pv || !is_pv) &&
                alpha > -SCORE_WIN_MIN && vz_gate(b, op) && vz_mark(c, b, op, sp.vz_nodes);
     Move list[MAX_MOVES];
+    // 先に浅く読んで最初の手を決める (置換表の手がないとき)
+    if (sp.iid && !qmode && excl < 0 && ttmove < 0 && depth >= sp.iid && !op_threat) {
+        pvs(c, alpha, beta, depth - 2 - depth / 4, ply, is_pv);
+        if (c->stop) return 0;
+        if (tt_probe(b->hash, &e)) ttmove = e.move, tthit = 1;
+    }
+    // singular 延長: 置換表の手だけが飛び抜けて良い (他の手は全部、置換表の点より sing_margin × 深さ / 8 以上悪い) なら 1 手延長する。
+    // 三・四に限らず「この一手」の手順 (静かな手を含む) を深く読む
+    int sing_ext = 0;
+    if (sp.sing && !qmode && excl < 0 && ply > 0 && ply < MAX_PLY && tthit && ttmove >= 0 && depth >= sp.sing_depth &&
+        e.flag != TT_UPPER && e.depth >= depth - 3) {
+        int tv = value_from_tt(e.value, ply);
+        if (tv > -SCORE_WIN_MIN && tv < SCORE_WIN_MIN) {
+            int sb = tv - sp.sing_margin * depth / 8;
+            sing_stat[0]++;
+            c->excl[ply] = ttmove;
+            int v = pvs(c, sb - 1, sb, (depth - 1) / 2, ply, 0);
+            c->excl[ply] = -1;
+            if (c->stop) return 0;
+            if (v < sb) sing_ext = 1, sing_stat[1]++;
+            else if (sp.sing_mc && !is_pv && sb >= beta) { sing_stat[2]++; return sb; }
+        }
+    }
     int n, i0 = 0, ttstage = 0, gmode = qmode && !op_threat, drop4 = c->drop4;
     if (sp.ttfirst && ttmove >= 0 && !tzon && !vzon && !sp.tpo && !sp.mcp && !(op_threat && sp.def_line) &&
         gen_ok(c, ttmove, me, op, op_threat, gmode)) {
@@ -1028,6 +1063,7 @@ moves_loop:
     for (int i = i0; i < n; i++) {
         pick_move(list, i, n);
         int q = list[i].pos, tactical = list[i].tactical || op_threat || tzon || (vzon && sp.vz_tact);
+        if (q == excl) continue;
         // 全部の深さの手の数の枝刈り (Rapfi 風、既定は無効)。i + 1 = 何手目か (枝刈りした手も数える)
         if (sp.mcp && !qmode && searched > 0 && best > -SCORE_WIN_MIN && (sp.mcp_tact || !tactical) && (sp.mcp_pv || !is_pv) &&
             (i + 1) * (2 - improving) >= mcp_table[depth < 63 ? depth : 63])
@@ -1060,6 +1096,7 @@ moves_loop:
         if (ply + 1 < MAX_PLY) c->xhalf[ply + 1] = (uint8_t)carry;
         if (sp.ext_four && !qmode && a4 >= P4_BLOCK4 && a4 <= P4_BLOCK4_FLEX3 && ext_ok) nd = depth;
         if (prep && sp.l3x_ext && ext_ok) nd = depth, l3x_stat[3]++;
+        if (sing_ext && q == ttmove && ext_ok && nd < depth) nd = depth;
         if (tzon && sp.tz_ext && ext_ok) nd = depth;
         if (searched == 0) {
             v = -pvs(c, -beta, -alpha, nd, ply + 1, is_pv);
@@ -1172,6 +1209,7 @@ moves_loop:
             }
         goto moves_loop;
     }
+    if (excl >= 0) return searched == 0 ? alpha0 : best;   // singular の確かめ: 置換表には書かない
     if (searched == 0) {
         // 打てる手がない: 相手の活三を止められない (負け)、または全部禁じ手 / 静止探索で四がない
         if (op_threat) best = -(SCORE_WIN - ply - 3);
@@ -1219,6 +1257,7 @@ static void ctx_reset(Ctx *c, Board *b, int id, double t0) {
     c->seldepth = 0;
     c->root_depth = 0;
     memset(c->killer, 0, sizeof c->killer);
+    for (int i = 0; i <= MAX_PLY; i++) c->excl[i] = -1;
     memset(c->pvlen, 0, sizeof c->pvlen);
     // history は前の手の情報を少し残す
     for (int cc = 1; cc <= 2; cc++)
