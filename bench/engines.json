@@ -56,5 +56,23 @@
     },
     "note": "Rapfi 古典評価、深さ2制限",
     "pre_delay": 0.05
+  },
+  "rapfi-n30k": {
+    "cmd": "{rapfi}/pbrain-rapfi",
+    "cwd": "{rapfi}",
+    "info": {
+      "max_node": 30000
+    },
+    "note": "Rapfi 古典評価、1手3万ノード制限",
+    "pre_delay": 0.05
+  },
+  "rapfi-n300k": {
+    "cmd": "{rapfi}/pbrain-rapfi",
+    "cwd": "{rapfi}",
+    "info": {
+      "max_node": 300000
+    },
+    "note": "Rapfi 古典評価、1手30万ノード制限",
+    "pre_delay": 0.05
   }
 }
