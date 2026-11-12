@@ -93,6 +93,7 @@ static int cmd_l3(Rule rule, long nodes, int opp, int ms) {
         int att = opp ? opp_color(board_side(&b)) : board_side(&b);
         L3Result r;
         double t0 = now_sec();
+        if (getenv("L3MP")) g_l3_mustplay = atoi(getenv("L3MP"));
         l3_win(&b, att, nodes, ms, &r);
         double dt = now_sec() - t0;
         total += dt;

@@ -24,6 +24,6 @@ int l3_win(Board *b, int attacker, long max_nodes, int max_ms, L3Result *res);
 
 // 調整用: 局面ごとの VCT の確認のノード上限 (既定 3000)、静かな手の確認の上限 (既定 300)、静かな手の pat4 の下限
 extern long g_l3_vct_nodes, g_l3_quiet_nodes;
-extern int g_l3_quiet_min, g_l3_vct_depth, g_l3_max_ply;
+extern int g_l3_quiet_min, g_l3_vct_depth, g_l3_max_ply, g_l3_mustplay;
 
 #endif

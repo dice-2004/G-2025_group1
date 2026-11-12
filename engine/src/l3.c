@@ -19,6 +19,8 @@ long g_l3_or_nodes = 2000;
 long g_l3_stat[6];
 double g_l3_ms[4];   // 調査用: OR の VCT, 静かな手の確認, AND の dfpn+圏, AND の quick   // 調査用: OR 数, OR の子の合計, AND 数, AND の子の合計, AND の圏の失敗, AND の dfpn 失敗
 int g_l3_quiet_min = P4_FLEX2_2X;
+int g_l3_mustplay = 2;   // 1 = 受けの候補を、証明済みの受けの VCT の圏で絞る (その圏の外の受けは同じ VCT で負ける)
+long g_l3_mp_stat[3];    // 絞りを試した AND の局面、絞る前の受けの数、残った受けの数
 
 #define INF 100000000u
 #define LTT_BITS 16
@@ -209,6 +211,35 @@ static int gen_and(int *ch, int *nch) {
     int m = 0;
     for (int k = 0; k < n; k++)
         if (llegal(def, ch[k])) ch[m++] = ch[k];
+    if (g_l3_mustplay == 1 && m > 1) {
+        // must-play の絞り: 受け r の後に攻め側の VCT (圏 Z) があれば r は負け。別の受け r' が Z の外なら、r の石を除き r' を足した局面でも
+        // 同じ VCT が成り立つ (受け側の石が減るのは攻め側の得、圏の外の石は手順に触れない) ので r' も負け。受け側の三・四になる手は残す
+        static _Thread_local int z2[ZMAX];
+        static _Thread_local uint8_t inz[NCELL];
+        uint8_t dead[MAX_CH] = {0};
+        double t1 = now_ms();
+        g_l3_mp_stat[0]++; g_l3_mp_stat[1] += m;
+        for (int k = 0; k < m && !L.aborted; k++) {
+            if (dead[k] || b->pat4[def][ch[k]] >= g_l3_def_min) continue;
+            board_move_color(b, ch[k], def);
+            int w = !(tz_gate(b, def) && 0) && vct(att, g_l3_or_nodes * 2);
+            int nz2 = w ? dfpn_vct_zone(b, att, z2, ZMAX) : -1;
+            board_undo(b);
+            if (!w) continue;
+            dead[k] = 1;
+            if (nz2 < 0) continue;
+            for (int i = 0; i < nz2; i++) inz[z2[i]] = 1;
+            for (int j = 0; j < m; j++)
+                if (!dead[j] && !inz[ch[j]] && b->pat4[def][ch[j]] < g_l3_def_min) dead[j] = 1;
+            for (int i = 0; i < nz2; i++) inz[z2[i]] = 0;
+        }
+        g_l3_ms[0] += now_ms() - t1;
+        int m2 = 0;
+        for (int k = 0; k < m; k++)
+            if (!dead[k]) ch[m2++] = ch[k];
+        m = m2;
+        g_l3_mp_stat[2] += m;
+    }
     *nch = m;
     g_l3_stat[2]++; g_l3_stat[3] += m;
     return m ? 0 : 1;
@@ -300,7 +331,26 @@ static void mid(int is_or, int ply, uint32_t thpn, uint32_t thdn, uint32_t *opn,
         }
         board_move_color(b, ch[bi], color);
         mid(!is_or, ply + 1, tp, td, &cpn[bi], &cdn[bi]);
+        int nz2 = -1;
+        static _Thread_local int z2[ZMAX];
+        // must-play の絞り (遅延版): 受け ch[bi] が負けと分かったら、その後の攻め側の VCT の圏を取り、圏の外の受け (受け側の三・四を除く) も負けにする
+        if (!is_or && g_l3_mustplay == 2 && cpn[bi] == 0 && nch > 1 && !L.aborted) {
+            double t1 = now_ms();
+            if (vct(L.att, g_l3_or_nodes * 2)) nz2 = dfpn_vct_zone(b, L.att, z2, ZMAX);
+            g_l3_ms[0] += now_ms() - t1;
+        }
         board_undo(b);
+        if (nz2 >= 0) {
+            static _Thread_local uint8_t inz[NCELL];
+            g_l3_mp_stat[0]++;
+            for (int i = 0; i < nz2; i++) inz[z2[i]] = 1;
+            for (int j = 0; j < nch; j++) {
+                if (cpn[j] == 0) continue;
+                g_l3_mp_stat[1]++;
+                if (!inz[ch[j]] && b->pat4[L.def][ch[j]] < g_l3_def_min) cpn[j] = 0, cdn[j] = INF, g_l3_mp_stat[2]++;
+            }
+            for (int i = 0; i < nz2; i++) inz[z2[i]] = 0;
+        }
     }
     if (is_or && pn == 0) {
         for (int i = 0; i < nch; i++)

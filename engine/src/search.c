@@ -282,7 +282,7 @@ static struct {
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
-    int tvct, tvct_depth, tvct_min, tvct_pv;   // 木の中の VCT: 残り深さ tvct_depth 以上で手番側に三・四の材料が tvct_min 以上あれば、df-pn (tvct ノード) で自分の VCT を調べ、あれば勝ちを返す
+    int tvct, tvct_depth, tvct_min, tvct_pv, tvct_mode, tvct_plies;   // tvct_mode 1 = tss_solve の VCT (攻め tvct_plies 手まで) を使う   // 木の中の VCT: 残り深さ tvct_depth 以上で手番側に三・四の材料が tvct_min 以上あれば、df-pn (tvct ノード) で自分の VCT を調べ、あれば勝ちを返す
     int ohist, okill;   // 敵の急所は我が急所: 相手の history (相手がそこに打って beta cut した実績) を自分の手の点に足す重み (/64)、相手の killer (1 手先の手数の killer) の点に足す値
     int bdd, bdd_depth, bdd_after, bdd_r, bdd_maxd;   // 受けの束ね読み: 相手の活三への受け (自分の三・四にならない止める手) を全部同時に置いて読み、alpha 以下なら受けは全部だめ。bdd = 束の最大の石の数
     int bd, bd_depth, bd_after, bd_r, bd_retry;   // 束ね読み: 非 PV の節点で bd_after 手読んだ後、残りの静かな手を bd 個まとめて同時に置き、(深さ − 1 − bd_r) で読んで alpha 以下なら全部捨てる (石が増えて損をしない性質)。失敗は bd_retry 回まで
@@ -315,7 +315,7 @@ static struct {
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
 } sp = {
     .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .mcp = 0, .mcp_mul = 100, .mcp_tact = 0, .mcp_pv = 0, .fut = 0, .fut_margin = 250, .fut_depth = 99, .razor = 0, .razor_margin = 100, .razor_depth = 2, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
-    .tvct = 0, .tvct_depth = 2, .tvct_min = 2, .tvct_pv = 1,
+    .tvct = 0, .tvct_depth = 2, .tvct_min = 2, .tvct_pv = 1, .tvct_mode = 0, .tvct_plies = 6,
     .ohist = 0, .okill = 0,
     .bdd = 0, .bdd_depth = 1, .bdd_after = 1, .bdd_r = 0, .bdd_maxd = 99,
     .bd = 0, .bd_depth = 3, .bd_after = 3, .bd_r = 0, .bd_retry = 1,
@@ -445,6 +445,8 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "tvct_depth")) sp.tvct_depth = (int)v;
     else if (!strcmp(name, "tvct_min")) sp.tvct_min = (int)v;
     else if (!strcmp(name, "tvct_pv")) sp.tvct_pv = (int)v;
+    else if (!strcmp(name, "tvct_mode")) sp.tvct_mode = (int)v;
+    else if (!strcmp(name, "tvct_plies")) sp.tvct_plies = (int)v;
     else if (!strcmp(name, "ohist")) sp.ohist = (int)v;
     else if (!strcmp(name, "okill")) sp.okill = (int)v;
     else if (!strcmp(name, "bdd")) sp.bdd = (int)v;
@@ -964,7 +966,12 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         if (*fe != fk) {
             DfpnResult dr;
             tvct_stat[0]++;
-            if (dfpn_vct(b, me, sp.tvct, 0, &dr) && dr.move >= 0) {
+            if (sp.tvct_mode == 1) {
+                TssResult tr;
+                dr.win = tss_solve(b, me, TSS_VCT, sp.tvct_plies, sp.tvct, &tr);
+                dr.move = tr.move, dr.nodes = tr.nodes;
+            } else dfpn_vct(b, me, sp.tvct, 0, &dr);
+            if (dr.win && dr.move >= 0) {
                 tvct_stat[1]++;
                 int v = SCORE_WIN - ply - 12;
                 tt_store(b->hash, v, dr.move, 100, TT_LOWER, ply);
