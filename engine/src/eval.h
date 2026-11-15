@@ -55,6 +55,9 @@ typedef struct {
     // フォーク積: 空点の値に、方向の違う 2 本の線の「静かな形の強さ」の積の和 × cross / 16 を足す (0 = 使わない)。
     // 勝ちは 1 点で 2 本の線が同時に脅威になること (四三・三三) なので、まだ三・四でない線どうしの交わりを掛け算で数える
     int cross;
+    // 張り (tension): 形の差 D = 自分の和 − 相手の和 に (1 + tens/64 × (S − tens_s0) / tens_s0) を掛ける (S = 両方の和、0 = 使わない)。
+    // 盤上の形の総量が多いほど差が効く。負けている側は相手の形を減らす手を、勝っている側は自分の形を増やす手を選ぶようになる
+    int tens, tens_s0;
     int race_own[EVAL_RACE_LEVELS], race_opp[EVAL_RACE_LEVELS];
 } EvalParams;
 

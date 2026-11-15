@@ -217,7 +217,14 @@ static int legal_flex4(Board *b, int color) {
 int evaluate(const Board *b) {
     int me = board_side(b), op = opp_color(me);
     const EvalParams *w = &g_eval_params;
-    long v = b->vsum[me] - (long)b->vsum[op] * w->opp_scale / 64 + w->tempo;
+    long va = b->vsum[me], vo = (long)b->vsum[op] * w->opp_scale / 64, v = va - vo;
+    if (w->tens) {
+        long f = (va + vo - w->tens_s0) * w->tens / w->tens_s0;   // /64
+        if (f < -32) f = -32;
+        if (f > 64) f = 64;
+        v += v * f / 64;
+    }
+    v += w->tempo;
     const int (*th)[THREAT_COUNT] = w->threat[me == BLACK ? 0 : 1];
     int bm = eval_threat_bits(b->p4cnt[me]), bo = eval_threat_bits(b->p4cnt[op]);
     for (int k = 0; k < THREAT_COUNT; k++) {
@@ -522,6 +529,8 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "fvcf")) g_fvcf = (int)v;
     else if (!strcmp(name, "ts_light")) g_ts_light = (int)v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
+    else if (!strcmp(name, "tens")) g_eval_params.tens = (int)v;
+    else if (!strcmp(name, "tens_s0")) g_eval_params.tens_s0 = (int)v;
     else if (!strcmp(name, "cross")) g_eval_params.cross = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strcmp(name, "table")) g_eval_params.use_table = (int)v;
@@ -783,6 +792,7 @@ static inline int threat_material(const Board *b, int c) {
     return k[P4_FLEX3] + k[P4_FLEX3_PLUS] + 2 * k[P4_FLEX3_2X] + k[P4_BLOCK4] + k[P4_BLOCK4_PLUS] + 2 * k[P4_BLOCK4_FLEX3];
 }
 long tvct_stat[3];  // 木の中の VCT: 呼んだ回数、勝ち、負けのノード
+long leaf_stat[4];   // 葉 (評価を返す節点) の数、うち手番側に四の点がない (末端の VCF を呼ばない) 数
 long mv_cnt[2][13][13]; int mv_stat_depth = -1;   // G2_MVSTAT=<残り深さ> で集計
 __attribute__((constructor)) static void mv_stat_init(void) { const char *e = getenv("G2_MVSTAT"); if (e) mv_stat_depth = atoi(e); }
 long mv_stat[2][13][13];   // 読んだ手の数 [相手の脅威を受ける節点か][自分の pat4][相手の pat4]
@@ -908,6 +918,8 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
             if (g_fvcf ? fvcf_solve(b, me, sp.leaf_vcf_depth, sp.leaf_vcf, &r) : tss_solve(b, me, TSS_VCF, sp.leaf_vcf_depth, sp.leaf_vcf, &r))
                 return SCORE_WIN - ply - r.nline;
         }
+        leaf_stat[0]++;
+        if (b->p4cnt[me][P4_BLOCK4] + b->p4cnt[me][P4_BLOCK4_PLUS] + b->p4cnt[me][P4_BLOCK4_FLEX3] == 0) leaf_stat[1]++;
         if (depth <= -sp.qdepth) return sp.tpv == 1 ? tp_leaf_eval(b, evaluate(b), alpha, beta) : evaluate(b);
         if (!op_threat) {
             stand = sp.tpv == 1 ? tp_leaf_eval(b, evaluate(b), alpha, beta) : evaluate(b);
@@ -1202,7 +1214,13 @@ moves_loop:
             else nd = depth, carry = 1;
         }
         if (ply + 1 < MAX_PLY) c->xhalf[ply + 1] = (uint8_t)carry;
-        if (sp.ext_four && !qmode && a4 >= P4_BLOCK4 && a4 <= P4_BLOCK4_FLEX3 && ext_ok) nd = depth;
+        if (sp.ext_four == 1 && !qmode && a4 >= P4_BLOCK4 && a4 <= P4_BLOCK4_FLEX3 && ext_ok) nd = depth;
+        // ext_four == 2: 四を半手だけ延長する (四 2 回で 1 手分。繰り越しは三の半手延長と共用)
+        if (sp.ext_four == 2 && !qmode && a4 >= P4_BLOCK4 && a4 <= P4_BLOCK4_FLEX3 && ext_ok) {
+            if (carry) nd = depth, carry = 0;
+            else carry = 1;
+            if (ply + 1 < MAX_PLY) c->xhalf[ply + 1] = (uint8_t)carry;
+        }
         if (prep && sp.l3x_ext && ext_ok) nd = depth, l3x_stat[3]++;
         if (sing_ext && q == ttmove && ext_ok && nd < depth) nd = depth;
         if (tzon && sp.tz_ext && ext_ok) nd = depth;

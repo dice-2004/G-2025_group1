@@ -175,6 +175,8 @@ static int speed(Rule rule, int depth, int threads) {
     extern long tvct_stat[3];
     if (tvct_stat[0]) printf("tvct: calls %ld wins %ld fail-nodes %ld\n", tvct_stat[0], tvct_stat[1], tvct_stat[2]);
     if (getenv("G2_MVSTAT")) {
+        extern long leaf_stat[4];
+        printf("leaf: eval-leaves %ld no-b4 %ld\n", leaf_stat[0], leaf_stat[1]);
         extern long mv_stat[2][13][13], mv_cnt[2][13][13]; extern int mv_stat_depth;
 
         long tot = 0;
@@ -331,7 +333,7 @@ static int evalmoves(Rule rule) {
         for (int i = 0; i < n; i++)
             for (int j = i + 1; j < n; j++)
                 if (val[j] > val[i]) { int t = val[i]; val[i] = val[j]; val[j] = t; t = mv[i]; mv[i] = mv[j]; mv[j] = t; }
-        printf("static %d:", evaluate(&b));
+        printf("static %d: vsum %d %d |", evaluate(&b), (int)b.vsum[board_side(&b)], (int)b.vsum[opp_color(board_side(&b))]);
         for (int i = 0; i < n && i < 15; i++) printf(" %d,%d=%d", pos_x(mv[i]), pos_y(mv[i]), val[i]);
         printf("\n");
     }
