@@ -151,6 +151,7 @@ typedef struct {
     int seval[MAX_PLY];     // 節点の静的評価 (手の数の枝刈り・futility の「評価が良くなっているか」用)
     int excl[MAX_PLY + 1];  // singular 延長の確かめで読まない手 (その手数の節点、-1 = なし)
     uint8_t xhalf[MAX_PLY]; // ext_three == 2 の半手の延長の繰り越し (その手数の節点に渡る)
+    int keep_off;       // gen_moves: keep4 を使わない (ルートで相手に VCF/VCT があるとき。四が受けの手段になる)
     int drop4;          // gen_moves: 相手の活三を受ける節点で、受けにならない自分のただの四を除く
 } Ctx;
 
@@ -272,6 +273,8 @@ static struct {
     int lmr_pv;         // lmr_log のとき PV の節点での削減を何 % にするか
     int tact_own;       // 自分のこの形 (Pattern4) 以上を作る手を「戦術的」(LMP・LMR をしない) とする
     int tact_def;       // 相手のこの形以上の点をふさぐ手を「戦術的」とする
+    int keep4, keep4_def;     // 脅威の温存: 受けにならない自分のただの四 (相手の pat4 < keep4_def) を候補から外す。1 = ルートだけ、2 = 木の全体 (既定 0)
+    int defer4, defer4_def;   // 受けにならない自分のただの四を残り深さ defer4 以下で後回し (読まない)。四は後でも打てる (既定 0)
     int def_own4;       // 0 = 相手の活三を受ける節点で、自分に VCF がなければ受けにならない自分のただの四を読まない
     int def_vcf_nodes, def_vcf_depth, def_vcf_min, def_own4_depth;   // その VCF の確かめのノード数・深さ
     int lmr_pol, lmr_pol_max;   // policy のとき、点が最大の手より lmr_pol 低いごとに LMR を 1 手増やす (最大 lmr_pol_max)。0 = しない
@@ -332,7 +335,7 @@ static struct {
     .tz_nodes = 300, .tz_ext = 0, .nmp = 0, .nmp_depth = 3,
     .nmp_r = 2, .own_vcf = 0, .ext_four = 0, .ext_limit = 4,
     .lmr_log = 0, .lmr_pv = 66, .tact_own = P4_FLEX3, .tact_def = P4_FLEX3,
-    .vct_dfpn = 1, .def_line = 0, .policy = 0, .lmr_pol = 0, .lmr_pol_max = 2, .def_own4 = 0, .def_vcf_nodes = 300, .def_vcf_depth = 16, .def_vcf_min = 99, .def_own4_depth = 2,
+    .vct_dfpn = 1, .def_line = 0, .policy = 0, .lmr_pol = 0, .lmr_pol_max = 2, .def_own4 = 0, .defer4 = 0, .defer4_def = 2, .keep4 = 0, .keep4_def = 2, .def_vcf_nodes = 300, .def_vcf_depth = 16, .def_vcf_min = 99, .def_own4_depth = 2,
 };
 
 int search_soft_pct(void) { return sp.soft_pct; }
@@ -507,6 +510,10 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "lmr_pol")) sp.lmr_pol = (int)v;
     else if (!strcmp(name, "lmr_pol_max")) sp.lmr_pol_max = (int)v;
     else if (!strcmp(name, "def_own4")) sp.def_own4 = (int)v;
+    else if (!strcmp(name, "keep4")) sp.keep4 = (int)v;
+    else if (!strcmp(name, "keep4_def")) sp.keep4_def = (int)v;
+    else if (!strcmp(name, "defer4")) sp.defer4 = (int)v;
+    else if (!strcmp(name, "defer4_def")) sp.defer4_def = (int)v;
     else if (!strcmp(name, "def_vcf_nodes")) sp.def_vcf_nodes = (int)v;
     else if (!strcmp(name, "def_vcf_depth")) sp.def_vcf_depth = (int)v;
     else if (!strcmp(name, "def_vcf_min")) sp.def_vcf_min = (int)v;
@@ -664,6 +671,7 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
             if (op_threat && a < P4_BLOCK4 && !blocks_threat(b, op, q)) continue;
             if (defl && a < P4_BLOCK4 && c->tzmark[q] != c->tzgen) continue;
             if (c->drop4 && (a == P4_BLOCK4 || a == P4_BLOCK4_PLUS) && !blocks_threat(b, op, q)) continue;
+            if (sp.keep4 && a == P4_BLOCK4 && d < sp.keep4_def && !op_threat && !tzon && !c->keep_off && mode != 1 && (sp.keep4 >= 2 || ply == 0)) continue;
             if (tzon && a < P4_BLOCK4 && c->tzmark[q] != c->tzgen) continue;
             int s = vme[board_pidx(b, me, q)] + vop[board_pidx(b, op, q)] * DEF_SCALE / 64;
             if (polon && (sp.policy == 1 || a < P4_BLOCK4)) {
@@ -707,6 +715,7 @@ static int gen_ok(Ctx *c, int q, int me, int op, int op_threat, int mode) {
     if (mode == 1 && (a < sp.q_min_p4 || a > P4_BLOCK4_FLEX3)) return 0;
     if (op_threat && a < P4_BLOCK4 && !blocks_threat(b, op, q)) return 0;
     if (c->drop4 && (a == P4_BLOCK4 || a == P4_BLOCK4_PLUS) && !blocks_threat(b, op, q)) return 0;
+    if (sp.keep4 >= 2 && a == P4_BLOCK4 && b->pat4[op][q] < sp.keep4_def && !op_threat && mode != 1) return 0;
     return 1;
 }
 
@@ -774,6 +783,9 @@ static inline int threat_material(const Board *b, int c) {
     return k[P4_FLEX3] + k[P4_FLEX3_PLUS] + 2 * k[P4_FLEX3_2X] + k[P4_BLOCK4] + k[P4_BLOCK4_PLUS] + 2 * k[P4_BLOCK4_FLEX3];
 }
 long tvct_stat[3];  // 木の中の VCT: 呼んだ回数、勝ち、負けのノード
+long mv_cnt[2][13][13]; int mv_stat_depth = -1;   // G2_MVSTAT=<残り深さ> で集計
+__attribute__((constructor)) static void mv_stat_init(void) { const char *e = getenv("G2_MVSTAT"); if (e) mv_stat_depth = atoi(e); }
+long mv_stat[2][13][13];   // 読んだ手の数 [相手の脅威を受ける節点か][自分の pat4][相手の pat4]
 long bd_stat[6];    // 束ね読み: 試した回数、成功、捨てた手の数、束の石の数の合計
 long sing_stat[3];  // singular: 確かめた回数、延長、multi-cut
 long l3x_stat[4];   // 準備手: 節点、調べた手、VCT の脅威になった手、延長した手
@@ -1133,6 +1145,8 @@ moves_loop:
             int a = b->pat4[me][q];
             if (a < P4_BLOCK4 && a != P4_FLEX3_2X && (sp.tfut >= 2 || a >= P4_FLEX3 || !tactical)) continue;
         }
+        if (sp.defer4 && !qmode && !is_pv && !op_threat && depth <= sp.defer4 && searched > 0 && best > -SCORE_WIN_MIN &&
+            b->pat4[me][q] == P4_BLOCK4 && b->pat4[op][q] < sp.defer4_def) continue;
         if (restricted(b, me) && board_is_forbidden(b, q)) continue;
         int rzout = rzon && !tactical && searched >= sp.rz_after && rz_count(ply) > 0 && best > -SCORE_WIN_MIN &&
                     !rz_relevant(ply, q, sp.rz_rad, sp.rz_lines);
@@ -1178,6 +1192,7 @@ moves_loop:
         board_move(b, q);
         int v, nd = depth - 1;
         // 活三を作る手 (相手は受けるしかない) の延長
+        long mv_nb = c->nodes; int mv_d = b->pat4[op][q];
         int ext_ok = 2 * (ply + depth) < sp.ext_limit * c->root_depth;
         int carry = ply < MAX_PLY - 1 ? c->xhalf[ply] : 0;   // ext_three == 2: 半手分の延長の繰り越し
         if (sp.ext_three == 1 && !qmode && a4 >= P4_FLEX3 && a4 <= P4_FLEX3_2X && ext_ok) nd = depth;
@@ -1241,6 +1256,7 @@ moves_loop:
         }
         board_undo(b);
         if (c->stop) return 0;
+        if (!qmode && depth == mv_stat_depth) mv_stat[op_threat != 0][a4][mv_d] += c->nodes - mv_nb, mv_cnt[op_threat != 0][a4][mv_d]++;
         searched++;
 
         if (v > best) {
@@ -1628,8 +1644,10 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     int op_threat = legal_flex4(b, op) >= 0;
     Move list[MAX_MOVES];
     TTData e;
+    c->keep_off = ndefs > 0;
     int n = gen_moves(c, list, me, op, op_threat, tt_probe(b->hash, &e) ? e.move : -1, 0, 0, 0);
     sort_moves(list, n);
+    c->keep_off = 0;
     RootMove root[MAX_MOVES];
     int nr = 0;
     // 相手の VCF への受け (vcf_defenses、受けになり得る手の上位集合) を先に調べる。def_restrict なら受けだけに絞る
