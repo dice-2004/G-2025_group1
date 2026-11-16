@@ -277,6 +277,7 @@ static struct {
     int ext_four;       // 1 = 四を作る手 (相手は止めるしかない) も深さを減らさない (延長。ルートの深さの 2 倍まで)
     int ext_limit;      // 延長の上限: ply + depth < ext_limit * ルートの深さ / 2
     int lmr_log;        // 0 = 従来の LMR。正なら削減 = ln(深さ) * ln(手の順番) * 100 / lmr_log (深い所ほど遅い手を大きく削る)
+    int lmr_log_min;    // lmr_log を使う残り深さの下限 (それより浅い節点は従来の LMR)。短い持ち時間で悪化させないため
     int lmr_pv;         // lmr_log のとき PV の節点での削減を何 % にするか
     int tact_own;       // 自分のこの形 (Pattern4) 以上を作る手を「戦術的」(LMP・LMR をしない) とする
     int tact_def;       // 相手のこの形以上の点をふさぐ手を「戦術的」とする
@@ -508,6 +509,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "ext_four")) sp.ext_four = (int)v;
     else if (!strcmp(name, "ext_limit")) sp.ext_limit = (int)v;
     else if (!strcmp(name, "lmr_log")) { sp.lmr_log = (int)v; lmr_table_ok = 0; }
+    else if (!strcmp(name, "lmr_log_min")) sp.lmr_log_min = (int)v;
     else if (!strcmp(name, "lmr_pv")) sp.lmr_pv = (int)v;
     else if (!strcmp(name, "tact_own")) sp.tact_own = (int)v;
     else if (!strcmp(name, "tact_def")) sp.tact_def = (int)v;
@@ -1229,7 +1231,7 @@ moves_loop:
         } else {
             int r = 0;
             if (!qmode && depth >= 3 && searched >= sp.lmr_moves && !tactical) {
-                if (sp.lmr_log) {
+                if (sp.lmr_log && depth >= sp.lmr_log_min) {
                     r = lmr_table[depth < 63 ? depth : 63][searched < 63 ? searched : 63];
                     if (is_pv) r = r * sp.lmr_pv / 100;
                     if (r < 1) r = 1;
