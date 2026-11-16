@@ -177,7 +177,7 @@ static int speed(Rule rule, int depth, int threads) {
     if (getenv("G2_MVSTAT")) {
         extern long leaf_stat[4];
         printf("leaf: eval-leaves %ld no-b4 %ld\n", leaf_stat[0], leaf_stat[1]);
-        extern long mv_stat[2][13][13], mv_cnt[2][13][13]; extern int mv_stat_depth;
+        extern long mv_stat[2][13][13], mv_cnt[2][13][13];
 
         long tot = 0;
         for (int i = 0; i < 2 * 169; i++) tot += ((long *)mv_stat)[i];

@@ -281,6 +281,7 @@ static struct {
     int lmr_pv;         // lmr_log のとき PV の節点での削減を何 % にするか
     int tact_own;       // 自分のこの形 (Pattern4) 以上を作る手を「戦術的」(LMP・LMR をしない) とする
     int tact_def;       // 相手のこの形以上の点をふさぐ手を「戦術的」とする
+    int ch, ch_depth;         // 補正の履歴: 深く読んだ値と静的評価のずれを脅威の数の組ごとに対局中に覚え、葉の評価に足す (ch = 重み /64、0 = 使わない)
     int keep4, keep4_def;     // 脅威の温存: 受けにならない自分のただの四 (相手の pat4 < keep4_def) を候補から外す。1 = ルートだけ、2 = 木の全体 (既定 0)
     int defer4, defer4_def;   // 受けにならない自分のただの四を残り深さ defer4 以下で後回し (読まない)。四は後でも打てる (既定 0)
     int def_own4;       // 0 = 相手の活三を受ける節点で、自分に VCF がなければ受けにならない自分のただの四を読まない
@@ -343,7 +344,7 @@ static struct {
     .tz_nodes = 300, .tz_ext = 0, .nmp = 0, .nmp_depth = 3,
     .nmp_r = 2, .own_vcf = 0, .ext_four = 0, .ext_limit = 4,
     .lmr_log = 0, .lmr_pv = 66, .tact_own = P4_FLEX3, .tact_def = P4_FLEX3,
-    .vct_dfpn = 1, .def_line = 0, .policy = 0, .lmr_pol = 0, .lmr_pol_max = 2, .def_own4 = 0, .defer4 = 0, .defer4_def = 2, .keep4 = 0, .keep4_def = 2, .def_vcf_nodes = 300, .def_vcf_depth = 16, .def_vcf_min = 99, .def_own4_depth = 2,
+    .vct_dfpn = 1, .def_line = 0, .policy = 0, .lmr_pol = 0, .lmr_pol_max = 2, .def_own4 = 0, .defer4 = 0, .defer4_def = 2, .keep4 = 0, .keep4_def = 2, .ch = 0, .ch_depth = 2, .def_vcf_nodes = 300, .def_vcf_depth = 16, .def_vcf_min = 99, .def_own4_depth = 2,
 };
 
 int search_soft_pct(void) { return sp.soft_pct; }
@@ -519,6 +520,8 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "lmr_pol")) sp.lmr_pol = (int)v;
     else if (!strcmp(name, "lmr_pol_max")) sp.lmr_pol_max = (int)v;
     else if (!strcmp(name, "def_own4")) sp.def_own4 = (int)v;
+    else if (!strcmp(name, "ch")) sp.ch = (int)v;
+    else if (!strcmp(name, "ch_depth")) sp.ch_depth = (int)v;
     else if (!strcmp(name, "keep4")) sp.keep4 = (int)v;
     else if (!strcmp(name, "keep4_def")) sp.keep4_def = (int)v;
     else if (!strcmp(name, "defer4")) sp.defer4 = (int)v;
@@ -849,6 +852,32 @@ static void qpot_order(Board *b, Move *list, int n, int me, int op) {
     }
 }
 
+// 補正の履歴 (correction history): 事前の学習ではなく、その対局の探索の中で「深く読んだ値 − 静的評価」のずれを
+// 脅威の数の組 (両方の色の Pattern4 ごとの空点の数を粗く丸めたもの) ごとに覚える。値は評価の 16 倍
+static int16_t ch_tab[2][1 << 16];
+long ch_stat[2];
+static inline unsigned ch_key(const Board *b, int me, int op) {
+    const int16_t *m = b->p4cnt[me], *o = b->p4cnt[op];
+    unsigned h = 0;
+    for (int k = P4_FLEX2_2X; k <= P4_BLOCK4_FLEX3; k++) {
+        h = h * 4 + (unsigned)(m[k] > 3 ? 3 : m[k]);
+        h = h * 4 + (unsigned)(o[k] > 3 ? 3 : o[k]);
+    }
+    int a = m[P4_BLOCK3] / 3, d = o[P4_BLOCK3] / 3, e = m[P4_FLEX2] / 6, f = o[P4_FLEX2] / 6;
+    h = h * 4 + (unsigned)(a > 3 ? 3 : a);
+    h = h * 4 + (unsigned)(d > 3 ? 3 : d);
+    h = h * 4 + (unsigned)(e > 3 ? 3 : e);
+    h = h * 4 + (unsigned)(f > 3 ? 3 : f);
+    h *= 2654435761u;
+    return h >> 16;
+}
+static inline int leaf_eval(const Board *b) {
+    int v = evaluate(b);
+    if (!sp.ch) return v;
+    int me = board_side(b);
+    return v + ch_tab[me == BLACK ? 0 : 1][ch_key(b, me, opp_color(me))] * sp.ch / (64 * 16);
+}
+
 static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     Board *b = c->b;
     // tpv == 2: 葉ではなく残り深さ 1 の局面で 1 回だけ VCF の旗 (tp.c) を調べ、補正の分だけ窓をずらして読み、値に足す
@@ -922,9 +951,9 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         }
         leaf_stat[0]++;
         if (b->p4cnt[me][P4_BLOCK4] + b->p4cnt[me][P4_BLOCK4_PLUS] + b->p4cnt[me][P4_BLOCK4_FLEX3] == 0) leaf_stat[1]++;
-        if (depth <= -sp.qdepth) return sp.tpv == 1 ? tp_leaf_eval(b, evaluate(b), alpha, beta) : evaluate(b);
+        if (depth <= -sp.qdepth) return sp.tpv == 1 ? tp_leaf_eval(b, evaluate(b), alpha, beta) : leaf_eval(b);
         if (!op_threat) {
-            stand = sp.tpv == 1 ? tp_leaf_eval(b, evaluate(b), alpha, beta) : evaluate(b);
+            stand = sp.tpv == 1 ? tp_leaf_eval(b, evaluate(b), alpha, beta) : leaf_eval(b);
             if (stand >= beta) return stand;
             if (stand > alpha) alpha = stand;
         }
@@ -1350,6 +1379,17 @@ moves_loop:
 
     int flag = best >= beta ? TT_LOWER : (best > alpha0 ? TT_EXACT : TT_UPPER);
     tt_store(b->hash, best, bestmove, depth, flag, ply);
+    if (sp.ch && !qmode && depth >= sp.ch_depth && searched > 0 && !op_threat && best > -SCORE_WIN_MIN && best < SCORE_WIN_MIN) {
+        int st = evaluate(b);
+        if (flag == TT_EXACT || (flag == TT_LOWER && best > st) || (flag == TT_UPPER && best < st)) {
+            int d = best - st, w = depth < 8 ? depth : 8;
+            if (d > 1000) d = 1000;
+            if (d < -1000) d = -1000;
+            int16_t *e = &ch_tab[me == BLACK ? 0 : 1][ch_key(b, me, op)];
+            *e = (int16_t)(*e + (d * 16 - *e) * w / 256);
+            ch_stat[0]++;
+        }
+    }
     return best;
 }
 
