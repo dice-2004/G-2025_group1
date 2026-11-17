@@ -281,6 +281,7 @@ static struct {
     int lmr_pv;         // lmr_log のとき PV の節点での削減を何 % にするか
     int tact_own;       // 自分のこの形 (Pattern4) 以上を作る手を「戦術的」(LMP・LMR をしない) とする
     int tact_def;       // 相手のこの形以上の点をふさぐ手を「戦術的」とする
+    int bfm, bfm_d, bfm_k, bfm_margin, bfm_pct;   // 最良優先の木 (bfm = 1): ルートから最善の筋をたどって葉を広げ、葉は深さ bfm_d の探索で点を付ける (既定 0)
     int ch, ch_depth;         // 補正の履歴: 深く読んだ値と静的評価のずれを脅威の数の組ごとに対局中に覚え、葉の評価に足す (ch = 重み /64、0 = 使わない)
     int keep4, keep4_def;     // 脅威の温存: 受けにならない自分のただの四 (相手の pat4 < keep4_def) を候補から外す。1 = ルートだけ、2 = 木の全体 (既定 0)
     int defer4, defer4_def;   // 受けにならない自分のただの四を残り深さ defer4 以下で後回し (読まない)。四は後でも打てる (既定 0)
@@ -344,7 +345,7 @@ static struct {
     .tz_nodes = 300, .tz_ext = 0, .nmp = 0, .nmp_depth = 3,
     .nmp_r = 2, .own_vcf = 0, .ext_four = 0, .ext_limit = 4,
     .lmr_log = 0, .lmr_pv = 66, .tact_own = P4_FLEX3, .tact_def = P4_FLEX3,
-    .vct_dfpn = 1, .def_line = 0, .policy = 0, .lmr_pol = 0, .lmr_pol_max = 2, .def_own4 = 0, .defer4 = 0, .defer4_def = 2, .keep4 = 0, .keep4_def = 2, .ch = 0, .ch_depth = 2, .def_vcf_nodes = 300, .def_vcf_depth = 16, .def_vcf_min = 99, .def_own4_depth = 2,
+    .vct_dfpn = 1, .def_line = 0, .policy = 0, .lmr_pol = 0, .lmr_pol_max = 2, .def_own4 = 0, .defer4 = 0, .defer4_def = 2, .keep4 = 0, .keep4_def = 2, .ch = 0, .ch_depth = 2, .bfm = 0, .bfm_d = 4, .bfm_k = 5, .bfm_margin = 400, .bfm_pct = 115, .def_vcf_nodes = 300, .def_vcf_depth = 16, .def_vcf_min = 99, .def_own4_depth = 2,
 };
 
 int search_soft_pct(void) { return sp.soft_pct; }
@@ -520,6 +521,11 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "lmr_pol")) sp.lmr_pol = (int)v;
     else if (!strcmp(name, "lmr_pol_max")) sp.lmr_pol_max = (int)v;
     else if (!strcmp(name, "def_own4")) sp.def_own4 = (int)v;
+    else if (!strcmp(name, "bfm")) sp.bfm = (int)v;
+    else if (!strcmp(name, "bfm_d")) sp.bfm_d = (int)v;
+    else if (!strcmp(name, "bfm_k")) sp.bfm_k = (int)v;
+    else if (!strcmp(name, "bfm_margin")) sp.bfm_margin = (int)v;
+    else if (!strcmp(name, "bfm_pct")) sp.bfm_pct = (int)v;
     else if (!strcmp(name, "ch")) sp.ch = (int)v;
     else if (!strcmp(name, "ch_depth")) sp.ch_depth = (int)v;
     else if (!strcmp(name, "keep4")) sp.keep4 = (int)v;
@@ -1526,6 +1532,121 @@ static void iterate(Ctx *c, RootMove *root, int nr, const SearchLimits *lim, Sea
     }
 }
 
+// ---------------------------------------------------------------- 最良優先の木 (best-first minimax)
+// αβ の反復深化は時間を 10 倍にしても 1.5 段しか深くならない (分岐の大半が三・四の応酬)。そこで木を明示的に持ち、
+// ルートから「今いちばん良い筋」をたどって葉を 1 つ広げる、を繰り返す。葉の点は浅い αβ (深さ bfm_d) で付け、
+// 親へは最大 (negamax) で戻す。時間はいちばん良い筋とその対案だけに使われ、主な筋は αβ よりずっと深くなる。
+// 点はすべて同じ深さの偶奇 (木の深さ + 探索の深さ) で付ける (手番の加点のぶれを避ける)。
+typedef struct {
+    int move;       // この節点に来る手
+    int val;        // この節点の手番側から見た点
+    int first, n;   // 子 (bf_nodes の添字)。first < 0 = まだ広げていない (-2 = 広げられない)
+} BfNode;
+#define BF_MAX 16384
+static BfNode bf_nodes[BF_MAX];
+static int bf_cnt;
+long bf_stat[4];   // 広げた回数、木の最大の深さ、最後の主な筋の長さ、αβ と違う手を選んだ回数
+
+// 節点 ni (盤はその局面) を広げる。cand/ncand が与えられたらその手 (ルート) を、なければ生成した上位 bfm_k 手を子にする
+static int bf_expand(Ctx *c, int ni, int t, const RootMove *cand, int ncand) {
+    Board *b = c->b;
+    int me = board_side(b), op = opp_color(me);
+    int mv[MAX_MOVES], n = 0;
+    if (cand) {
+        for (int i = 0; i < ncand; i++) mv[n++] = cand[i].pos;
+    } else {
+        if (b->p4cnt[me][P4_FIVE] || b->nmoves >= b->size * b->size) { bf_nodes[ni].first = -2; return 1; }
+        Move list[MAX_MOVES];
+        TTData e;
+        int op_threat = legal_flex4(b, op) >= 0;
+        int opfive = b->p4cnt[op][P4_FIVE];
+        if (opfive) {
+            int q = find_cell(b, op, P4_FIVE);
+            if (legal(b, me, q)) mv[n++] = q;
+        } else {
+            int tm = tt_probe(b->hash, &e) ? e.move : -1;
+            c->drop4 = 0;
+            int m = gen_moves(c, list, me, op, op_threat, tm, t < MAX_PLY ? t : MAX_PLY - 1, 0, 0);
+            sort_moves(list, m);
+            for (int i = 0; i < m && n < sp.bfm_k; i++)
+                if (legal(b, me, list[i].pos)) mv[n++] = list[i].pos;
+        }
+    }
+    if (n == 0 || bf_cnt + n > BF_MAX) { bf_nodes[ni].first = -2; return 1; }
+    int first = bf_cnt, best = -SCORE_INF;
+    int d = sp.bfm_d + ((t + 1) & 1);   // 子は木の深さ t + 1。t + 1 + d の偶奇をそろえる
+    for (int i = 0; i < n; i++) {
+        int alpha = best > -SCORE_INF ? best - sp.bfm_margin : -SCORE_INF;
+        board_move(b, mv[i]);
+        c->root_depth = t + 1 + d;
+        int v = -pvs(c, -SCORE_INF, -alpha, d, t + 1 < MAX_PLY - 12 ? t + 1 : MAX_PLY - 12, 1);
+        board_undo(b);
+        if (c->stop) return 0;
+        bf_nodes[first + i] = (BfNode){mv[i], -v, -1, 0};
+        if (v > best) best = v;
+    }
+    bf_cnt += n;
+    bf_nodes[ni].first = first;
+    bf_nodes[ni].n = n;
+    bf_nodes[ni].val = best;
+    return 1;
+}
+
+static int bf_best_child(int ni) {
+    const BfNode *nd = &bf_nodes[ni];
+    int bj = nd->first;
+    for (int j = nd->first + 1; j < nd->first + nd->n; j++)
+        if (-bf_nodes[j].val > -bf_nodes[bj].val) bj = j;
+    return bj;
+}
+
+static void bf_search(Ctx *c, RootMove *root, int nr, const SearchLimits *lim, SearchResult *res) {
+    Board *b = c->b;
+    double t_end = c->t0 + (double)(lim->soft_ms > 0 ? lim->soft_ms : lim->hard_ms) * sp.bfm_pct / 100;
+    if (lim->hard_ms > 0 && t_end > c->t0 + lim->hard_ms) t_end = c->t0 + lim->hard_ms;
+    c->hard_ms = (int)(t_end - c->t0);
+    bf_cnt = 1;
+    bf_nodes[0] = (BfNode){-1, 0, -1, 0};
+    int kroot = nr < sp.bfm_k + 3 ? nr : sp.bfm_k + 3;
+    if (!bf_expand(c, 0, 0, root, kroot)) return;
+    int path[MAX_PLY], maxt = 0, lastlen = 0;
+    while (!c->stop && now_ms() < t_end) {
+        int ni = 0, t = 0;
+        while (bf_nodes[ni].first >= 0 && t < MAX_PLY - 16) {
+            path[t] = ni;
+            ni = bf_best_child(ni);
+            board_move(b, bf_nodes[ni].move);
+            t++;
+        }
+        int v = bf_nodes[ni].val, ok = 1, dead = bf_nodes[ni].first == -2 || v > SCORE_WIN_MIN || v < -SCORE_WIN_MIN || t >= MAX_PLY - 16;
+        if (!dead) ok = bf_expand(c, ni, t, NULL, 0);
+        for (int k = t; k > 0; k--) board_undo(b);
+        if (!ok) break;
+        lastlen = t;
+        if (t > maxt) maxt = t;
+        if (dead) break;   // いちばん良い筋が読み切り (詰み・終局) に着いた
+        bf_stat[0]++;
+        for (int k = t - 1; k >= 0; k--) {
+            int pi = path[k], bj = bf_best_child(pi);
+            bf_nodes[pi].val = -bf_nodes[bj].val;
+        }
+    }
+    c->stop = 0;
+    int bj = bf_best_child(0);
+    if (lim->verbose) {
+        fprintf(stderr, "bfm: nodes %d expansions %ld max depth %d root value %d pv", bf_cnt, bf_stat[0], maxt, bf_nodes[0].val);
+        for (int ni = 0; bf_nodes[ni].first >= 0;) { ni = bf_best_child(ni); fprintf(stderr, " %d,%d", pos_x(bf_nodes[ni].move), pos_y(bf_nodes[ni].move)); }
+        fprintf(stderr, "\n");
+    }
+    if (maxt > bf_stat[1]) bf_stat[1] = maxt;
+    bf_stat[2] = lastlen;
+    if (bf_nodes[bj].move != res->move) bf_stat[3]++;
+    res->move = bf_nodes[bj].move;
+    res->score = bf_nodes[0].val;
+    res->pvlen = 1;
+    res->pv[0] = res->move;
+}
+
 typedef struct {
     Ctx *c;
     RootMove root[MAX_MOVES];
@@ -1776,7 +1897,14 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         h->res.move = -1;
         started[t] = pthread_create(&th[t], NULL, helper_main, h) == 0;
     }
-    iterate(c, root, nr, lim, res);
+    if (sp.bfm) {
+        // 最良優先の木: 先に浅い反復深化で手を並べ、残りの時間は木を広げる
+        SearchLimits sl = *lim;
+        sl.max_depth = sp.bfm_d + 1;
+        iterate(c, root, nr, &sl, res);
+        if (!c->stop && res->score < SCORE_WIN_MIN && res->score > -SCORE_WIN_MIN) bf_search(c, root, nr, lim, res);
+    } else
+        iterate(c, root, nr, lim, res);
     __atomic_store_n(&g_stop, 1, __ATOMIC_RELAXED);
     res->nodes = c->nodes;
     for (int t = 1; t < n_threads; t++) {
