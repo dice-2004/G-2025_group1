@@ -199,6 +199,8 @@
       if (r.x < 0) { result = 3; return; }
       await play(r.x, r.y, { ...r.info, think_ms: Number($('time').value) });
       if (g !== game) return;
+      // あなたの考慮時間にも読む (思考時間の 3 倍、最大 6 秒まで。次の命令が来たらやめる)
+      if (!result && $('ponder') && $('ponder').checked) worker.postMessage({ type: 'ponder', ms: Math.min(6000, 3 * Number($('time').value)) });
       showThought(r, moves.length);
     } catch (e) {
       setStatus('エラー: ' + e.message, 'lose');

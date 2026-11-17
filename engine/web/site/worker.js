@@ -21,8 +21,26 @@ function state(size) {
   return { forbidden, result: g.g2_result() };
 }
 
+// 相手 (人) の考慮時間に読む。wasm は途中で止められないので 100ms ずつ読み、合間に次の命令を受ける。
+// 命令が来たらやめる (pondering を進めて古い予約を無効にする)。合計は budget ms まで (電池を使いすぎないように)
+let pondering = 0;
+function ponder(budget) {
+  const token = ++pondering;
+  let left = budget;
+  const slice = () => {
+    if (token !== pondering || left <= 0) return;
+    const t0 = performance.now();
+    let depth = 0;
+    try { depth = g.g2_ponder(100); } catch (e) { return; }
+    left -= Math.max(20, performance.now() - t0);
+    if (depth > 0) setTimeout(slice, 0);   // 0 = 読むものがない (終局・ブック・即決)
+  };
+  setTimeout(slice, 0);
+}
+
 self.onmessage = async (ev) => {
   const m = ev.data;
+  pondering++;   // どの命令でも先読みをやめる
   if (m.type === 'init') { boot(m.bytes); return; }   // 1 ファイル版: wasm の中身を受け取る
   if (!ready) boot(fetch('g2.wasm' + V).then((r) => r.arrayBuffer()));
   try {
@@ -37,6 +55,8 @@ self.onmessage = async (ev) => {
     } else if (m.type === 'undo') {
       for (let i = 0; i < m.n; i++) g.g2_undo();
       self.postMessage({ type: 'state', id: m.id, ...state(m.size) });
+    } else if (m.type === 'ponder') {
+      ponder(m.ms);   // 返事はしない
     } else if (m.type === 'think') {
       const t0 = performance.now();
       const r = g.g2_think(m.ms);

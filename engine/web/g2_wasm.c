@@ -33,6 +33,7 @@ EXPORT(g2_new_game) void g2_new_game(int rule, int size) {
     if (size < 5 || size > MAX_SIZE) size = 15;
     board_init(&g_board, size, &g_rule);
     search_new_game();
+    search_warmup();   // 表のページを先に割り当てる (最初の手を遅くしない)
 }
 
 // 手番側の石を (x, y) に置く。置けたら 1
@@ -101,6 +102,22 @@ EXPORT(g2_think) int g2_think(int time_ms) {
     g_info[INFO_NODES] = (int)g_res.nodes;
     if (g_res.move < 0) return -1;
     return pos_y(g_res.move) * 32 + pos_x(g_res.move);
+}
+
+// 相手 (人) の考慮時間に読む: 今の局面 (相手の手番) を ms だけ探索して置換表に結果を残す (手は返さない)。
+// ブラウザの wasm は 1 スレッドで途中で止められないので、Worker が短い ms で繰り返し呼び、合間に次の命令を見る。
+// 戻り値は読み終えた深さ (0 = 読むものがない: 終局・ブックの局面・即決の手)
+EXPORT(g2_ponder) int g2_ponder(int ms) {
+    int bm;
+    if (board_last_move_wins(&g_board) || g_board.nmoves >= g_board.size * g_board.size) return 0;
+    if (book_probe(&g_board, &bm)) return 0;
+    SearchLimits sl = {0};
+    sl.hard_ms = ms < 10 ? 10 : ms;
+    sl.ponder = 1;
+    SearchResult r;
+    memset(&r, 0, sizeof r);
+    search_root(&g_board, &sl, &r);
+    return r.depth;
 }
 
 EXPORT(g2_info) int g2_info(int i) { return (i >= 0 && i < INFO_N) ? g_info[i] : 0; }
