@@ -100,6 +100,15 @@ void fvcf_clear(void) {
 
 void fvcf_set_thread(int id) { tid = id < 0 || id >= MAX_THREADS ? 0 : id; }
 
+// 対局の前に表を確保して全ページに触れておく
+void fvcf_warm(int id) {
+    if (id < 0 || id >= MAX_THREADS || tts[id]) return;
+    tts[id] = calloc(TT_SIZE, sizeof(Ent));
+    if (!tts[id]) return;
+    memset(tts[id], 0, sizeof(Ent) * TT_SIZE);
+    tt_epoch[id] = __atomic_load_n(&fv_epoch, __ATOMIC_RELAXED);
+}
+
 // useset = 1 (VCF の探索): key と攻め側のパターン・四の点の集合を保つ。0 (手順の再生): key だけを保つ
 static inline __attribute__((always_inline)) void touch(int q, const int vcf) {
     if (S.st[q] == S.gen) return;

@@ -319,6 +319,13 @@ static void mid(int is_or, int ply, uint32_t thpn, uint32_t thdn, uint32_t *opn,
     *odn = dn;
 }
 
+// 対局の前に (探索するスレッドで) 表を確保して全ページに触れておく
+void dfpn_warm(void) {
+    if (D.tt) return;
+    D.tt = calloc(DTT_SIZE, sizeof(DEntry));
+    if (D.tt) memset(D.tt, 0, sizeof(DEntry) * DTT_SIZE);
+}
+
 int dfpn_vct(Board *b, int attacker, long max_nodes, int max_ms, DfpnResult *res) {
     if (!D.tt) {
         D.tt = calloc(DTT_SIZE, sizeof(DEntry));

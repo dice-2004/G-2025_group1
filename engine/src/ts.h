@@ -15,6 +15,7 @@ typedef struct {
 } TsResult;
 
 int ts_win(Board *b, int attacker, int max_depth, long max_nodes, int max_ms, TsResult *res);
+void ts_warm(void);
 // 本探索の中から呼ぶ版: 置換表を消さない (同じ予算で何度も呼ぶ前提。前の呼び出しの結果を使い回す)
 int ts_probe(Board *b, int attacker, int max_depth, long max_nodes, TsResult *res);
 

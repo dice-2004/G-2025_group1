@@ -54,5 +54,6 @@ extern int g_and_zone;   // 1 = VCT の受けの局面で圏による省略を�
 void tss_clear(void);
 // 呼び出し元のスレッドの番号 (0〜15、既定 0)。スレッドごとに別の置換表を使う
 void tss_set_thread(int id);
+void tss_warm(int id);
 
 #endif

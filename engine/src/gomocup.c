@@ -90,6 +90,7 @@ int main(void) {
     srand((unsigned)time(NULL));
     board_global_init();
     setvbuf(stdout, NULL, _IOLBF, 0);
+    search_set_tt_size(64);   // INFO max_memory が 256MB 以上なら変わらない (START で触れたページをそのまま使える)
 
     while (fgets(line, sizeof line, stdin)) {
         line[strcspn(line, "\r\n")] = 0;
@@ -110,6 +111,7 @@ int main(void) {
             } else {
                 size = s;
                 new_game();
+                search_warmup();   // OK を返す前 (持ち時間の外) に表のページを割り当てておく
                 printf("OK\n");
             }
         } else if (!strcasecmp(line, "RESTART")) {
@@ -127,8 +129,9 @@ int main(void) {
                     long mb = val / 4 / (1 << 20);
                     search_set_tt_size((int)(mb < 4 ? 4 : mb > 64 ? 64 : mb));
                     search_new_game();
+                    search_warmup();
                 }
-                else if (!strcasecmp(key, "thread_num")) search_set_threads((int)val);
+                else if (!strcasecmp(key, "thread_num")) search_set_threads((int)val), search_warmup();
                 else if (!strcasecmp(key, "ponder")) ponder_on = (int)val;   // 1 = 相手の考慮時間に先読みする (既定 0)
                 else if (!strcasecmp(key, "max_depth")) limits.max_depth = (int)val;
                 else if (!strcasecmp(key, "max_node")) limits.max_nodes = val;
@@ -194,7 +197,8 @@ int main(void) {
         } else if (line[0]) {
             printf("UNKNOWN %s\n", line);
         }
-        if (!strcasecmp(line, "INFO") || !strcasecmp(line, "START") || !strcasecmp(line, "RESTART"))
+        // START / RESTART は審判が OK を待つので持ち時間に入らない。INFO は直後に TURN/BOARD が来るので引く
+        if (!strcasecmp(line, "INFO"))
             pending_ms += wall_ms() - cmd_t0;
         fflush(stdout);
     }

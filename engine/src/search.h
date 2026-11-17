@@ -33,6 +33,7 @@ typedef struct {
 void search_set_tt_size(int mb);   // 置換表の大きさ (既定 32MB)
 void search_set_threads(int n);    // 探索のスレッド数 (Lazy SMP、既定 1)
 void search_new_game(void);        // 履歴をクリア (置換表は残す)
+void search_warmup(void);          // 対局の前に呼ぶ: 表を確保して全ページに触れておく (最初の数手を遅くしない)
 void search_clear_tt(void);        // 置換表をクリア (ルール・評価の重みが変わったとき)
 void search_root(Board *b, const SearchLimits *lim, SearchResult *res);
 // 相手の考慮時間の先読み (ポンダー): 今の局面 (相手の手番) を別スレッドで読み続けて置換表を温める。

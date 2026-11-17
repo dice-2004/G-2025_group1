@@ -60,6 +60,15 @@ void tss_clear(void) {
     }
 }
 
+// 対局の前に表を確保して全ページに触れておく
+void tss_warm(int id) {
+    if (id < 0 || id >= TSS_MAX_THREADS || tts[id]) return;
+    tts[id] = calloc(TT_SIZE, sizeof(TTEntry));
+    if (!tts[id]) return;
+    memset(tts[id], 0, sizeof(TTEntry) * TT_SIZE);
+    tt_epoch[id] = tss_epoch;
+}
+
 void tss_set_thread(int id) {
     tss_tid = id < 0 || id >= TSS_MAX_THREADS ? 0 : id;
 }

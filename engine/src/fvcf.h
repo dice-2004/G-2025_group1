@@ -31,6 +31,7 @@ int fvcf_extra_solve(Board *b, int att, int extra, int max_depth, long max_nodes
 void fvcf_clear(void);
 // 呼び出し元のスレッドの番号 (tss_set_thread と同じ番号)
 void fvcf_set_thread(int id);
+void fvcf_warm(int id);
 
 // 1 (既定) = 脅威圏 (tz.c)・ルートと末端の VCF にこちらを使う (INFO p_fvcf 0 で vcf.c)
 extern int g_fvcf;

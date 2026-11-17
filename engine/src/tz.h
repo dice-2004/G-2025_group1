@@ -42,6 +42,9 @@ int tz_line_zone(Board *b, int att, const int *line, int n, TzZone *z);
 
 // ルール・盤が変わったとき (search_clear_tt から)
 void tz_clear(void);
+// 呼び出し元のスレッドの番号 (fvcf_set_thread と同じ番号)
+void tz_set_thread(int id);
+void tz_warm(int id);
 
 // 統計 (デバッグ用)
 typedef struct {

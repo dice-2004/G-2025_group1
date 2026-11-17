@@ -287,6 +287,13 @@ static int ts_alloc(void) {
     return T.tt && T.qc;
 }
 
+// 対局の前に (探索するスレッドで) 表を確保して全ページに触れておく
+void ts_warm(void) {
+    if (T.tt || !ts_alloc()) return;
+    memset(T.tt, 0, TTS_SIZE * sizeof(TsEntry));
+    memset(T.qc, 0, QC_SIZE * sizeof(QEntry));
+}
+
 int ts_win(Board *b, int attacker, int max_depth, long max_nodes, int max_ms, TsResult *res) {
     if (!ts_alloc()) return 0;
     memset(T.tt, 0, TTS_SIZE * sizeof(TsEntry));

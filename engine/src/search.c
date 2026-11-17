@@ -47,6 +47,7 @@ static size_t tt_mask;      // バケット数 - 1 (1 バケット = 2 エント
 static uint8_t tt_gen;
 static int tt_mb = 32;
 static int tt_used;         // 確保してから探索に使ったか
+static int tt_warm;         // 確保してから全ページに触れたか (search_warmup)
 
 void search_set_tt_size(int mb) {
     if (mb < 1) mb = 1;
@@ -62,6 +63,7 @@ static void tt_alloc(void) {
     size_t n = 1;
     while (n * 2 * sizeof(TTEntry) * 2 <= (size_t)tt_mb << 20) n *= 2;
     tt = calloc(n * 2, sizeof(TTEntry));
+    tt_warm = 0;
     tt_mask = n - 1;
 }
 
@@ -101,7 +103,9 @@ static int tt_probe(uint64_t key, TTData *out) {
     return 0;
 }
 
+static _Thread_local int tl_nostore;   // 1 = このスレッドは置換表に書かない (smp_tt = 0 の補助スレッド。原因調べ用)
 static void tt_store(uint64_t key, int value, int move, int depth, int flag, int ply) {
+    if (tl_nostore) return;
     TTEntry *e = &tt[(key & tt_mask) * 2];
     uint64_t d0 = ld(&e[0].data), d1 = ld(&e[1].data);
     int m0 = (ld(&e[0].key) ^ d0) == key, m1 = (ld(&e[1].key) ^ d1) == key;
@@ -170,6 +174,20 @@ void search_set_threads(int n) {
 void search_new_game(void) {
     tt_alloc();
     for (int i = 0; i < MAX_THREADS; i++) memset(ctxs[i].history, 0, sizeof ctxs[i].history), memset(ctxs[i].ph, 0, sizeof ctxs[i].ph);
+}
+
+// 対局の前 (START の応答の前、持ち時間の外) に呼ぶ: 置換表と各スレッドの詰み探索の表を確保して全ページに触れておく。
+// 触れていないページは最初に使う時に OS が割り当てる (1 ページごとに割り込み)。対局ごとに新しいプロセスで始めると
+// 最初の 2〜3 手がこれで遅くなり、複数スレッドでは割り当てが競合してさらに遅くなる (2 スレッドで最初の手が 1 段浅くなっていた)
+void search_warmup(void) {
+    tt_alloc();
+    if (tt && !tt_warm) {
+        if (!tt_used) memset(tt, 0, (tt_mask + 1) * 2 * sizeof(TTEntry));
+        tt_warm = 1;
+    }
+    for (int t = 0; t < n_threads; t++) fvcf_warm(t), tss_warm(t), tz_warm(t);
+    dfpn_warm();
+    ts_warm();
 }
 
 void search_clear_tt(void) {
@@ -292,6 +310,8 @@ static struct {
     int policy;         // 1 = 手の並べ方に policy_data.c の重みを使う、2 = 四を作る手は今の点のまま
     int def_line;       // 1 = 相手の活三への受けを、達四の点を通る線の上の点 (と自分の四) に絞る
     int vct_dfpn;       // 1 = ルートの VCT (vct_pct) を証明数探索 (dfpn.c) で調べる (既定。0 = vct_solve)
+    int smp_idle;   // 1 = 補助スレッドは作るだけで何もしない (原因調べ用)
+    int smp_tt, smp_skip;   // 補助スレッド: 置換表に書く (既定 1)、深さを飛ばす (既定 1)
     int smp_pick;       // 1 = 補助スレッドの結果 (勝ちの読み切り・より深い反復) も使う
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
@@ -338,7 +358,7 @@ static struct {
     .l3x = 0, .l3x_depth = 3, .l3x_min = 1, .l3x_top = 4, .l3x_ext = 1, .l3x_w = 1 << 20,
     .qpot = 0, .qpot_depth = 3, .qpot_w = 1000, .qpot_tact = 99, .probcut = 0, .pc_depth = 5, .pc_margin = 300, .pc_red = 3, .pc_moves = 3, .def_scale = 52, .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
     .vz = 0, .vz_depth = 4, .vz_nodes = 2000, .vz_keep = P4_BLOCK3, .vz_pv = 1, .vz_root = 0, .vz_root_nodes = 20000, .vz_tact = 0,
-    .smp_pick = 1, .dfdef_pct = 0, .dfver_pct = 0,
+    .smp_pick = 1, .smp_tt = 1, .smp_skip = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
     .cand_min = 0, .ext_three = 1, .vctdef_pct = 0, .unstable_pct = 100,
@@ -399,6 +419,9 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "unstable_pct")) sp.unstable_pct = (int)v;
     else if (!strcmp(name, "threads")) search_set_threads((int)v);
     else if (!strcmp(name, "smp_pick")) sp.smp_pick = (int)v;
+    else if (!strcmp(name, "smp_tt")) sp.smp_tt = (int)v;
+    else if (!strcmp(name, "smp_idle")) sp.smp_idle = (int)v;
+    else if (!strcmp(name, "smp_skip")) sp.smp_skip = (int)v;
     else if (!strcmp(name, "dfdef_pct")) sp.dfdef_pct = (int)v;
     else if (!strcmp(name, "dfver_pct")) sp.dfver_pct = (int)v;
     else if (!strcmp(name, "dfver_l3")) sp.dfver_l3 = (int)v;
@@ -958,8 +981,10 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
             if (g_fvcf ? fvcf_solve(b, me, sp.leaf_vcf_depth, sp.leaf_vcf, &r) : tss_solve(b, me, TSS_VCF, sp.leaf_vcf_depth, sp.leaf_vcf, &r))
                 return SCORE_WIN - ply - r.nline;
         }
-        leaf_stat[0]++;
-        if (b->p4cnt[me][P4_BLOCK4] + b->p4cnt[me][P4_BLOCK4_PLUS] + b->p4cnt[me][P4_BLOCK4_FLEX3] == 0) leaf_stat[1]++;
+        if (mv_stat_depth >= 0) {   // 集計は G2_MVSTAT の時だけ (全スレッドが同じ変数に書くと遅くなる)
+            leaf_stat[0]++;
+            if (b->p4cnt[me][P4_BLOCK4] + b->p4cnt[me][P4_BLOCK4_PLUS] + b->p4cnt[me][P4_BLOCK4_FLEX3] == 0) leaf_stat[1]++;
+        }
         if (depth <= -sp.qdepth) return sp.tpv == 1 ? tp_leaf_eval(b, evaluate(b), alpha, beta) : leaf_eval(b);
         if (!op_threat) {
             stand = sp.tpv == 1 ? tp_leaf_eval(b, evaluate(b), alpha, beta) : leaf_eval(b);
@@ -1456,7 +1481,7 @@ static void iterate(Ctx *c, RootMove *root, int nr, const SearchLimits *lim, Sea
     int max_depth = lim->max_depth > 0 ? lim->max_depth : MAX_PLY - 10;
     int prev_score = 0, prev_best = -1, unstable = 0;
     for (int depth = 1; depth <= max_depth; depth++) {
-        if (c->id > 0) {
+        if (c->id > 0 && sp.smp_skip) {
             // 補助スレッドはスレッドごとに一部の深さを飛ばす (同じ深さを全員で読まないように)
             int k = (c->id - 1) % 20;
             if ((depth + SKIP_PHASE[k]) / SKIP_SIZE[k] % 2) continue;
@@ -1681,6 +1706,9 @@ static void *helper_main(void *arg) {
     Helper *h = arg;
     tss_set_thread(h->c->id);
     fvcf_set_thread(h->c->id);
+    tz_set_thread(h->c->id);
+    tl_nostore = !sp.smp_tt;
+    if (sp.smp_idle) return NULL;
     iterate(h->c, h->root, h->nr, &h->lim, &h->res);
     return NULL;
 }
@@ -1913,6 +1941,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         h->nr = nr;
         h->lim = *lim;
         h->lim.soft_ms = 0;
+        if (sp.smp_idle == 2) h->lim.max_depth = 0;   // 原因調べ用: 主スレッドが深さ固定でも補助スレッドは止められるまで読む
         h->lim.verbose = 0;
         memset(&h->res, 0, sizeof h->res);
         h->res.move = -1;

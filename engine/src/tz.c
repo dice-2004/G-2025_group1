@@ -33,6 +33,14 @@ typedef struct {
 } TzState;
 
 static _Thread_local TzState *S;
+#define TZ_MAX_THREADS 16
+static TzState *tzs[TZ_MAX_THREADS];   // スレッドの番号ごとの状態 (補助スレッドは 1 手ごとに作り直されるので、番号で引いて使い回す)
+static _Thread_local int tz_tid;
+
+void tz_set_thread(int id) {
+    tz_tid = id < 0 || id >= TZ_MAX_THREADS ? 0 : id;
+    S = tzs[tz_tid];
+}
 static int tz_epoch;   // tz_clear のたびに増やす (各スレッドの表は次に使う時に消す)
 
 static const uint64_t SALT[3] = {0, 0x510e527fade682d1ULL, 0x9b05688c2b3e6c1fULL};
@@ -52,12 +60,25 @@ static int ensure(void) {
         }
         return 1;
     }
+    if (tzs[tz_tid]) { S = tzs[tz_tid]; return ensure(); }
     S = calloc(1, sizeof(TzState));
     if (!S) return 0;
     S->cache = calloc(CACHE_SIZE, sizeof(CacheEntry));
     if (!S->cache) { free(S); S = NULL; return 0; }
     S->epoch = __atomic_load_n(&tz_epoch, __ATOMIC_RELAXED);
+    tzs[tz_tid] = S;
     return 1;
+}
+
+// 対局の前に表を確保して全ページに触れておく (最初の数手がページの割り当てで遅くならないように)
+void tz_warm(int id) {
+    TzState *keep = S;
+    int kt = tz_tid;
+    tz_tid = id < 0 || id >= TZ_MAX_THREADS ? 0 : id;
+    S = tzs[tz_tid];
+    if (!S && ensure()) memset(S->cache, 0, sizeof(CacheEntry) * CACHE_SIZE);
+    S = keep;
+    tz_tid = kt;
 }
 
 TzStats tz_stats(void) {

@@ -21,6 +21,7 @@ typedef struct {
 // attacker を手番として VCT を調べる (attacker が手番でなくてもよい: パスしたら)。勝てれば 1。
 // max_nodes / max_ms (0 = 時間の制限なし) のどちらかに達したら打ち切る
 int dfpn_vct(Board *b, int attacker, long max_nodes, int max_ms, DfpnResult *res);
+void dfpn_warm(void);
 
 // 直前の dfpn_vct の証明 (同じ盤・同じ attacker で勝ち) の圏: 受け側の石がこの外に増えても勝ちは (ほぼ) 変わらない。
 // cells に空点も石の点も入れる。戻り値は個数、-1 = 絞れない (証明木が大きすぎる・圏を絞れない VCF がある)
