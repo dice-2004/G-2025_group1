@@ -281,7 +281,7 @@ static struct {
     int lmr_pv;         // lmr_log のとき PV の節点での削減を何 % にするか
     int tact_own;       // 自分のこの形 (Pattern4) 以上を作る手を「戦術的」(LMP・LMR をしない) とする
     int tact_def;       // 相手のこの形以上の点をふさぐ手を「戦術的」とする
-    int bfm, bfm_d, bfm_k, bfm_margin, bfm_pct;   // 最良優先の木 (bfm = 1): ルートから最善の筋をたどって葉を広げ、葉は深さ bfm_d の探索で点を付ける (既定 0)
+    int bfm, bfm_d, bfm_k, bfm_margin, bfm_pct, bfm_share, bfm_veto;   // 最良優先の木 (bfm = 1): ルートから最善の筋をたどって葉を広げ、葉は深さ bfm_d の探索で点を付ける (既定 0)
     int ch, ch_depth;         // 補正の履歴: 深く読んだ値と静的評価のずれを脅威の数の組ごとに対局中に覚え、葉の評価に足す (ch = 重み /64、0 = 使わない)
     int keep4, keep4_def;     // 脅威の温存: 受けにならない自分のただの四 (相手の pat4 < keep4_def) を候補から外す。1 = ルートだけ、2 = 木の全体 (既定 0)
     int defer4, defer4_def;   // 受けにならない自分のただの四を残り深さ defer4 以下で後回し (読まない)。四は後でも打てる (既定 0)
@@ -345,7 +345,7 @@ static struct {
     .tz_nodes = 300, .tz_ext = 0, .nmp = 0, .nmp_depth = 3,
     .nmp_r = 2, .own_vcf = 0, .ext_four = 0, .ext_limit = 4,
     .lmr_log = 0, .lmr_pv = 66, .tact_own = P4_FLEX3, .tact_def = P4_FLEX3,
-    .vct_dfpn = 1, .def_line = 0, .policy = 0, .lmr_pol = 0, .lmr_pol_max = 2, .def_own4 = 0, .defer4 = 0, .defer4_def = 2, .keep4 = 0, .keep4_def = 2, .ch = 0, .ch_depth = 2, .bfm = 0, .bfm_d = 4, .bfm_k = 5, .bfm_margin = 400, .bfm_pct = 115, .def_vcf_nodes = 300, .def_vcf_depth = 16, .def_vcf_min = 99, .def_own4_depth = 2,
+    .vct_dfpn = 1, .def_line = 0, .policy = 0, .lmr_pol = 0, .lmr_pol_max = 2, .def_own4 = 0, .defer4 = 0, .defer4_def = 2, .keep4 = 0, .keep4_def = 2, .ch = 0, .ch_depth = 2, .bfm = 0, .bfm_d = 4, .bfm_k = 5, .bfm_margin = 400, .bfm_pct = 115, .bfm_share = 40, .bfm_veto = 150, .def_vcf_nodes = 300, .def_vcf_depth = 16, .def_vcf_min = 99, .def_own4_depth = 2,
 };
 
 int search_soft_pct(void) { return sp.soft_pct; }
@@ -526,6 +526,8 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "bfm_k")) sp.bfm_k = (int)v;
     else if (!strcmp(name, "bfm_margin")) sp.bfm_margin = (int)v;
     else if (!strcmp(name, "bfm_pct")) sp.bfm_pct = (int)v;
+    else if (!strcmp(name, "bfm_share")) sp.bfm_share = (int)v;
+    else if (!strcmp(name, "bfm_veto")) sp.bfm_veto = (int)v;
     else if (!strcmp(name, "ch")) sp.ch = (int)v;
     else if (!strcmp(name, "ch_depth")) sp.ch_depth = (int)v;
     else if (!strcmp(name, "keep4")) sp.keep4 = (int)v;
@@ -1640,6 +1642,15 @@ static void bf_search(Ctx *c, RootMove *root, int nr, const SearchLimits *lim, S
     }
     if (maxt > bf_stat[1]) bf_stat[1] = maxt;
     bf_stat[2] = lastlen;
+    if (sp.bfm == 2) {
+        // 併用: αβ の選んだ手 A を、木の点で veto 以上上回る手 B があるときだけ B に替える
+        int aj = -1;
+        for (int j = bf_nodes[0].first; j < bf_nodes[0].first + bf_nodes[0].n; j++)
+            if (bf_nodes[j].move == res->move) aj = j;
+        if (aj < 0 || bj == aj || -bf_nodes[bj].val - -bf_nodes[aj].val < sp.bfm_veto) return;
+        if (lim->verbose) fprintf(stderr, "bfm veto: %d,%d (%d) -> %d,%d (%d)\n", pos_x(res->move), pos_y(res->move), -bf_nodes[aj].val,
+                                  pos_x(bf_nodes[bj].move), pos_y(bf_nodes[bj].move), -bf_nodes[bj].val);
+    }
     if (bf_nodes[bj].move != res->move) bf_stat[3]++;
     res->move = bf_nodes[bj].move;
     res->score = bf_nodes[0].val;
@@ -1900,9 +1911,18 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     if (sp.bfm) {
         // 最良優先の木: 先に浅い反復深化で手を並べ、残りの時間は木を広げる
         SearchLimits sl = *lim;
-        sl.max_depth = sp.bfm_d + 1;
+        int stopped = 0;
+        if (sp.bfm == 2 && lim->soft_ms > 0) {
+            // 併用: αβ に時間の (100 − bfm_share)% を使い、残りで木を広げて選んだ手を確かめる
+            sl.soft_ms = lim->soft_ms * (100 - sp.bfm_share) / 100;
+            int h = sl.soft_ms * 13 / 10;
+            if (h < c->hard_ms) c->hard_ms = h;
+        } else
+            sl.max_depth = sp.bfm_d + 1;
         iterate(c, root, nr, &sl, res);
-        if (!c->stop && res->score < SCORE_WIN_MIN && res->score > -SCORE_WIN_MIN) bf_search(c, root, nr, lim, res);
+        if (sp.bfm == 2 && c->stop && !__atomic_load_n(&g_stop, __ATOMIC_RELAXED)) c->stop = 0, stopped = 1;
+        (void)stopped;
+        if (!c->stop && res->move >= 0 && res->score < SCORE_WIN_MIN && res->score > -SCORE_WIN_MIN) bf_search(c, root, nr, lim, res);
     } else
         iterate(c, root, nr, lim, res);
     __atomic_store_n(&g_stop, 1, __ATOMIC_RELAXED);
