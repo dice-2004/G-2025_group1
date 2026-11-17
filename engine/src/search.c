@@ -158,6 +158,7 @@ typedef struct {
 static Ctx ctxs[MAX_THREADS];
 static Board boards[MAX_THREADS];   // 補助スレッド用の盤のコピー
 static int n_threads = 1;
+static int g_abort;                 // 1 = 先読み (ポンダー) を止める
 static int g_stop;                  // 主スレッドが探索を終えたら 1 (補助スレッドを止める)
 
 void search_set_threads(int n) {
@@ -754,7 +755,7 @@ static inline void pick_move(Move *m, int i, int n) {
 static inline void check_time(Ctx *c) {
     if ((c->nodes & 1023) == 0) {
         if (c->id == 0 && now_ms() - c->t0 >= c->hard_ms) c->stop = 1;
-        if (__atomic_load_n(&g_stop, __ATOMIC_RELAXED)) c->stop = 1;
+        if (__atomic_load_n(&g_stop, __ATOMIC_RELAXED) || __atomic_load_n(&g_abort, __ATOMIC_RELAXED)) c->stop = 1;
     }
     if (c->max_nodes && c->nodes >= c->max_nodes) c->stop = 1;
 }
@@ -1804,6 +1805,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     // 詰み探索 (vcf.c): 自分の VCF → 相手の VCF への受け → 自分の VCT
     // ノード数は持ち時間に比例させる (VCF・VCT の 1 ノードはおよそ 1.5us)
     long hard = lim->hard_ms > 0 ? lim->hard_ms : 1000;
+    if (lim->ponder) hard = 100;   // 先読み: 止められない詰み探索は短く
     int vmove;
     TssResult vres;
     int vwin = g_fvcf ? fvcf_solve(b, board_side(b), 40, hard * 60, &vres) : tss_solve(b, board_side(b), TSS_VCF, 40, hard * 60, &vres);
@@ -1818,7 +1820,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     int ndefs = vcf_defenses(b, hard * 60, defs);   // -1 = 相手に VCF なし
     // df-pn は上限時間の vct_pct % まで
     DfpnResult dr;
-    if (ndefs < 0 && sp.vct_pct > 0 &&
+    if (ndefs < 0 && sp.vct_pct > 0 && !lim->ponder &&
         (sp.vct_dfpn ? (dfpn_vct(b, me, 1L << 40, (int)(hard * sp.vct_pct / 100), &dr) && (vmove = dr.move) >= 0)
                      : vct_solve(b, sp.vct_depth, hard * sp.vct_pct * 6, &vmove))) {
         res->move = vmove;
@@ -1827,7 +1829,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         return;
     }
     TsResult tsr;
-    if (ndefs < 0 && sp.ts_pct > 0 && ts_win(b, me, 40, 1L << 40, (int)(hard * sp.ts_pct / 100), &tsr) && tsr.move >= 0) {
+    if (ndefs < 0 && sp.ts_pct > 0 && !lim->ponder && ts_win(b, me, 40, 1L << 40, (int)(hard * sp.ts_pct / 100), &tsr) && tsr.move >= 0) {
         res->move = tsr.move;
         res->score = SCORE_WIN - 20;
         res->reason = "ts";
@@ -1902,7 +1904,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
 
     pthread_t th[MAX_THREADS];
     int started[MAX_THREADS] = {0};
-    for (int t = 1; t < n_threads; t++) {
+    for (int t = 1; t < n_threads && !lim->ponder; t++) {
         Helper *h = &helpers[t];
         boards[t] = *b;
         h->c = &ctxs[t];
@@ -1935,7 +1937,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         iterate(c, root, nr, lim, res);
     __atomic_store_n(&g_stop, 1, __ATOMIC_RELAXED);
     res->nodes = c->nodes;
-    for (int t = 1; t < n_threads; t++) {
+    for (int t = 1; t < n_threads && !lim->ponder; t++) {
         if (!started[t]) continue;
         pthread_join(th[t], NULL);
         res->nodes += ctxs[t].nodes;
@@ -1957,4 +1959,37 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     if (sp.dfver_pct > 0 && lim->hard_ms > 0 && res->move >= 0 && res->score < SCORE_WIN_MIN)
         verify_move(c, b, op, root, nr, lim->hard_ms, res, lim->verbose);
     res->ms = (int)(now_ms() - c->t0);
+}
+
+// ---------------------------------------------------------------- 先読み (ポンダー)
+static Board ponder_board;
+static pthread_t ponder_thread;
+static int ponder_running;
+
+static void *ponder_main(void *arg) {
+    (void)arg;
+    tss_set_thread(0);
+    fvcf_set_thread(0);
+    SearchLimits sl = {0};
+    sl.ponder = 1;
+    SearchResult res;
+    if (!__atomic_load_n(&g_abort, __ATOMIC_RELAXED)) search_root(&ponder_board, &sl, &res);
+    return NULL;
+}
+
+void search_ponder_start(const Board *b) {
+    if (ponder_running) search_ponder_stop();
+    ponder_board = *b;
+    __atomic_store_n(&g_abort, 0, __ATOMIC_RELAXED);
+    ponder_running = pthread_create(&ponder_thread, NULL, ponder_main, NULL) == 0;
+}
+
+void search_ponder_stop(void) {
+    if (!ponder_running) return;
+    __atomic_store_n(&g_abort, 1, __ATOMIC_RELAXED);
+    pthread_join(ponder_thread, NULL);
+    __atomic_store_n(&g_abort, 0, __ATOMIC_RELAXED);
+    ponder_running = 0;
+    tss_set_thread(0);
+    fvcf_set_thread(0);
 }

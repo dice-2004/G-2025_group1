@@ -60,6 +60,8 @@ static double wall_ms(void) {
     return ts.tv_sec * 1000.0 + ts.tv_nsec * 1e-6;
 }
 
+static int ponder_on;
+
 static void reply_move(void) {
     double t0 = wall_ms();
     sync_tables();
@@ -76,6 +78,7 @@ static void reply_move(void) {
         printf("%d,%d\n", pos_x(p), pos_y(p));
     }
     fflush(stdout);
+    if (ponder_on && p >= 0) search_ponder_start(&board);
 }
 
 static int parse_xy(const char *s, int *x, int *y) {
@@ -91,6 +94,11 @@ int main(void) {
     while (fgets(line, sizeof line, stdin)) {
         line[strcspn(line, "\r\n")] = 0;
         double cmd_t0 = wall_ms();
+        if (ponder_on) {
+            // 先読みを止めてから命令を処理する (止めるまでの時間は次の手の持ち時間から引く)
+            search_ponder_stop();
+            pending_ms += wall_ms() - cmd_t0;
+        }
         char *arg = line;
         while (*arg && *arg != ' ') arg++;
         if (*arg) *arg++ = 0;
@@ -121,6 +129,7 @@ int main(void) {
                     search_new_game();
                 }
                 else if (!strcasecmp(key, "thread_num")) search_set_threads((int)val);
+                else if (!strcasecmp(key, "ponder")) ponder_on = (int)val;   // 1 = 相手の考慮時間に先読みする (既定 0)
                 else if (!strcasecmp(key, "max_depth")) limits.max_depth = (int)val;
                 else if (!strcasecmp(key, "max_node")) limits.max_nodes = val;
                 else if (!strcasecmp(key, "verbose")) limits.verbose = (int)val;

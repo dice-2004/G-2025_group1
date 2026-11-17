@@ -83,5 +83,34 @@
     },
     "note": "Rapfi 古典評価、1手100万ノード制限",
     "pre_delay": 0.05
+  },
+  "g2-t2": {
+    "cmd": "{repo}/engine/build/pbrain-g2",
+    "note": "G2 を 2 スレッドで (サイト AI が 2 スレッドのときの対等な設定)",
+    "info": {
+      "thread_num": 2
+    }
+  },
+  "g2-t4": {
+    "cmd": "{repo}/engine/build/pbrain-g2",
+    "note": "G2 を 4 スレッドで",
+    "info": {
+      "thread_num": 4
+    }
+  },
+  "g2-ponder": {
+    "cmd": "{repo}/engine/build/pbrain-g2",
+    "note": "G2 + 相手の考慮時間の先読み (1 スレッド)",
+    "info": {
+      "ponder": 1
+    }
+  },
+  "g2-t2-ponder": {
+    "cmd": "{repo}/engine/build/pbrain-g2",
+    "note": "G2 2 スレッド + 先読み",
+    "info": {
+      "thread_num": 2,
+      "ponder": 1
+    }
   }
 }
