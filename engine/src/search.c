@@ -1189,7 +1189,15 @@ moves_loop:
             (i + 1) * (2 - improving) >= mcp_table[depth < 63 ? depth : 63])
             continue;
         if (searched > 0 && !is_pv && !tactical && best > -SCORE_WIN_MIN) {
-            if (depth >= 1 && depth <= 4 && searched * 100 >= LMP_COUNT[depth] * sp.lmp_mul) continue;
+            if (depth >= 1 && depth <= 4 && searched * 100 >= LMP_COUNT[depth] * sp.lmp_mul) {
+                // ここから先の静かな手はすべて読まない (searched と best は減らない) ので、残りを戦術的な手だけに詰める
+                // (残りの 60 手ほどを 1 手ずつ最大値で選び直す O(n^2) の無駄をなくす。読む手と順番は同じ)
+                int w = i + 1;
+                for (int j = i + 1; j < n; j++)
+                    if (list[j].tactical) list[w++] = list[j];
+                n = w;
+                continue;
+            }
             if (list[i].value < sp.cand_min) continue;
         }
         if (tfon && searched > 0 && best > -SCORE_WIN_MIN) {
