@@ -348,6 +348,7 @@ static struct {
     int iid;   // 置換表の手がない残り深さ iid 以上の節点で、先に浅く読んで最初に読む手を決める (0 = しない)
     int ph, ph_malus;   // パターン履歴 (探索中に覚える、形ごとの beta cut の成績) を手の並べ方に足す重み (/64、0 = 使わない)。ph_malus = 1 で cut した手より前に読んだ手を減点
     int l3x, l3x_depth, l3x_min, l3x_top, l3x_ext, l3x_w;   // 準備手: 静かな手のうち材料の増え上位 l3x_top 手を打って、相手がパスしたら VCT (dfpn l3x 節点) があるか調べる。あれば戦術的な手にし、l3x_ext なら延長
+    int qfit, qfit_depth, qkeep, qkeep_min;   // 案 W: 静かな手を形の数の増減の重み (Rapfi に合わせた 20 個) で並べる (qfit = 倍率 /64、0 = 使わない)
     int qpot, qpot_depth, qpot_w, qpot_tact;   // 静かな手の脅威の材料 (打った後の自分の三・四の点の増え + 相手の三・四の点の減り) で並べ替える。qpot_tact 以上なら戦術的な手に
     int probcut, pc_depth, pc_margin, pc_red, pc_moves;   // ProbCut: 静かな節点で上位 pc_moves 手を pc_red 浅く beta+pc_margin の窓で読み、超えたら切る
     int def_scale;  // 手の並べ方の守り (相手の点) の重み /64
@@ -380,7 +381,7 @@ static struct {
     .sing = 0, .sing_depth = 5, .sing_margin = 16, .sing_mc = 0, .iid = 0,
     .ph = 0, .ph_malus = 1,
     .l3x = 0, .l3x_depth = 3, .l3x_min = 1, .l3x_top = 4, .l3x_ext = 1, .l3x_w = 1 << 20,
-    .qpot = 0, .qpot_depth = 3, .qpot_w = 1000, .qpot_tact = 99, .probcut = 0, .pc_depth = 5, .pc_margin = 300, .pc_red = 3, .pc_moves = 3, .def_scale = 52, .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
+    .qfit = 0, .qfit_depth = 3, .qkeep = 0, .qkeep_min = 0, .qpot = 0, .qpot_depth = 3, .qpot_w = 1000, .qpot_tact = 99, .probcut = 0, .pc_depth = 5, .pc_margin = 300, .pc_red = 3, .pc_moves = 3, .def_scale = 52, .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
     .vz = 0, .vz_depth = 4, .vz_nodes = 2000, .vz_keep = P4_BLOCK3, .vz_pv = 1, .vz_root = 0, .vz_root_nodes = 20000, .vz_tact = 0,
     .smp_pick = 1, .smp_tt = 1, .smp_skip = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
@@ -534,6 +535,10 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "l3x_ext")) sp.l3x_ext = (int)v;
     else if (!strcmp(name, "l3x_w")) sp.l3x_w = (int)v;
     else if (!strcmp(name, "qpot")) sp.qpot = (int)v;
+    else if (!strcmp(name, "qfit")) sp.qfit = (int)v;
+    else if (!strcmp(name, "qkeep")) sp.qkeep = (int)v;
+    else if (!strcmp(name, "qkeep_min")) sp.qkeep_min = (int)v;
+    else if (!strcmp(name, "qfit_depth")) sp.qfit_depth = (int)v;
     else if (!strcmp(name, "qpot_depth")) sp.qpot_depth = (int)v;
     else if (!strcmp(name, "qpot_w")) sp.qpot_w = (int)v;
     else if (!strcmp(name, "qpot_tact")) sp.qpot_tact = (int)v;
@@ -910,6 +915,62 @@ static void qpot_order(Board *b, Move *list, int n, int me, int op) {
     }
 }
 
+// 静かな手の並べ方 (案 W、qfit): 打った後の「形ごとの空点の数」の増減の重み付きの和で並べる。重みは Rapfi が静かな局面で打った手
+// 6168 局面に条件付きロジットで合わせた 20 個 (1/100 logit。自分: 活二..四三、相手: 同)。静的評価の当たり 29% → 38% (11/23 の分析と同じ材料)。
+// 戦術的な手・三四の点は触らない。並べ替えるだけで、戦術的の印は付けない (p_qpot は付けて節点が増えた)
+static const int16_t QFIT_ME[P4_COUNT] = {0, 11, 12, 37, 37, 76, 112, 156, 126, 181, 368, 0, 0};
+static const int16_t QFIT_OP[P4_COUNT] = {0, -18, -31, -48, -65, -105, -158, -240, -139, -226, -743, 0, 0};
+static void qfit_order(Board *b, Move *list, int n, int me, int op) {
+    int f[MAX_MOVES], m = 0;
+    long sv = 0, sf = 0;
+    for (int i = 0; i < n; i++) {
+        int q = list[i].pos;
+        f[i] = 0;
+        if (list[i].tactical || b->pat4[me][q] >= P4_FLEX3 || b->pat4[op][q] >= P4_FLEX3) continue;
+        int16_t c0[2][P4_COUNT];
+        memcpy(c0[0], b->p4cnt[me], sizeof c0[0]);
+        memcpy(c0[1], b->p4cnt[op], sizeof c0[1]);
+        board_move(b, q);
+        int v = 0;
+        for (int k = 1; k < P4_FLEX4; k++)
+            v += QFIT_ME[k] * (b->p4cnt[me][k] - c0[0][k]) + QFIT_OP[k] * (b->p4cnt[op][k] - c0[1][k]);
+        board_undo(b);
+        f[i] = v * sp.qfit / 64;
+        sv += list[i].value, sf += f[i], m++;
+    }
+    if (m < 2) return;
+    int adj = (int)((sv - sf) / m);   // 静かな手の点の平均は変えない (戦術的な手との前後は今のまま)
+    for (int i = 0; i < n; i++) {
+        int q = list[i].pos;
+        if (list[i].tactical || b->pat4[me][q] >= P4_FLEX3 || b->pat4[op][q] >= P4_FLEX3) continue;
+        list[i].score += (f[i] + adj - list[i].value) * 16;
+    }
+}
+
+// 案 W2: list[0..n) の戦術的でない手のうち、形の数の増減の重みの上位 sp.qkeep 手 (重みが qkeep_min 以上) に戦術的の印を付ける
+static void qkeep_mark(Board *b, Move *list, int n, int me, int op) {
+    int bi[8], bv[8], k = sp.qkeep < 8 ? sp.qkeep : 8, m = 0;
+    for (int i = 0; i < n; i++) {
+        if (list[i].tactical) continue;
+        int q = list[i].pos;
+        int16_t c0[2][P4_COUNT];
+        memcpy(c0[0], b->p4cnt[me], sizeof c0[0]);
+        memcpy(c0[1], b->p4cnt[op], sizeof c0[1]);
+        board_move(b, q);
+        int v = 0;
+        for (int t = 1; t < P4_FLEX4; t++)
+            v += QFIT_ME[t] * (b->p4cnt[me][t] - c0[0][t]) + QFIT_OP[t] * (b->p4cnt[op][t] - c0[1][t]);
+        board_undo(b);
+        if (v < sp.qkeep_min) continue;
+        int j = m < k ? m++ : k;
+        if (j == k && v <= bv[k - 1]) continue;
+        if (j == k) j = k - 1;
+        while (j > 0 && bv[j - 1] < v) { bv[j] = bv[j - 1]; bi[j] = bi[j - 1]; j--; }
+        bv[j] = v, bi[j] = i;
+    }
+    for (int j = 0; j < m; j++) list[bi[j]].tactical = 1;
+}
+
 // 補正の履歴 (correction history): 事前の学習ではなく、その対局の探索の中で「深く読んだ値 − 静的評価」のずれを
 // 脅威の数の組 (両方の色の Pattern4 ごとの空点の数を粗く丸めたもの) ごとに覚える。値は評価の 16 倍
 static int16_t ch_tab[2][1 << 16];
@@ -1202,6 +1263,7 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     } else
         n = gen_moves(c, list, me, op, op_threat, ttmove, ply, gmode, tzon);
     if (sp.qpot && !op_threat && !qmode && depth >= sp.qpot_depth) qpot_order(b, list, n, me, op);
+    if (sp.qfit && !op_threat && !qmode && depth >= sp.qfit_depth) qfit_order(b, list, n, me, op);
     if (sp.l3x && !op_threat && !qmode && !tzon && depth >= sp.l3x_depth) prep_mark(b, list, n, me, op);
     c->drop4 = 0;
     if (vzon) {
@@ -1244,6 +1306,16 @@ moves_loop:
             if (depth >= 1 && depth <= 4 && searched * 100 >= LMP_COUNT[depth] * sp.lmp_mul) {
                 // ここから先の静かな手はすべて読まない (searched と best は減らない) ので、残りを戦術的な手だけに詰める
                 // (残りの 60 手ほどを 1 手ずつ最大値で選び直す O(n^2) の無駄をなくす。読む手と順番は同じ)
+                if (sp.qkeep && depth >= sp.qfit_depth) {
+                    // 案 W2: 切る静かな手のうち、形の数の増減 (Rapfi に合わせた重み) が上位 qkeep 手だけは読む (戦術的な手として扱う)
+                    qkeep_mark(b, list + i, n - i, me, op);
+                    int w = i;
+                    for (int j = i; j < n; j++)
+                        if (list[j].tactical) list[w++] = list[j];
+                    n = w;
+                    i--;
+                    continue;
+                }
                 int w = i + 1;
                 for (int j = i + 1; j < n; j++)
                     if (list[j].tactical) list[w++] = list[j];
@@ -1422,6 +1494,7 @@ moves_loop:
         c->drop4 = drop4;
         n = gen_moves(c, list, me, op, op_threat, ttmove, ply, gmode, tzon);
         if (sp.qpot && !op_threat && !qmode && depth >= sp.qpot_depth) qpot_order(b, list, n, me, op);
+        if (sp.qfit && !op_threat && !qmode && depth >= sp.qfit_depth) qfit_order(b, list, n, me, op);
         if (sp.l3x && !op_threat && !qmode && !tzon && depth >= sp.l3x_depth) prep_mark(b, list, n, me, op);
         c->drop4 = 0;
         i0 = 0;
