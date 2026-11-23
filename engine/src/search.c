@@ -584,6 +584,8 @@ int search_set_param(const char *name, long v) {
         if (a < 0 || a > 1 || s2 < 0 || s2 > 1 || k < 0 || k >= THREAT_COUNT) return 0;
         g_eval_params.threat[a][s2][k] = (int)v;
     }
+    else if (!strncmp(name, "sub", 3) && name[3] >= '2' && name[3] <= '7' && name[4] == '_' && name[5] >= '0' && name[5] <= '7' && !name[6])
+        g_eval_params.sub[name[3] - '2'][name[5] - '0'] = (int)v;
     else if (!strncmp(name, "line", 4) && atoi(name + 4) >= 0 && atoi(name + 4) < P_COUNT) g_eval_params.line[atoi(name + 4)] = (int)v;
     else if (!strncmp(name, "combo", 5) && atoi(name + 5) >= 0 && atoi(name + 5) < P4_COUNT) g_eval_params.combo[atoi(name + 5)] = (int)v;
     else return 0;

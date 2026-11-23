@@ -3,6 +3,8 @@
 #include <string.h>
 
 int16_t g_cell_value[3][PIDX_COUNT];
+int16_t g_sub_value[3][P_COUNT][8];
+uint8_t g_sub2[KEY_COUNT];
 
 // 重みは tests/tune_eval.py で調整した値 (2026-10-22)。
 // 6000 局面に Rapfi (古典評価、2 万ノード) の評価を付けて合わせた (--rapfi 6000)。自己対戦で +117 Elo
@@ -80,4 +82,14 @@ void eval_init(const Rule *rule) {
         }
     }
     g_cell_value[EMPTY][0] = 0;
+    memset(g_sub_value, 0, sizeof g_sub_value);
+    int on = 0;
+    for (int c = BLACK; c <= WHITE; c++)
+        for (int p = P_B1; p <= P_F3; p++)
+            for (int k = 0; k < 8; k++) on |= (g_sub_value[c][p][k] = (int16_t)g_eval_params.sub[p - P_B1][k]) != 0;
+    if (on)
+        for (uint32_t key = 0; key < KEY_COUNT; key++)
+            g_sub2[key] = (uint8_t)(g_pattern_sub[BLACK][key] | g_pattern_sub[WHITE][key] << 4);
+    else
+        memset(g_sub2, 0, sizeof g_sub2);
 }

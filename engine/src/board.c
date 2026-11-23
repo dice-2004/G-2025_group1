@@ -26,10 +26,17 @@ void board_pass(Board *b) {
     b->hash ^= zobrist_pass;
 }
 
+static inline int sub_of(uint8_t s2, int c) { return c == BLACK ? (s2 & 15) : (s2 >> 4); }
+static inline int sub_sum(const Board *b, int c, int q) {
+    int v = 0;
+    for (int d = 0; d < 4; d++) v += g_sub_value[c][b->pat[c][q][d]][sub_of(b->sub[q][d], c)];
+    return v;
+}
+
 // 空点 q の集計 (vsum, p4cnt) への寄与を足す (sign=+1) / 引く (sign=-1)
 static inline void account_cell(Board *b, int q, int sign) {
     for (int c = BLACK; c <= WHITE; c++) {
-        b->vsum[c] += sign * g_cell_value[c][pattern_index(b->pat[c][q])];
+        b->vsum[c] += sign * (g_cell_value[c][pattern_index(b->pat[c][q])] + sub_sum(b, c, q));
         b->p4cnt[c][b->pat4[c][q]] += (int16_t)sign;
     }
 }
@@ -42,6 +49,7 @@ static void refresh_cell(Board *b, int q) {
         for (int d = 0; d < 4; d++) pt[d] = g_pattern_table[c][b->key[q][d]];
         b->pat4[c][q] = g_p4_table[pattern_index(pt)];
     }
+    for (int d = 0; d < 4; d++) b->sub[q][d] = g_sub2[b->key[q][d]];
     if (empty) account_cell(b, q, +1);
 }
 
@@ -52,7 +60,8 @@ static inline void refresh_dir(Board *b, int q, int d) {
     uint8_t np2 = g_pattern2[b->key[q][d]];
     uint8_t *pb = b->pat[BLACK][q], *pw = b->pat[WHITE][q];
     uint8_t nb = np2 & 15, nw = np2 >> 4;
-    if (nb == pb[d] && nw == pw[d]) return;
+    uint8_t ns = g_sub2[b->key[q][d]], os = b->sub[q][d];
+    if (nb == pb[d] && nw == pw[d] && ns == os) return;
     BoardUndo *u = &b->undo[b->nundo++];
     u->q = (uint16_t)q;
     u->d = (uint8_t)d;
@@ -60,6 +69,12 @@ static inline void refresh_dir(Board *b, int q, int d) {
     u->pw = pw[d];
     u->p4b = b->pat4[BLACK][q];
     u->p4w = b->pat4[WHITE][q];
+    u->sub = os;
+    if (ns | os) {   // 細かい種類の加点 (使わないときは g_sub2 が全部 0 なのでここに来ない)
+        b->vsum[BLACK] += g_sub_value[BLACK][nb][ns & 15] - g_sub_value[BLACK][pb[d]][os & 15];
+        b->vsum[WHITE] += g_sub_value[WHITE][nw][ns >> 4] - g_sub_value[WHITE][pw[d]][os >> 4];
+        b->sub[q][d] = ns;
+    }
     if (nb != pb[d]) {
         b->vsum[BLACK] -= g_cell_value[BLACK][pattern_index(pb)];
         b->p4cnt[BLACK][b->pat4[BLACK][q]]--;
@@ -165,6 +180,7 @@ static void remove_stone(Board *b, int p) {
         b->pat[WHITE][u->q][u->d] = u->pw;
         b->pat4[BLACK][u->q] = u->p4b;
         b->pat4[WHITE][u->q] = u->p4w;
+        b->sub[u->q][u->d] = u->sub;
     }
     b->nundo = mark;
     const BoardSums *sv = &b->sums_before[b->nmoves];
@@ -262,6 +278,7 @@ int board_verify(const Board *b) {
                 if (b->cell[q] != EMPTY) continue;   // 石のあるマスのパターンは更新しない
                 for (int c = BLACK; c <= WHITE; c++)
                     if (b->pat[c][q][d] != pattern_of(c, b->key[q][d])) return 0;
+                if (b->sub[q][d] != g_sub2[b->key[q][d]]) return 0;
             }
             if (b->cell[q] != EMPTY) continue;
             for (int c = BLACK; c <= WHITE; c++)
@@ -286,7 +303,7 @@ int board_verify(const Board *b) {
             if (b->near[q] != n) return 0;
             if (b->cell[q] != EMPTY) continue;
             for (int c = BLACK; c <= WHITE; c++) {
-                vsum[c] += g_cell_value[c][pattern_index(b->pat[c][q])];
+                vsum[c] += g_cell_value[c][pattern_index(b->pat[c][q])] + sub_sum(b, c, q);
                 cnt[c][b->pat4[c][q]]++;
             }
         }

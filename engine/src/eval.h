@@ -9,6 +9,10 @@
 #include "pattern.h"
 
 extern int16_t g_cell_value[3][PIDX_COUNT];
+// 線パターンの細かい種類 (pattern.h g_pattern_sub) の加点: 空点・方向ごとに g_sub_value[色][線パターン][上げる点の数] を足す。
+// g_sub2[key] = 黒の上げる点の数 | 白 << 4 (加点がすべて 0 なら全部 0 にして、盤の更新を今まで通りにする)
+extern int16_t g_sub_value[3][P_COUNT][8];
+extern uint8_t g_sub2[KEY_COUNT];
 
 // 盤面の脅威の種類 (その色が次の 1 手で作れる形)
 enum { THREAT_B4F3 = 0, THREAT_F3X2, THREAT_F3, THREAT_B4PLUS, THREAT_B4X2, THREAT_B3PLUS, THREAT_F2X2, THREAT_F3MANY, THREAT_COUNT };
@@ -59,6 +63,8 @@ typedef struct {
     // 盤上の形の総量が多いほど差が効く。負けている側は相手の形を減らす手を、勝っている側は自分の形を増やす手を選ぶようになる
     int tens, tens_s0;
     int race_own[EVAL_RACE_LEVELS], race_opp[EVAL_RACE_LEVELS];
+    // 線パターンの細かい種類の加点 [線パターン B1..F3 = 0..5][上げる点の数 0..7] (INFO p_sub<線パターンの番号 2..7>_<数>)。既定は 0
+    int sub[6][8];
 } EvalParams;
 
 // 空点の値の補正 (tests/tune_table.py で作る eval_table.c)。pidx は 4 方向のパターンを小さい順に並べた組
