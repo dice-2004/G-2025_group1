@@ -338,6 +338,7 @@ static struct {
     int smp_tt, smp_skip;   // 補助スレッド: 置換表に書く (既定 1)、深さを飛ばす (既定 1)
     int smp_pick;       // 1 = 補助スレッドの結果 (勝ちの読み切り・より深い反復) も使う
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
+    int trap, trap_k, trap_n, trap_margin, trap_min, trap_ms;   // 案 Y: 罠の多い手を選ぶ (trap = 1 で使う)
     int dfver_pct;      // 探索で選んだ手を打った後に相手の VCT がないか df-pn で確かめる時間 (上限時間の %)。0 = 使わない
     int rz, rz_depth, rz_after, rz_len, rz_rad, rz_lines, rz_red;   // 反証の圏 (rz.h)。rz: 0 = 使わない、1 = 圏の外の静かな手を rz_red 縮める、2 = 読まない
     int tvct, tvct_depth, tvct_min, tvct_pv, tvct_mode, tvct_plies;   // tvct_mode 1 = tss_solve の VCT (攻め tvct_plies 手まで) を使う   // 木の中の VCT: 残り深さ tvct_depth 以上で手番側に三・四の材料が tvct_min 以上あれば、df-pn (tvct ノード) で自分の VCT を調べ、あれば勝ちを返す
@@ -383,7 +384,7 @@ static struct {
     .l3x = 0, .l3x_depth = 3, .l3x_min = 1, .l3x_top = 4, .l3x_ext = 1, .l3x_w = 1 << 20,
     .qfit = 0, .qfit_depth = 3, .qkeep = 0, .qkeep_min = 0, .qpot = 0, .qpot_depth = 3, .qpot_w = 1000, .qpot_tact = 99, .probcut = 0, .pc_depth = 5, .pc_margin = 300, .pc_red = 3, .pc_moves = 3, .def_scale = 52, .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
     .vz = 0, .vz_depth = 4, .vz_nodes = 2000, .vz_keep = P4_BLOCK3, .vz_pv = 1, .vz_root = 0, .vz_root_nodes = 20000, .vz_tact = 0,
-    .smp_pick = 1, .smp_tt = 1, .smp_skip = 1, .dfdef_pct = 0, .dfver_pct = 0,
+    .smp_pick = 1, .trap = 0, .trap_k = 3, .trap_n = 8, .trap_margin = 60, .trap_min = 15, .trap_ms = 4, .smp_tt = 1, .smp_skip = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
     .cand_min = 0, .ext_three = 1, .vctdef_pct = 0, .unstable_pct = 100,
@@ -444,6 +445,12 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "unstable_pct")) sp.unstable_pct = (int)v;
     else if (!strcmp(name, "threads")) search_set_threads((int)v);
     else if (!strcmp(name, "smp_pick")) sp.smp_pick = (int)v;
+    else if (!strcmp(name, "trap")) sp.trap = (int)v;
+    else if (!strcmp(name, "trap_k")) sp.trap_k = (int)v;
+    else if (!strcmp(name, "trap_n")) sp.trap_n = (int)v;
+    else if (!strcmp(name, "trap_margin")) sp.trap_margin = (int)v;
+    else if (!strcmp(name, "trap_min")) sp.trap_min = (int)v;
+    else if (!strcmp(name, "trap_ms")) sp.trap_ms = (int)v;
     else if (!strcmp(name, "smp_tt")) sp.smp_tt = (int)v;
     else if (!strcmp(name, "smp_idle")) sp.smp_idle = (int)v;
     else if (!strcmp(name, "smp_skip")) sp.smp_skip = (int)v;
@@ -975,6 +982,7 @@ static void qkeep_mark(Board *b, Move *list, int n, int me, int op) {
 // 脅威の数の組 (両方の色の Pattern4 ごとの空点の数を粗く丸めたもの) ごとに覚える。値は評価の 16 倍
 static int16_t ch_tab[2][1 << 16];
 long ch_stat[2];
+long trap_stat[2];   // 罠を調べた回数、手を替えた回数
 static inline unsigned ch_key(const Board *b, int me, int op) {
     const int16_t *m = b->p4cnt[me], *o = b->p4cnt[op];
     unsigned h = 0;
@@ -1840,6 +1848,81 @@ static void dfpn_defenses(Ctx *c, Board *b, int op, RootMove *root, int *nr, lon
     }
 }
 
+// 案 Y: 罠の多い手を選ぶ (相手が間違えやすい局面へ誘う)。
+// 探索の点がほぼ同じ (最善 − trap_margin 以上と null window で確かめた) 上位 trap_k 手について、打った後の相手の自然な応手 (並べ方の上位
+// trap_n 手) のうち、こちらに VCF / VCT (df-pn) が生じる手の割合 (上位ほど重い、1/(順位+1)) を「罠の密度」とする。
+// 相手が最善の 1 手を見つけなければ負ける局面は、読みの浅い相手・評価の外れる相手ほど間違える。最善手より密度が trap_min % 以上高い手に替える。
+// 残りの時間 (soft で止まった後から hard まで) だけを使う
+static int trap_density(Ctx *c, Board *b, int me, int op, double t_end) {
+    Move list[MAX_MOVES];
+    int op_threat = legal_flex4(b, me) >= 0;
+    int n = gen_moves(c, list, op, me, op_threat, -1, 1, 0, 0);
+    sort_moves(list, n);
+    int wsum = 0, wwin = 0, k = 0;
+    for (int i = 0; i < n && k < sp.trap_n; i++) {
+        int r = list[i].pos;
+        if (!legal(b, op, r)) continue;
+        int w = 64 / (k + 1);
+        k++;
+        double left = t_end - now_ms();
+        if (left < 1) break;
+        board_move(b, r);
+        TssResult tr;
+        DfpnResult dr;
+        int win = 0;
+        if (!b->p4cnt[op][P4_FIVE] && !(legal_flex4(b, op) >= 0)) {
+            win = fvcf_solve(b, me, 40, 20000, &tr);
+            int ms = (int)(left < sp.trap_ms ? left : sp.trap_ms);
+            if (!win && ms >= 1 && !b->p4cnt[op][P4_BLOCK4] && !b->p4cnt[op][P4_BLOCK4_PLUS] && !b->p4cnt[op][P4_BLOCK4_FLEX3])
+                win = dfpn_vct(b, me, 1L << 40, ms, &dr);
+        }
+        board_undo(b);
+        wsum += w;
+        if (win) wwin += w;
+    }
+    return wsum ? wwin * 100 / wsum : 0;
+}
+
+static void trap_pick(Ctx *c, Board *b, RootMove *root, int nr, const SearchLimits *lim, SearchResult *res) {
+    int me = board_side(b), op = opp_color(me);
+    double t_end = c->t0 + lim->hard_ms;
+    if (now_ms() > t_end - 5) return;
+    c->stop = 0;
+    c->hard_ms = lim->hard_ms;
+    int best = res->score, d = res->depth - 2;
+    if (d < 1) d = 1;
+    int cand[8], nc = 0;
+    cand[nc++] = res->move;
+    for (int i = 0; i < nr && nc < sp.trap_k && nc < 8; i++)
+        if (root[i].pos != res->move) cand[nc++] = root[i].pos;
+    board_move(b, cand[0]);
+    int bestd = trap_density(c, b, me, op, t_end), pick = -1, pickd = bestd;
+    board_undo(b);
+    for (int j = 1; j < nc; j++) {
+        if (now_ms() > t_end - 3) break;
+        int thr = best - sp.trap_margin;
+        board_move(b, cand[j]);
+        c->root_depth = d + 1;
+        int v = -pvs(c, -thr, -thr + 1, d, 1, 0);
+        int ok = !c->stop && v >= thr;
+        int dens = ok ? trap_density(c, b, me, op, t_end) : -1;
+        board_undo(b);
+        if (c->stop) break;
+        if (ok && dens >= pickd + sp.trap_min) pick = cand[j], pickd = dens;
+    }
+    c->stop = 0;
+    trap_stat[0]++;
+    if (lim->verbose) fprintf(stderr, "trap: best %d,%d density %d, cands %d, pick %d (%d%%), %.0f ms\n", pos_x(res->move), pos_y(res->move), bestd, nc, pick, pickd, now_ms() - c->t0);
+    if (pick >= 0) {
+        trap_stat[1]++;
+        if (lim->verbose) fprintf(stderr, "trap: %d,%d (%d%%) -> %d,%d (%d%%)\n", pos_x(res->move), pos_y(res->move), bestd, pos_x(pick), pos_y(pick), pickd);
+        res->move = pick;
+        res->pvlen = 1;
+        res->pv[0] = pick;
+        res->reason = "trap";
+    }
+}
+
 // 探索で選んだ手を打った後に相手の VCT がないかを df-pn で確かめ、負けが証明されたら次の候補 (前の反復の点の順) を
 // 確かめる。残り時間の半分ずつを使い、証明できなかった手 (勝ちがない・打ち切り) を打つ。全部負けなら元の手のまま
 static void verify_move(Ctx *c, Board *b, int op, RootMove *root, int nr, int hard_ms, SearchResult *res, int verbose) {
@@ -2084,6 +2167,9 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         }
     }
     res->seldepth = c->seldepth;
+    if (sp.trap && lim->hard_ms > 0 && !lim->ponder && res->move >= 0 && res->depth >= 3 && nr > 1 &&
+        res->score < SCORE_WIN_MIN && res->score > -SCORE_WIN_MIN)
+        trap_pick(c, b, root, nr, lim, res);
     if (sp.dfver_pct > 0 && lim->hard_ms > 0 && res->move >= 0 && res->score < SCORE_WIN_MIN)
         verify_move(c, b, op, root, nr, lim->hard_ms, res, lim->verbose);
     res->ms = (int)(now_ms() - c->t0);
