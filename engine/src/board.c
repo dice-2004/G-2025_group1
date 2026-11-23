@@ -5,6 +5,7 @@
 #include <string.h>
 
 static uint64_t zobrist[3][NCELL];
+static const int PIDX_W[4] = { P_COUNT * P_COUNT * P_COUNT, P_COUNT * P_COUNT, P_COUNT, 1 };   // pattern_index の各方向の重み
 static uint64_t zobrist_pass;
 
 static uint64_t splitmix64(uint64_t *s) {
@@ -29,7 +30,7 @@ void board_pass(Board *b) {
 // 空点 q の集計 (vsum, p4cnt) への寄与を足す (sign=+1) / 引く (sign=-1)
 static inline void account_cell(Board *b, int q, int sign) {
     for (int c = BLACK; c <= WHITE; c++) {
-        b->vsum[c] += sign * g_cell_value[c][pattern_index(b->pat[c][q])];
+        b->vsum[c] += sign * g_cell_value[c][b->pidx[c][q]];
         b->p4cnt[c][b->pat4[c][q]] += (int16_t)sign;
     }
 }
@@ -40,7 +41,8 @@ static void refresh_cell(Board *b, int q) {
     for (int c = BLACK; c <= WHITE; c++) {
         uint8_t *pt = b->pat[c][q];
         for (int d = 0; d < 4; d++) pt[d] = g_pattern_table[c][b->key[q][d]];
-        b->pat4[c][q] = g_p4_table[pattern_index(pt)];
+        b->pidx[c][q] = (uint16_t)pattern_index(pt);
+        b->pat4[c][q] = g_p4_table[b->pidx[c][q]];
     }
     if (empty) account_cell(b, q, +1);
 }
@@ -60,29 +62,38 @@ static inline void refresh_dir(Board *b, int q, int d) {
     u->pw = pw[d];
     u->p4b = b->pat4[BLACK][q];
     u->p4w = b->pat4[WHITE][q];
+    u->ib = b->pidx[BLACK][q];
+    u->iw = b->pidx[WHITE][q];
     if (nb != pb[d]) {
-        b->vsum[BLACK] -= g_cell_value[BLACK][pattern_index(pb)];
+        int oi = b->pidx[BLACK][q], idx = oi + (nb - pb[d]) * PIDX_W[d];
+        b->vsum[BLACK] += g_cell_value[BLACK][idx] - g_cell_value[BLACK][oi];
         b->p4cnt[BLACK][b->pat4[BLACK][q]]--;
         pb[d] = nb;
-        int idx = pattern_index(pb);
+        b->pidx[BLACK][q] = (uint16_t)idx;
         b->pat4[BLACK][q] = g_p4_table[idx];
-        b->vsum[BLACK] += g_cell_value[BLACK][idx];
         b->p4cnt[BLACK][b->pat4[BLACK][q]]++;
     }
     if (nw != pw[d]) {
-        b->vsum[WHITE] -= g_cell_value[WHITE][pattern_index(pw)];
+        int oi = b->pidx[WHITE][q], idx = oi + (nw - pw[d]) * PIDX_W[d];
+        b->vsum[WHITE] += g_cell_value[WHITE][idx] - g_cell_value[WHITE][oi];
         b->p4cnt[WHITE][b->pat4[WHITE][q]]--;
         pw[d] = nw;
-        int idx = pattern_index(pw);
+        b->pidx[WHITE][q] = (uint16_t)idx;
         b->pat4[WHITE][q] = g_p4_table[idx];
-        b->vsum[WHITE] += g_cell_value[WHITE][idx];
         b->p4cnt[WHITE][b->pat4[WHITE][q]]++;
     }
 }
 
+// 周囲 5x5 の石の数を増減する。1 行の 5 マスを 8 バイトの 1 回の加減でまとめる (各マスは 25 以下なので桁上がりしない)
 static inline void add_near(Board *b, int p, int delta) {
-    for (int dy = -2; dy <= 2; dy++)
-        for (int dx = -2; dx <= 2; dx++) b->near[p + dy * STRIDE + dx] += (uint8_t)delta;
+    const uint64_t five = 0x0101010101ull;
+    for (int dy = -2; dy <= 2; dy++) {
+        uint8_t *r = &b->near[p + dy * STRIDE - 2];
+        uint64_t w;
+        memcpy(&w, r, 8);
+        w = delta > 0 ? w + five : w - five;
+        memcpy(r, &w, 8);
+    }
 }
 
 static uint32_t compute_key(const Board *b, int q, int d) {
@@ -100,6 +111,8 @@ void board_init(Board *b, int size, const Rule *rule) {
     memset(b, 0, sizeof *b);
     b->size = size;
     b->rule = *rule;
+    b->bbox[0] = b->bbox[2] = (int8_t)size;
+    b->bbox[1] = b->bbox[3] = -1;
     for (int p = 0; p < NCELL; p++) b->cell[p] = WALL;
     for (int y = 0; y < size; y++)
         for (int x = 0; x < size; x++) b->cell[to_pos(x, y)] = EMPTY;
@@ -121,6 +134,14 @@ static void put_stone(Board *b, int p, int color) {
     BoardSums *sv = &b->sums_before[b->nmoves];
     memcpy(sv->vsum, b->vsum, sizeof sv->vsum);
     memcpy(sv->p4cnt, b->p4cnt, sizeof sv->p4cnt);
+    memcpy(sv->bbox, b->bbox, sizeof sv->bbox);
+    {
+        int x = pos_x(p), y = pos_y(p);
+        if (x < b->bbox[0]) b->bbox[0] = (int8_t)x;
+        if (x > b->bbox[1]) b->bbox[1] = (int8_t)x;
+        if (y < b->bbox[2]) b->bbox[2] = (int8_t)y;
+        if (y > b->bbox[3]) b->bbox[3] = (int8_t)y;
+    }
     account_cell(b, p, -1);
     add_near(b, p, +1);
     b->cell[p] = (uint8_t)color;
@@ -163,6 +184,8 @@ static void remove_stone(Board *b, int p) {
         const BoardUndo *u = &b->undo[i];
         b->pat[BLACK][u->q][u->d] = u->pb;
         b->pat[WHITE][u->q][u->d] = u->pw;
+        b->pidx[BLACK][u->q] = u->ib;
+        b->pidx[WHITE][u->q] = u->iw;
         b->pat4[BLACK][u->q] = u->p4b;
         b->pat4[WHITE][u->q] = u->p4w;
     }
@@ -170,6 +193,7 @@ static void remove_stone(Board *b, int p) {
     const BoardSums *sv = &b->sums_before[b->nmoves];
     memcpy(b->vsum, sv->vsum, sizeof sv->vsum);
     memcpy(b->p4cnt, sv->p4cnt, sizeof sv->p4cnt);
+    memcpy(b->bbox, sv->bbox, sizeof b->bbox);
 }
 
 void board_move(Board *b, int pos) {
@@ -265,9 +289,22 @@ int board_verify(const Board *b) {
             }
             if (b->cell[q] != EMPTY) continue;
             for (int c = BLACK; c <= WHITE; c++)
+                if (b->pidx[c][q] != pattern_index(b->pat[c][q])) return 0;
+            for (int c = BLACK; c <= WHITE; c++)
                 if (b->pat4[c][q] != combine_pattern4(b->pat[c][q])) return 0;
         }
     }
+    int8_t bb[4] = { (int8_t)b->size, -1, (int8_t)b->size, -1 };
+    for (int y = 0; y < b->size; y++)
+        for (int x = 0; x < b->size; x++) {
+            int c = b->cell[to_pos(x, y)];
+            if (c != BLACK && c != WHITE) continue;
+            if (x < bb[0]) bb[0] = (int8_t)x;
+            if (x > bb[1]) bb[1] = (int8_t)x;
+            if (y < bb[2]) bb[2] = (int8_t)y;
+            if (y > bb[3]) bb[3] = (int8_t)y;
+        }
+    if (memcmp(bb, b->bbox, sizeof bb)) return 0;
     uint64_t h = 0;
     for (int p = 0; p < NCELL; p++)
         if (b->cell[p] == BLACK || b->cell[p] == WHITE) h ^= zobrist[b->cell[p]][p];

@@ -212,11 +212,13 @@ static inline int legal(Board *b, int color, int q) {
     return !restricted(b, color) || !board_is_forbidden(b, q);
 }
 
-// 盤上の空点で color のパターンが p4 の点を 1 つ探す (なければ -1)
+// 盤上の空点で color のパターンが p4 の点を 1 つ探す (なければ -1)。形のある点は石から 5 マス以内にしかない
 static int find_cell(const Board *b, int color, int p4) {
-    for (int y = 0; y < b->size; y++) {
-        int q = to_pos(0, y);
-        for (int x = 0; x < b->size; x++, q++)
+    int x0, x1, y0, y1;
+    board_area(b, 5, &x0, &x1, &y0, &y1);
+    for (int y = y0; y <= y1; y++) {
+        int q = to_pos(x0, y);
+        for (int x = x0; x <= x1; x++, q++)
             if (b->cell[q] == EMPTY && b->pat4[color][q] == p4) return q;
     }
     return -1;
@@ -225,12 +227,21 @@ static int find_cell(const Board *b, int color, int p4) {
 // color が (禁じ手でなく) 打てる達四・四四の点があるか。あればその点、なければ -1
 static int legal_flex4(Board *b, int color) {
     if (!b->p4cnt[color][P4_FLEX4]) return -1;
-    for (int y = 0; y < b->size; y++) {
-        int q = to_pos(0, y);
-        for (int x = 0; x < b->size; x++, q++)
+    int x0, x1, y0, y1;
+    board_area(b, 5, &x0, &x1, &y0, &y1);
+    for (int y = y0; y <= y1; y++) {
+        int q = to_pos(x0, y);
+        for (int x = x0; x <= x1; x++, q++)
             if (b->cell[q] == EMPTY && b->pat4[color][q] == P4_FLEX4 && legal(b, color, q)) return q;
     }
     return -1;
+}
+
+// legal_flex4 の有無だけ (禁じ手のない側は数だけで決まる)
+static inline int has_flex4(Board *b, int color) {
+    if (!b->p4cnt[color][P4_FLEX4]) return 0;
+    if (!restricted(b, color)) return 1;
+    return legal_flex4(b, color) >= 0;
 }
 
 int evaluate(const Board *b) {
@@ -688,6 +699,10 @@ static inline int cheb_dist(int a, int b) {
 
 // 相手の四・活三への防ぎ手か: 相手がそこに打つとその線で四以上になる点
 static inline int blocks_threat(const Board *b, int op, int q) {
+    // 4 方向のどれかが四 (止め四・達四・一直線の四四) なら合成は BLOCK4 以上、どれも四でなければ BLOCK4 未満 (五を除く)
+    int p4 = b->pat4[op][q];
+    if (p4 < P4_BLOCK4) return 0;
+    if (p4 != P4_FIVE) return 1;
     const uint8_t *pt = b->pat[op][q];
     for (int d = 0; d < 4; d++)
         if (pt[d] >= P_B4 && pt[d] <= P_D4) return 1;
@@ -708,16 +723,8 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
     }
     const int *k = ply < MAX_PLY ? c->killer[ply] : NULL;
     // 石のある範囲 ±2 だけを見る
-    int x0 = b->size, x1 = -1, y0 = b->size, y1 = -1;
-    for (int i = 0; i < b->nmoves; i++) {
-        int x = pos_x(b->moves[i]), y = pos_y(b->moves[i]);
-        if (x < x0) x0 = x;
-        if (x > x1) x1 = x;
-        if (y < y0) y0 = y;
-        if (y > y1) y1 = y;
-    }
-    x0 = x0 > 2 ? x0 - 2 : 0, y0 = y0 > 2 ? y0 - 2 : 0;
-    x1 = x1 + 2 < b->size ? x1 + 2 : b->size - 1, y1 = y1 + 2 < b->size ? y1 + 2 : b->size - 1;
+    int x0, x1, y0, y1;
+    board_area(b, 2, &x0, &x1, &y0, &y1);
     const int16_t *vme = g_cell_value[me], *vop = g_cell_value[op];
     const int *hist = c->history[me];
     const int *ok2 = ply + 1 < MAX_PLY ? c->killer[ply + 1] : NULL;
@@ -1063,9 +1070,9 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         return v;
     }
     // 自分の達四: 勝ち
-    if (legal_flex4(b, me) >= 0) return SCORE_WIN - ply - 2;
+    if (has_flex4(b, me)) return SCORE_WIN - ply - 2;
 
-    int op_threat = legal_flex4(b, op) >= 0;
+    int op_threat = has_flex4(b, op);
     // 静止探索: 深さが尽きたら、相手の活三への防ぎ (脅威がある時) か自分の四だけを読む
     int qmode = depth <= 0, stand = -SCORE_INF;
     if (qmode) {
@@ -1701,7 +1708,7 @@ static int bf_expand(Ctx *c, int ni, int t, const RootMove *cand, int ncand) {
         if (b->p4cnt[me][P4_FIVE] || b->nmoves >= b->size * b->size) { bf_nodes[ni].first = -2; return 1; }
         Move list[MAX_MOVES];
         TTData e;
-        int op_threat = legal_flex4(b, op) >= 0;
+        int op_threat = has_flex4(b, op);
         int opfive = b->p4cnt[op][P4_FIVE];
         if (opfive) {
             int q = find_cell(b, op, P4_FIVE);
@@ -1855,7 +1862,7 @@ static void dfpn_defenses(Ctx *c, Board *b, int op, RootMove *root, int *nr, lon
 // 残りの時間 (soft で止まった後から hard まで) だけを使う
 static int trap_density(Ctx *c, Board *b, int me, int op, double t_end) {
     Move list[MAX_MOVES];
-    int op_threat = legal_flex4(b, me) >= 0;
+    int op_threat = has_flex4(b, me);
     int n = gen_moves(c, list, op, me, op_threat, -1, 1, 0, 0);
     sort_moves(list, n);
     int wsum = 0, wwin = 0, k = 0;
@@ -1870,7 +1877,7 @@ static int trap_density(Ctx *c, Board *b, int me, int op, double t_end) {
         TssResult tr;
         DfpnResult dr;
         int win = 0;
-        if (!b->p4cnt[op][P4_FIVE] && !(legal_flex4(b, op) >= 0)) {
+        if (!b->p4cnt[op][P4_FIVE] && !has_flex4(b, op)) {
             win = fvcf_solve(b, me, 40, 20000, &tr);
             int ms = (int)(left < sp.trap_ms ? left : sp.trap_ms);
             if (!win && ms >= 1 && !b->p4cnt[op][P4_BLOCK4] && !b->p4cnt[op][P4_BLOCK4_PLUS] && !b->p4cnt[op][P4_BLOCK4_FLEX3])
@@ -2053,7 +2060,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     if (lim->verbose && ndefs >= 0) fprintf(stderr, "opponent has VCF: %d defenses\n", ndefs);
 
     // ルートの候補
-    int op_threat = legal_flex4(b, op) >= 0;
+    int op_threat = has_flex4(b, op);
     Move list[MAX_MOVES];
     TTData e;
     c->keep_off = ndefs > 0;

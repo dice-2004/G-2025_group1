@@ -11,12 +11,14 @@
 typedef struct {
     uint16_t q;
     uint8_t d, pb, pw, p4b, p4w, pad;
+    uint16_t ib, iw;    // 前の pidx
 } BoardUndo;
 #define BOARD_UNDO_MAX ((MAX_MOVES + 16) * 40)
 
 typedef struct {
     int32_t vsum[3];
     int16_t p4cnt[3][P4_COUNT];
+    int8_t bbox[4];
 } BoardSums;
 
 typedef struct {
@@ -26,11 +28,13 @@ typedef struct {
     uint32_t key[NCELL][4];         // 各マス・各方向の周囲 10 マスの並び
     uint8_t pat[3][NCELL][4];       // [color][pos][dir] その色がそこに打ったときの線パターン
     uint8_t pat4[3][NCELL];         // [color][pos] 4 方向合成
+    uint16_t pidx[3][NCELL];        // [color][pos] pattern_index(pat[color][pos]) (差分更新で保持。表引きの添字の計算を省く)
     uint64_t hash;
     // 以下は空点についての集計 (差分更新)。探索・評価用
     int32_t vsum[3];                // [color] 空点の g_cell_value の和
     int16_t p4cnt[3][P4_COUNT];     // [color][Pattern4] その形になる空点の数
     uint8_t near[NCELL];            // 周囲 5x5 にある石の数 (候補手の範囲)
+    int8_t bbox[4];                 // 石のある範囲 x0, x1, y0, y1 (石がなければ x0 = size, x1 = -1)
     int moves[MAX_MOVES];           // 着手履歴
     int nmoves;
     int passes;                     // 探索中のパス (null move) の回数の偶奇。通常は 0
@@ -52,7 +56,7 @@ void board_undo(Board *b);
 void board_pass(Board *b);             // 手番だけを入れ替える (もう一度呼ぶと戻る)。ハッシュに手番を混ぜる
 void board_move_color(Board *b, int pos, int color);   // 手番に関係なく color を置く (board_undo で戻る)
 
-static inline int board_pidx(const Board *b, int color, int pos) { return pattern_index(b->pat[color][pos]); }
+static inline int board_pidx(const Board *b, int color, int pos) { return b->pidx[color][pos]; }
 
 // pos に color が打ったら勝ち (五) になるか
 static inline int board_is_five(const Board *b, int pos, int color) { return b->pat4[color][pos] == P4_FIVE; }
@@ -68,5 +72,14 @@ int board_last_move_wins(const Board *b);
 int board_verify(const Board *b);
 
 void board_print(const Board *b, FILE *fp);
+
+// 石のある範囲を m マス広げて盤内に切った範囲 (石がなければ空の範囲)
+static inline void board_area(const Board *b, int m, int *x0, int *x1, int *y0, int *y1) {
+    int a = b->bbox[0] - m, c = b->bbox[1] + m, e = b->bbox[2] - m, f = b->bbox[3] + m;
+    *x0 = a < 0 ? 0 : a;
+    *x1 = c >= b->size ? b->size - 1 : c;
+    *y0 = e < 0 ? 0 : e;
+    *y1 = f >= b->size ? b->size - 1 : f;
+}
 
 #endif
