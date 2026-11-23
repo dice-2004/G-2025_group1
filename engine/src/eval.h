@@ -58,6 +58,9 @@ typedef struct {
     // 張り (tension): 形の差 D = 自分の和 − 相手の和 に (1 + tens/64 × (S − tens_s0) / tens_s0) を掛ける (S = 両方の和、0 = 使わない)。
     // 盤上の形の総量が多いほど差が効く。負けている側は相手の形を減らす手を、勝っている側は自分の形を増やす手を選ぶようになる
     int tens, tens_s0;
+    // 一手の値 (案 V): 和は全部の空点の可能性を同じ重さで数えるが、実際に打てるのは 1 点だけ。手番側の最大の空点の値 × bmv_me/64 を足し、
+    // 相手の最大の空点の値 × bmv_op/64 を引く (0 = 使わない)
+    int bmv_me, bmv_op;
     int race_own[EVAL_RACE_LEVELS], race_opp[EVAL_RACE_LEVELS];
 } EvalParams;
 

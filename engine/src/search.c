@@ -244,6 +244,30 @@ int evaluate(const Board *b) {
         v += v * f / 64;
     }
     v += w->tempo;
+    if (w->bmv_me | w->bmv_op) {
+        int x0 = b->size, x1 = -1, y0 = b->size, y1 = -1;
+        for (int i = 0; i < b->nmoves; i++) {
+            int x = pos_x(b->moves[i]), y = pos_y(b->moves[i]);
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+            if (y < y0) y0 = y;
+            if (y > y1) y1 = y;
+        }
+        x0 = x0 > 2 ? x0 - 2 : 0, y0 = y0 > 2 ? y0 - 2 : 0;
+        x1 = x1 + 2 < b->size ? x1 + 2 : b->size - 1, y1 = y1 + 2 < b->size ? y1 + 2 : b->size - 1;
+        const int16_t *vme = g_cell_value[me], *vop = g_cell_value[op];
+        int mm = 0, mo = 0;
+        for (int y = y0; y <= y1; y++) {
+            int q = to_pos(x0, y);
+            for (int x = x0; x <= x1; x++, q++) {
+                if (b->cell[q] != EMPTY || !b->near[q]) continue;
+                int a = vme[board_pidx(b, me, q)], o = vop[board_pidx(b, op, q)];
+                if (a > mm) mm = a;
+                if (o > mo) mo = o;
+            }
+        }
+        v += (long)mm * w->bmv_me / 64 - (long)mo * w->bmv_op / 64;
+    }
     const int (*th)[THREAT_COUNT] = w->threat[me == BLACK ? 0 : 1];
     int bm = eval_threat_bits(b->p4cnt[me]), bo = eval_threat_bits(b->p4cnt[op]);
     for (int k = 0; k < THREAT_COUNT; k++) {
@@ -568,6 +592,8 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
     else if (!strcmp(name, "tens")) g_eval_params.tens = (int)v;
     else if (!strcmp(name, "tens_s0")) g_eval_params.tens_s0 = (int)v;
+    else if (!strcmp(name, "bmv_me")) g_eval_params.bmv_me = (int)v;
+    else if (!strcmp(name, "bmv_op")) g_eval_params.bmv_op = (int)v;
     else if (!strcmp(name, "cross")) g_eval_params.cross = (int)v;
     else if (!strcmp(name, "tempo")) g_eval_params.tempo = (int)v;
     else if (!strcmp(name, "table")) g_eval_params.use_table = (int)v;
