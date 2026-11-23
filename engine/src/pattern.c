@@ -2,12 +2,13 @@
 
 #include "eval.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 uint8_t g_pattern_table[3][KEY_COUNT];
 uint8_t g_pattern2[KEY_COUNT];
 uint8_t g_p4_table[PIDX_COUNT];
-uint8_t g_pattern_sub[3][KEY_COUNT];
+uint8_t (*g_pattern_sub)[KEY_COUNT];
 
 static const Rule *cur_rule;
 static int cur_color;
@@ -93,7 +94,19 @@ void pattern_init(const Rule *rule) {
         memset(memo, 0xFF, KEY_COUNT);
         for (uint32_t key = 0; key < KEY_COUNT; key++) classify(key);
     }
-    // 細かい種類: 1 つ上の形にする空点の数
+    for (uint32_t key = 0; key < KEY_COUNT; key++)
+        g_pattern2[key] = (uint8_t)(g_pattern_table[BLACK][key] | g_pattern_table[WHITE][key] << 4);
+    for (int i = 0; i < PIDX_COUNT; i++) {
+        uint8_t pats[4] = {(uint8_t)(i / (P_COUNT * P_COUNT * P_COUNT)), (uint8_t)(i / (P_COUNT * P_COUNT) % P_COUNT),
+                           (uint8_t)(i / P_COUNT % P_COUNT), (uint8_t)(i % P_COUNT)};
+        g_p4_table[i] = (uint8_t)combine_pattern4(pats);
+    }
+    eval_init(rule);   // 評価の表もルールごとに作り直す
+}
+
+// 細かい種類の表を作る (分析用。pattern_init の後に呼ぶ。エンジン本体は使わないので普段は作らない)
+void pattern_sub_init(const Rule *rule) {
+    if (!g_pattern_sub) g_pattern_sub = calloc(3, KEY_COUNT);
     for (int color = BLACK; color <= WHITE; color++) {
         const int restricted = (color == BLACK) && rule->forbid_overline;
         const uint8_t *t = g_pattern_table[color];
@@ -108,14 +121,6 @@ void pattern_init(const Rule *rule) {
             g_pattern_sub[color][key] = (uint8_t)(n > 7 ? 7 : n);
         }
     }
-    for (uint32_t key = 0; key < KEY_COUNT; key++)
-        g_pattern2[key] = (uint8_t)(g_pattern_table[BLACK][key] | g_pattern_table[WHITE][key] << 4);
-    for (int i = 0; i < PIDX_COUNT; i++) {
-        uint8_t pats[4] = {(uint8_t)(i / (P_COUNT * P_COUNT * P_COUNT)), (uint8_t)(i / (P_COUNT * P_COUNT) % P_COUNT),
-                           (uint8_t)(i / P_COUNT % P_COUNT), (uint8_t)(i % P_COUNT)};
-        g_p4_table[i] = (uint8_t)combine_pattern4(pats);
-    }
-    eval_init(rule);   // 評価の表もルールごとに作り直す
 }
 
 int combine_pattern4(const uint8_t pats[4]) {

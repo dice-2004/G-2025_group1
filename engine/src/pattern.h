@@ -57,7 +57,9 @@ extern uint8_t g_pattern2[KEY_COUNT];   // [key] 黒のパターン | 白のパ�
 // 線パターンの細かい種類: その形を 1 つ上の形 (活一→活二、活二→活三、活三→達四、止め一→止め二 …) に
 // する空点の数 (上限 7)。同じ活二でも「つながった二 (活三の点 4 つ)」「跳び二 (3 つ)」「大跳び二 (2 つ)」、
 // 活三でも「達四の点が 2 つの三 (_XXX_ の両側が空く)」と「1 つの三 (跳び三など)」を分ける
-extern uint8_t g_pattern_sub[3][KEY_COUNT];
+// (分析用。pattern_sub_init で作る)
+extern uint8_t (*g_pattern_sub)[KEY_COUNT];
+void pattern_sub_init(const Rule *rule);
 static inline int pattern_upgrade(int p) {
     switch (p) {
     case P_B1: return P_B2;

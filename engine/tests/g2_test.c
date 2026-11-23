@@ -497,6 +497,7 @@ static int subfeat(Rule rule) {
     static Board b;
     char line[8192];
     pattern_init(&rule);
+    pattern_sub_init(&rule);
     int row = -1;
     while (fgets(line, sizeof line, stdin)) {
         row++;
@@ -523,6 +524,7 @@ static int census(Rule rule) {
     char line[8192];
     int fine = getenv("G2_FINE") != NULL;
     pattern_init(&rule);
+    if (fine) pattern_sub_init(&rule);
     int row = -1;
     while (fgets(line, sizeof line, stdin)) {
         row++;
