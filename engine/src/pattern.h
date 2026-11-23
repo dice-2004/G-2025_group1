@@ -54,6 +54,24 @@ extern uint8_t g_pattern_table[3][KEY_COUNT];   // [color][key]、color は 1,2 
 static inline int pattern_of(int color, uint32_t key) { return g_pattern_table[color][key]; }
 extern uint8_t g_pattern2[KEY_COUNT];   // [key] 黒のパターン | 白のパターン << 4 (差分更新で 1 回の表引きで済ませる)
 
+// 線パターンの細かい種類: その形を 1 つ上の形 (活一→活二、活二→活三、活三→達四、止め一→止め二 …) に
+// する空点の数 (上限 7)。同じ活二でも「つながった二 (活三の点 4 つ)」「跳び二 (3 つ)」「大跳び二 (2 つ)」、
+// 活三でも「達四の点が 2 つの三 (_XXX_ の両側が空く)」と「1 つの三 (跳び三など)」を分ける
+// (分析用。pattern_sub_init で作る)
+extern uint8_t (*g_pattern_sub)[KEY_COUNT];
+void pattern_sub_init(const Rule *rule);
+static inline int pattern_upgrade(int p) {
+    switch (p) {
+    case P_B1: return P_B2;
+    case P_F1: return P_F2;
+    case P_B2: return P_B3;
+    case P_F2: return P_F3;
+    case P_B3: return P_B4;
+    case P_F3: return P_F4;
+    default: return -1;
+    }
+}
+
 // 中心から offset (-5..-1, 1..5) のマスのキー内ビット位置
 static inline int key_slot(int offset) { return offset < 0 ? offset + 5 : offset + 4; }
 

@@ -3,11 +3,11 @@
 G2 エンジン (`engine/src`) を WebAssembly にして、ブラウザで対局できるようにした静的サイト。
 エンジンのコードは変えず、`g2_wasm.c` (盤の操作と思考を関数として出す入口) を足してビルドしている。
 
-- 公開 (予定の本命): GitHub Pages https://dice-2004.github.io/G-2025_group1/ 。`claude/dev` への push で GitHub Actions
+- 公開: GitHub Pages https://dice-2004.github.io/G-2025_group1/ 。`claude/dev` への push で GitHub Actions
   (`.github/workflows/pages.yml`) がビルド → Node で動作確認 → 公開する (`engine/web/pages.enabled` があるときだけ公開。PR はビルドと確認だけ)。
   対局データは Google Apps Script の記録先 (`collector/Code.gs`) に送る。組織外の人の対局も記録できる
-- 公開 (今): claude.ai のアーティファクト https://claude.ai/artifact/CZdJbuBNsMpSExkEvfJ9uc 。Pages 版の公開と記録を確かめたら消してよい (dice 2026-11-10)。
-  対局データはアーティファクトの db に記録するが、組織外の人の対局は記録できない
+- claude.ai のアーティファクト版は 2026-11-23 に削除した (Pages 版の公開と記録の読み出しを確かめた後、dice の了承どおり)。
+  `make_artifact.py` と下のアーティファクトの節は、作り直す場合のために残している
 
 ## GitHub Pages 版の記録先 (Google Apps Script)
 
@@ -36,12 +36,12 @@ G2 エンジン (`engine/src`) を WebAssembly にして、ブラウザで対局
 
 `Code.gs` を変えたときは、貼り直して保存し、「デプロイを管理」→ 編集 → バージョン「新しいバージョン」で同じ URL のまま更新する。
 
-## アーティファクトの更新手順
+## (参考) アーティファクト版の作り方
 
 1. 変更をコミットする (wasm に埋め込むコミットを合わせるため、先にコミット)
 2. `ZIG="python3 -m ziglang" sh engine/web/build.sh && node engine/web/smoke_test.js`
 3. `python3 engine/web/make_artifact.py <出力.html> "$(date -u +%Y%m%d)-$(git rev-parse --short=7 HEAD)"`
-4. Artifact ツールで `url: https://claude.ai/artifact/CZdJbuBNsMpSExkEvfJ9uc` に公開。`capabilities` は省略すると前の宣言 (下の db・user) を引き継ぐ
+4. Artifact ツールで新しく公開する (前の URL は削除済み)。`capabilities` に下の db・user の宣言を渡す
 
 ## 対局データ (自動収集)
 
@@ -63,7 +63,7 @@ G2 エンジン (`engine/src`) を WebAssembly にして、ブラウザで対局
 
 ### 取り出し方 (強化スレッド向け)
 
-Claude の `ArtifactData` ツールで、`url` に上のアーティファクトを渡して読む (dice の権限で読むので全員分が見える)。
+Claude の `ArtifactData` ツールで、`url` にアーティファクトを渡して読む (dice の権限で読むので全員分が見える)。
 
 1. `action: "list"`, `collection: "games"` → 利用者ごとの目印の文書 (id が利用者 id)
 2. `action: "list"`, `collection: "games/<利用者 id>/g"` → その人の対局 (ページ送りは結果の続きの印を使う)

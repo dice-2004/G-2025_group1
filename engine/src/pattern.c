@@ -2,11 +2,13 @@
 
 #include "eval.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 uint8_t g_pattern_table[3][KEY_COUNT];
 uint8_t g_pattern2[KEY_COUNT];
 uint8_t g_p4_table[PIDX_COUNT];
+uint8_t (*g_pattern_sub)[KEY_COUNT];
 
 static const Rule *cur_rule;
 static int cur_color;
@@ -100,6 +102,25 @@ void pattern_init(const Rule *rule) {
         g_p4_table[i] = (uint8_t)combine_pattern4(pats);
     }
     eval_init(rule);   // 評価の表もルールごとに作り直す
+}
+
+// 細かい種類の表を作る (分析用。pattern_init の後に呼ぶ。エンジン本体は使わないので普段は作らない)
+void pattern_sub_init(const Rule *rule) {
+    if (!g_pattern_sub) g_pattern_sub = calloc(3, KEY_COUNT);
+    for (int color = BLACK; color <= WHITE; color++) {
+        const int restricted = (color == BLACK) && rule->forbid_overline;
+        const uint8_t *t = g_pattern_table[color];
+        for (uint32_t key = 0; key < KEY_COUNT; key++) {
+            int up = pattern_upgrade(t[key]), n = 0;
+            if (up >= 0)
+                for (int j = -5; j <= 5; j++) {
+                    if (j == 0 || cell_at(key, j) != EMPTY) continue;
+                    int c = t[key | ((uint32_t)color << (2 * key_slot(j)))];
+                    n += c == up || (up == P_F4 && c == P_D4 && !restricted);
+                }
+            g_pattern_sub[color][key] = (uint8_t)(n > 7 ? 7 : n);
+        }
+    }
 }
 
 int combine_pattern4(const uint8_t pats[4]) {

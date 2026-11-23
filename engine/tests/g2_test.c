@@ -47,9 +47,12 @@ static int random_empty_near(Board *b) {
     return -1;
 }
 
+static void apply_env_params(Rule rule);
+
 static int selftest(Rule rule) {
     static Board b;
     pattern_init(&rule);
+    apply_env_params(rule);   // G2_PARAMS で評価の重みを変えた盤の差分更新も確かめる
     int checks = 0;
     for (int game = 0; game < 300; game++) {
         board_init(&b, 15, &rule);
@@ -471,6 +474,85 @@ static int polfeat(Rule rule) {
     return 0;
 }
 
+// 局面の空点・方向ごとの線パターンの細かい種類 (g_pattern_sub) の数: [自分/相手][B1..F3 の 6 種][上げる点 0..7]
+static void print_subcnt(const Board *b, int me, int op) {
+    int cnt[2][6][8];
+    memset(cnt, 0, sizeof cnt);
+    for (int q = 0; q < NCELL; q++) {
+        if (b->cell[q] != EMPTY) continue;
+        for (int d = 0; d < 4; d++)
+            for (int c = 0; c < 2; c++) {
+                int col = c ? op : me, p = b->pat[col][q][d];
+                if (p >= P_B1 && p <= P_F3) cnt[c][p - P_B1][g_pattern_sub[col][b->key[q][d]]]++;
+            }
+    }
+    for (int c = 0; c < 2; c++)
+        for (int i = 0; i < 6; i++)
+            for (int j = 0; j < 8; j++) printf(" %d", cnt[c][i][j]);
+}
+
+// 形の分析用: 局面ごとに細かい種類の数を出す (五・達四の点がある局面は飛ばす)
+// 入力: 手順 (タブ以降は無視)。出力: 入力の行番号 (0 から) 手番の色 静的評価 自分の数 48 個 相手の数 48 個
+static int subfeat(Rule rule) {
+    static Board b;
+    char line[8192];
+    pattern_init(&rule);
+    pattern_sub_init(&rule);
+    int row = -1;
+    while (fgets(line, sizeof line, stdin)) {
+        row++;
+        char *tab = strchr(line, '\t');
+        if (tab) *tab = 0;
+        board_init(&b, 15, &rule);
+        char *s = line;
+        int x, y, k;
+        while (sscanf(s, " %d,%d%n", &x, &y, &k) == 2) { board_move(&b, to_pos(x, y)); s += k; }
+        int me = board_side(&b), op = opp_color(me);
+        if (b.p4cnt[me][P4_FIVE] || b.p4cnt[op][P4_FIVE] || b.p4cnt[me][P4_FLEX4] || b.p4cnt[op][P4_FLEX4]) continue;
+        printf("%d %d %d", row, me, evaluate(&b));
+        print_subcnt(&b, me, op);
+        printf("\n");
+    }
+    return 0;
+}
+
+// 静かな手の分析用: 候補手ごとに、打った後の空点の形の数と評価を出す
+// 入力: 手順<TAB>手。出力: 入力の行番号 正解か (-1 = 打つ前の局面) 評価 (打った側から) 自分の p4cnt[1..12] 相手の p4cnt[1..12]
+// (G2_FINE があれば続けて細かい種類の数 96 個)
+static int census(Rule rule) {
+    static Board b;
+    char line[8192];
+    int fine = getenv("G2_FINE") != NULL;
+    pattern_init(&rule);
+    if (fine) pattern_sub_init(&rule);
+    int row = -1;
+    while (fgets(line, sizeof line, stdin)) {
+        row++;
+        char *tab = strchr(line, '\t');
+        if (!tab) continue;
+        *tab = 0;
+        int tx, ty;
+        if (sscanf(tab + 1, "%d,%d", &tx, &ty) != 2) continue;
+        board_init(&b, 15, &rule);
+        char *s = line;
+        int x, y, k;
+        while (sscanf(s, " %d,%d%n", &x, &y, &k) == 2) { board_move(&b, to_pos(x, y)); s += k; }
+        int me = board_side(&b), op = opp_color(me), target = to_pos(tx, ty);
+        if (target < 0 || b.cell[target] != EMPTY) continue;
+        for (int q = -1; q < NCELL; q++) {
+            if (q >= 0 && (b.cell[q] != EMPTY || !b.near[q])) continue;
+            if (q >= 0) board_move(&b, q);
+            printf("%d %d %d", row, q < 0 ? -1 : q == target, q < 0 ? evaluate(&b) : -evaluate(&b));
+            for (int i = 1; i < P4_COUNT; i++) printf(" %d", b.p4cnt[me][i]);
+            for (int i = 1; i < P4_COUNT; i++) printf(" %d", b.p4cnt[op][i]);
+            if (fine) print_subcnt(&b, me, op);
+            printf("\n");
+            if (q >= 0) board_undo(&b);
+        }
+    }
+    return 0;
+}
+
 static int timed(Rule rule, int ms, int threads) {
     static Board b;
     char line[8192];
@@ -565,6 +647,8 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "evalmoves")) return evalmoves(rule);
     if (!strcmp(argv[1], "moverank")) return moverank(rule);
     if (!strcmp(argv[1], "polfeat")) return polfeat(rule);
+    if (!strcmp(argv[1], "census")) return census(rule);
+    if (!strcmp(argv[1], "subfeat")) return subfeat(rule);
     if (!strcmp(argv[1], "timed")) return timed(rule, argc > 3 ? atoi(argv[3]) : 1000, argc > 4 ? atoi(argv[4]) : 1);
     if (!strcmp(argv[1], "msdump")) return msdump(rule);
     if (!strcmp(argv[1], "tzcheck")) return tzcheck(rule);
