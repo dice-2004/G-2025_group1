@@ -10,7 +10,7 @@
 // 差分更新の取り消し用: 着手で変わった (空点, 方向) の前の値
 typedef struct {
     uint16_t q;
-    uint8_t d, pb, pw, p4b, p4w, sub;   // sub = 前の g_sub2 の値
+    uint8_t d, pb, pw, p4b, p4w, pad;
 } BoardUndo;
 #define BOARD_UNDO_MAX ((MAX_MOVES + 16) * 40)
 
@@ -26,7 +26,6 @@ typedef struct {
     uint32_t key[NCELL][4];         // 各マス・各方向の周囲 10 マスの並び
     uint8_t pat[3][NCELL][4];       // [color][pos][dir] その色がそこに打ったときの線パターン
     uint8_t pat4[3][NCELL];         // [color][pos] 4 方向合成
-    uint8_t sub[NCELL][4];          // [pos][dir] 線パターンの細かい種類 g_sub2 (黒 | 白 << 4)
     uint64_t hash;
     // 以下は空点についての集計 (差分更新)。探索・評価用
     int32_t vsum[3];                // [color] 空点の g_cell_value の和
