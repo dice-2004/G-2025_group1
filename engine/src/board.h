@@ -61,6 +61,9 @@ static inline int board_pidx(const Board *b, int color, int pos) { return b->pid
 // pos に color が打ったら勝ち (五) になるか
 static inline int board_is_five(const Board *b, int pos, int color) { return b->pat4[color][pos] == P4_FIVE; }
 
+// color が pos に打った後の空点の集計 (vsum, p4cnt) を、盤を変えずに求める (葉の評価用。board_move の集計と同じ値)
+void board_probe_sums(const Board *b, int pos, int color, BoardSums *out);
+
 // 黒が pos に打つと禁じ手か (ルールに禁じ手がなければ常に 0)
 int board_is_forbidden(Board *b, int pos);
 

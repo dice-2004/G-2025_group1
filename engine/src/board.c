@@ -163,6 +163,38 @@ static void put_stone(Board *b, int p, int color) {
     }
 }
 
+void board_probe_sums(const Board *b, int p, int color, BoardSums *out) {
+    memcpy(out->vsum, b->vsum, sizeof out->vsum);
+    memcpy(out->p4cnt, b->p4cnt, sizeof out->p4cnt);
+    for (int c = BLACK; c <= WHITE; c++) {
+        out->vsum[c] -= g_cell_value[c][b->pidx[c][p]];
+        out->p4cnt[c][b->pat4[c][p]]--;
+    }
+    for (int d = 0; d < 4; d++) {
+        int off = DIR_OFFSET[d], w = PIDX_W[d];
+        for (int k = -5; k <= 5; k++) {
+            if (!k) continue;
+            int q = p + k * off;   // q から見て p は -k
+            if (b->cell[q] != EMPTY) continue;
+            uint8_t np2 = g_pattern2[b->key[q][d] | (uint32_t)color << (2 * key_slot(-k))];
+            const uint8_t *pb = b->pat[BLACK][q], *pw = b->pat[WHITE][q];
+            int nb = np2 & 15, nw = np2 >> 4;
+            if (nb != pb[d]) {
+                int oi = b->pidx[BLACK][q], idx = oi + (nb - pb[d]) * w;
+                out->vsum[BLACK] += g_cell_value[BLACK][idx] - g_cell_value[BLACK][oi];
+                out->p4cnt[BLACK][b->pat4[BLACK][q]]--;
+                out->p4cnt[BLACK][g_p4_table[idx]]++;
+            }
+            if (nw != pw[d]) {
+                int oi = b->pidx[WHITE][q], idx = oi + (nw - pw[d]) * w;
+                out->vsum[WHITE] += g_cell_value[WHITE][idx] - g_cell_value[WHITE][oi];
+                out->p4cnt[WHITE][b->pat4[WHITE][q]]--;
+                out->p4cnt[WHITE][g_p4_table[idx]]++;
+            }
+        }
+    }
+}
+
 // 直前の put_stone を取り消す (着手は必ず後から順に戻すので、記録した前の値に戻せばよい。
 // p 自身のパターンは石がある間は更新していないので、置く前のまま)
 static void remove_stone(Board *b, int p) {
