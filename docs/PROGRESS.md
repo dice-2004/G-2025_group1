@@ -13,7 +13,7 @@
 | legacy の強さ | 連珠・1秒/手で Elo +883 (random=0)。1手読み貪欲ボットに 29.5/80、Rapfi 深さ2制限に 0/80 |
 | 開局ブック | 黒白とも 6 手目まで (連珠 150・自由 133 局面、2026-11-09 に縮小)。gomocalc 500ms 黒番 連珠 2-8 (深いブック 6-4、なし 1-9)・自由 7-3。[詳細](./benchmarks/2026-10-27_book.md) |
 | 新しい探索 (2026-11-09) | ルートで df-pn の VCT (dfpn.c、時間の 20%) の後に αβ の脅威探索 (ts.c、静かな「パスしたら VCF」の脅威を含む、時間の 20%) で自分の勝ちを探す (どちらも既定)。gomocalc 500ms 連珠 黒番 8-12 → 11-9、白番は 0-20 のまま。VCF は軽い盤 fvcf.c (結果は vcf.c と一致、VCF 1.5〜1.85 倍・ts 1.55 倍)。既定無効の試作: 脅威圏 tz.c、λ3 l3.c、反証の圏 rz.c、本探索の中の ts。[詳細](./benchmarks/2026-11-09_novel_search.md) |
-| ブラウザ版 (2026-11-10) | 今は claude.ai のアーティファクト https://claude.ai/artifact/CZdJbuBNsMpSExkEvfJ9uc (組織外の対局は記録できない)。GitHub Pages 版 + Google Apps Script の記録先 (組織外の対局も記録) に移す準備済みで、dice の設定待ち。移したらアーティファクトは消す。[engine/web/README.md](../engine/web/README.md) |
+| ブラウザ版 | GitHub Pages https://dice-2004.github.io/G-2025_group1/ (claude/dev への push で自動ビルド・確認・公開)。対局データは Google Apps Script の記録先に自動で記録し、`engine/web/fetch_games.py` (環境変数 G2_COLLECTOR_KEY) で読み出す。2026-11-23 時点で 15 局。アーティファクト版は削除済み。[engine/web/README.md](../engine/web/README.md) |
 | 次の目標 | rapfi-n100k に勝ち越す (評価の再調整・探索の枝刈り・VCT の使い方) |
 
 ## 2026-11-23 Rapfi の静かな攻め手の形の分析と、線の形の細かい種類 (探索スレッド)
@@ -99,7 +99,11 @@
   dice の判断で GitHub Pages 版に戻し、記録先を Google Apps Script (スプレッドシート、`engine/web/collector/Code.gs`) にした。
   秘密情報なし・新しいアカウント不要。読み出しは `engine/web/fetch_games.py`。Pages への公開は `engine/web/pages.enabled` があるときだけ。
   Code.gs は模擬の SpreadsheetApp で書き込み・上書き・読み出しを確認、ページからの POST は Playwright で確認 (1 局 5 回、最後に勝敗付き)。
-  残り: dice の設定 (Apps Script のデプロイ、Pages の有効化) → URL を config.js に書く → 公開と記録の確認 → アーティファクトを消す
+  2026-11-10: dice が設定 (Apps Script のデプロイ・読み出しの鍵・Pages の有効化) → config.js に URL、`engine/web/pages.enabled` を置いて公開。
+  公開後のページで対局し記録先への POST を確認、鍵なしの読み出しが弾かれることも確認
+  2026-11-23: 鍵付きの読み出しで 18 局を取得 (うちテスト 3 局: 20261110025553-elr5z・20261110025608-sv98g・20261110024255-3zmz1 は除いて使う)。
+  実際の 15 局はすべて連珠で、終局 10 局は G2 の全勝 (人が黒 7・白 3)、途中で終わった 5 局。エンジン版は 5 つ (push ごとに自動で更新されている)。
+  これを確かめてアーティファクト版を削除 (dice の了承どおり)
 - 中で G2 が動いていると分かるように、wasm にビルド元のコミットを埋め込み (`g2_version`、ページに「エンジン: G2 <コミット>」とソースへのリンク)、
   思考ごとに決め手 (探索・VCF・VCT・ブックなど)・深さ (最大の深さ)・評価・ノード数・時間・ノード/秒・読み筋を表示し、記録に残すようにした
 
