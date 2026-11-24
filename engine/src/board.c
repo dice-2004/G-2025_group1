@@ -185,12 +185,13 @@ void board_probe_sums(const Board *b, int p, int color, BoardSums *out) {
         out->p4cnt[c][b->pat4[c][p]]--;
     }
     for (int d = 0; d < 4; d++) {
-        int off = DIR_OFFSET[d], w = PIDX_W[d];
+        int off = DIR_OFFSET[d], w = PIDX_W[d], lp = g_line_pos[d][p];
+        uint64_t lw = b->line[d][g_line_id[d][p]] | (uint64_t)color << (2 * lp);   // 置いた後の直線
         for (int k = -5; k <= 5; k++) {
             if (!k) continue;
-            int q = p + k * off;   // q から見て p は -k
+            int q = p + k * off;
             if (b->cell[q] != EMPTY) continue;
-            uint8_t np2 = g_pattern2[board_key(b, q, d) | (uint32_t)color << (2 * key_slot(-k))];
+            uint8_t np2 = g_pattern2[line_key(lw, lp + k)];
             const uint8_t *pb = b->pat[BLACK][q], *pw = b->pat[WHITE][q];
             int nb = np2 & 15, nw = np2 >> 4;
             if (nb != pb[d]) {
