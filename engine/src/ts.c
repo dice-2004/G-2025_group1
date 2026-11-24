@@ -49,7 +49,9 @@ static _Thread_local struct {
     long nodes, max_nodes;
     double deadline;
     int aborted;
+    uint64_t salt;   // 表の印 (key ^ salt で書き、読む)。ts_win のたびに変えて、表を消さずに前の呼び出しの記録を無効にする (番地は key のまま)
 } T;
+#define TAG(k) ((k) ^ T.salt)
 
 static double now_ms(void) {
     struct timespec ts;
@@ -65,25 +67,31 @@ static inline int tlegal(int color, int q) {
     return !(T.forb && color == BLACK && board_is_forbidden(T.b, q));
 }
 
+// (五の点は 2 マス以内に石があるので候補の空点の行ビットだけをたどる。順は盤の順のまま)
 static int find_p4(int color, int p4) {
     const Board *b = T.b;
-    for (int q = 0; q < NCELL; q++)
-        if (b->cell[q] == EMPTY && b->pat4[color][q] == p4) return q;
+    for (int y = 0; y < b->size; y++) {
+        int q0 = to_pos(0, y);
+        for (uint32_t row = board_cand_row(b, y); row; row &= row - 1) {
+            int q = q0 + __builtin_ctz(row);
+            if (b->pat4[color][q] == p4) return q;
+        }
+    }
     return -1;
 }
 
 // 1 = 勝ち、0 = この深さでは勝てない、-1 = 調べていない
 static int tt_get(uint64_t key, int depth, int *move) {
     TsEntry *e = &T.tt[key & (TTS_SIZE - 1)];
-    if (e->key != key) return -1;
+    if (e->key != TAG(key)) return -1;
     if (e->depth == 0x7fff) { if (move) *move = e->move; return 1; }
     return e->depth >= depth ? 0 : -1;
 }
 
 static void tt_put(uint64_t key, int depth, int win, int move) {
     TsEntry *e = &T.tt[key & (TTS_SIZE - 1)];
-    if (e->key == key && e->depth == 0x7fff && !win) return;
-    e->key = key;
+    if (e->key == TAG(key) && e->depth == 0x7fff && !win) return;
+    e->key = TAG(key);
     e->depth = win ? 0x7fff : (int16_t)depth;
     e->move = (int16_t)move;
 }
@@ -127,7 +135,7 @@ static int or_node(int depth, int ply) {
     int tm = -1, t = tt_get(key, depth, &tm);
     if (t >= 0) return t;
     QEntry *qe = &T.qc[key & (QC_SIZE - 1)];
-    if (qe->key != key) { qe->key = key; qe->novcf = 0; qe->nq = -1; }
+    if (qe->key != TAG(key)) { qe->key = TAG(key); qe->novcf = 0; qe->nq = -1; }
     if (!qe->novcf && tz_gate(b, att)) {
         TzZone z;
         int ok = tz_probe_att(b, att, g_ts_vcf_nodes, &z);
@@ -141,7 +149,7 @@ static int or_node(int depth, int ply) {
     for (int phase = 0; phase < 2; phase++) {
         if (phase == 1 && g_ts_threat_min >= P4_FLEX3) break;
         int ch[MAX_CH], sc[MAX_CH], n = 0;
-        if (phase == 1 && qe->key == key && qe->nq >= 0) {
+        if (phase == 1 && qe->key == TAG(key) && qe->nq >= 0) {
             n = qe->nq;
             for (int i = 0; i < n; i++) ch[i] = qe->mv[i];
             goto search;
@@ -178,7 +186,7 @@ static int or_node(int depth, int ply) {
             ch[j] = q;
             sc[j] = s;
         }
-        if (phase == 1 && qe->key == key) {
+        if (phase == 1 && qe->key == TAG(key)) {
             qe->nq = (int8_t)(n < QC_MOVES ? n : QC_MOVES);
             for (int i = 0; i < qe->nq; i++) qe->mv[i] = (int16_t)ch[i];
         }
@@ -296,8 +304,8 @@ void ts_warm(void) {
 
 int ts_win(Board *b, int attacker, int max_depth, long max_nodes, int max_ms, TsResult *res) {
     if (!ts_alloc()) return 0;
-    memset(T.tt, 0, TTS_SIZE * sizeof(TsEntry));
-    memset(T.qc, 0, QC_SIZE * sizeof(QEntry));   // fail の深さは呼び出しの条件 (予算) によるので毎回消す
+    // fail の深さは呼び出しの条件 (予算) によるので、前の呼び出しの記録は使わない (表を消す代わりに印を変える。5MB の消去が要らない)
+    T.salt = (T.salt + 0x9E3779B97F4A7C15ULL) * 0xBF58476D1CE4E5B9ULL | 1;
     return run(b, attacker, max_depth, max_nodes, max_ms, res);
 }
 
@@ -323,7 +331,7 @@ static int run(Board *b, int attacker, int max_depth, long max_nodes, int max_ms
     }
     if (win) {
         TsEntry *e = &T.tt[tkey(1) & (TTS_SIZE - 1)];
-        move = e->key == tkey(1) ? e->move : -1;
+        move = e->key == TAG(tkey(1)) ? e->move : -1;
     }
     if (res) {
         res->win = win;
@@ -385,7 +393,7 @@ static void zwalk(int is_or, int ply) {
             // r == 2 (止める点が禁じ手で圏を絞れない VCF): 置換表の手をたどる
         }
         TsEntry *e = &T.tt[tkey(1) & (TTS_SIZE - 1)];
-        int m = e->key == tkey(1) && e->depth == 0x7fff ? e->move : -1;
+        int m = e->key == TAG(tkey(1)) && e->depth == 0x7fff ? e->move : -1;
         if (m < 0) {
             // 圏の作り直しで受けの候補が探索の時と少し違うことがある (VCF の手順の再利用による)。その局面だけ読み直す
             T.aborted = 0;
@@ -393,7 +401,7 @@ static void zwalk(int is_or, int ply) {
             T.deadline = 0;
             for (int d = 1; d <= 12 && !T.aborted; d++)
                 if (or_node(d, ply)) break;
-            m = e->key == tkey(1) && e->depth == 0x7fff ? e->move : -1;
+            m = e->key == TAG(tkey(1)) && e->depth == 0x7fff ? e->move : -1;
             if (m < 0 && b->p4cnt[att][P4_FIVE] == 0) {
                 // 勝ちが VCF (TT に手がない形) のこともある
                 TzZone z;
