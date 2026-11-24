@@ -783,19 +783,25 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
             }
         }
     }
+    // 繰り返しの中で変わらない値 (out への書き込みと別名になり得る大域変数を毎回読み直さないよう、先に読む)
+    const int q_min_p4 = sp.q_min_p4, drop4 = c->drop4, tact_own = sp.tact_own, tact_def = sp.tact_def;
+    const int keep4 = sp.keep4 && !op_threat && !tzon && !c->keep_off && mode != 1 && (sp.keep4 >= 2 || ply == 0), keep4_def = sp.keep4_def;
+    const int policy1 = sp.policy == 1, ohist = sp.ohist, okill = ok2 ? sp.okill : 0, phw = sp.ph;
+    const unsigned tzgen = c->tzgen;
+    const int k0 = k ? k[0] : -2, k1 = k ? k[1] : -2;
     for (int y = y0; y <= y1; y++) {
         int q = to_pos(x0, y);
         for (int x = x0; x <= x1; x++, q++) {
             if (b->cell[q] != EMPTY || !b->near[q]) continue;
             int a = b->pat4[me][q], d = b->pat4[op][q];
-            if (mode == 1 && (a < sp.q_min_p4 || a > P4_BLOCK4_FLEX3)) continue;
+            if (mode == 1 && (a < q_min_p4 || a > P4_BLOCK4_FLEX3)) continue;
             if (op_threat && a < P4_BLOCK4 && !blocks_threat(b, op, q)) continue;
-            if (defl && a < P4_BLOCK4 && c->tzmark[q] != c->tzgen) continue;
-            if (c->drop4 && (a == P4_BLOCK4 || a == P4_BLOCK4_PLUS) && !blocks_threat(b, op, q)) continue;
-            if (sp.keep4 && a == P4_BLOCK4 && d < sp.keep4_def && !op_threat && !tzon && !c->keep_off && mode != 1 && (sp.keep4 >= 2 || ply == 0)) continue;
-            if (tzon && a < P4_BLOCK4 && c->tzmark[q] != c->tzgen) continue;
+            if (defl && a < P4_BLOCK4 && c->tzmark[q] != tzgen) continue;
+            if (drop4 && (a == P4_BLOCK4 || a == P4_BLOCK4_PLUS) && !blocks_threat(b, op, q)) continue;
+            if (keep4 && a == P4_BLOCK4 && d < keep4_def) continue;
+            if (tzon && a < P4_BLOCK4 && c->tzmark[q] != tzgen) continue;
             int s = vme[board_pidx(b, me, q)] + vop[board_pidx(b, op, q)] * DEF_SCALE / 64;
-            if (polon && (sp.policy == 1 || a < P4_BLOCK4)) {
+            if (polon && (policy1 || a < P4_BLOCK4)) {
                 // 表の点 (1 logit = 256) を今の点の尺度 (100 ≒ 1 logit) に直す
                 int pv = s * g_policy_base_scale / 100 + pol_tab[me][0][board_pidx(b, me, q)] +
                          pol_tab[me][1][board_pidx(b, op, q)] + g_policy_dist_last[cheb_dist(q, lastm)] +
@@ -804,14 +810,14 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
             }
             out[n].value = s;
             s = s * 16 + hist[q] / 64;
-            if (sp.ohist) s += c->history[op][q] / 64 * sp.ohist / 64;
-            if (sp.okill && ok2 && (q == ok2[0] || q == ok2[1])) s += sp.okill;
-            if (phon) s += (ph[0][ph_class[board_pidx(b, me, q)]] + ph[1][ph_class[board_pidx(b, op, q)]]) * sp.ph / 64;
+            if (ohist) s += c->history[op][q] / 64 * ohist / 64;
+            if (okill && (q == ok2[0] || q == ok2[1])) s += okill;
+            if (phon) s += (ph[0][ph_class[board_pidx(b, me, q)]] + ph[1][ph_class[board_pidx(b, op, q)]]) * phw / 64;
             if (q == ttmove) s += 1 << 28;
-            else if (k && (q == k[0] || q == k[1])) s += 1 << 12;
+            else if (q == k0 || q == k1) s += 1 << 12;
             out[n].pos = q;
             out[n].score = s;
-            out[n].tactical = a >= sp.tact_own || d >= sp.tact_def;
+            out[n].tactical = a >= tact_own || d >= tact_def;
             n++;
         }
     }
