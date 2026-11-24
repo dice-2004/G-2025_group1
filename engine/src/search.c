@@ -335,6 +335,7 @@ static struct {
     int def_line;       // 1 = 相手の活三への受けを、達四の点を通る線の上の点 (と自分の四) に絞る
     int vct_dfpn;       // 1 = ルートの VCT (vct_pct) を証明数探索 (dfpn.c) で調べる (既定。0 = vct_solve)
     int smp_idle;   // 1 = 補助スレッドは作るだけで何もしない (原因調べ用)
+    int asym_own, asym_opp, asym_lmr;   // 案 Z: 非対称の幅。根の手番側の節点 / 相手の節点で、手の数の枝刈りの手数を % で変える (既定 100 / 100)
     int smp_tt, smp_skip;   // 補助スレッド: 置換表に書く (既定 1)、深さを飛ばす (既定 1)
     int smp_pick;       // 1 = 補助スレッドの結果 (勝ちの読み切り・より深い反復) も使う
     int dfdef_pct;      // 相手の VCT への受けを df-pn で調べる時間 (上限時間の %)。0 = 使わない
@@ -384,7 +385,7 @@ static struct {
     .l3x = 0, .l3x_depth = 3, .l3x_min = 1, .l3x_top = 4, .l3x_ext = 1, .l3x_w = 1 << 20,
     .qfit = 0, .qfit_depth = 3, .qkeep = 0, .qkeep_min = 0, .qpot = 0, .qpot_depth = 3, .qpot_w = 1000, .qpot_tact = 99, .probcut = 0, .pc_depth = 5, .pc_margin = 300, .pc_red = 3, .pc_moves = 3, .def_scale = 52, .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
     .vz = 0, .vz_depth = 4, .vz_nodes = 2000, .vz_keep = P4_BLOCK3, .vz_pv = 1, .vz_root = 0, .vz_root_nodes = 20000, .vz_tact = 0,
-    .smp_pick = 1, .trap = 0, .trap_k = 3, .trap_n = 8, .trap_margin = 60, .trap_min = 15, .trap_ms = 4, .smp_tt = 1, .smp_skip = 1, .dfdef_pct = 0, .dfver_pct = 0,
+    .smp_pick = 1, .trap = 0, .trap_k = 3, .trap_n = 8, .trap_margin = 60, .trap_min = 15, .trap_ms = 4, .asym_own = 100, .asym_opp = 100, .asym_lmr = 0, .smp_tt = 1, .smp_skip = 1, .dfdef_pct = 0, .dfver_pct = 0,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
     .cand_min = 0, .ext_three = 1, .vctdef_pct = 0, .unstable_pct = 100,
@@ -452,6 +453,9 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "trap_min")) sp.trap_min = (int)v;
     else if (!strcmp(name, "trap_ms")) sp.trap_ms = (int)v;
     else if (!strcmp(name, "smp_tt")) sp.smp_tt = (int)v;
+    else if (!strcmp(name, "asym_own")) sp.asym_own = (int)v;
+    else if (!strcmp(name, "asym_opp")) sp.asym_opp = (int)v;
+    else if (!strcmp(name, "asym_lmr")) sp.asym_lmr = (int)v;
     else if (!strcmp(name, "smp_idle")) sp.smp_idle = (int)v;
     else if (!strcmp(name, "smp_skip")) sp.smp_skip = (int)v;
     else if (!strcmp(name, "dfdef_pct")) sp.dfdef_pct = (int)v;
@@ -1311,7 +1315,7 @@ moves_loop:
             (i + 1) * (2 - improving) >= mcp_table[depth < 63 ? depth : 63])
             continue;
         if (searched > 0 && !is_pv && !tactical && best > -SCORE_WIN_MIN) {
-            if (depth >= 1 && depth <= 4 && searched * 100 >= LMP_COUNT[depth] * sp.lmp_mul) {
+            if (depth >= 1 && depth <= 4 && searched * 10000 >= LMP_COUNT[depth] * (ply & 1 ? sp.asym_opp : sp.asym_own) * sp.lmp_mul) {
                 // ここから先の静かな手はすべて読まない (searched と best は減らない) ので、残りを戦術的な手だけに詰める
                 // (残りの 60 手ほどを 1 手ずつ最大値で選び直す O(n^2) の無駄をなくす。読む手と順番は同じ)
                 if (sp.qkeep && depth >= sp.qfit_depth) {
@@ -1427,6 +1431,9 @@ moves_loop:
                     int extra = (pmax - list[i].value) / sp.lmr_pol;
                     r += extra < sp.lmr_pol_max ? extra : sp.lmr_pol_max;
                 }
+                if (sp.asym_lmr && (ply & 1)) r -= sp.asym_lmr;   // 案 Z: 相手の節点では削りを減らす
+                if (sp.asym_lmr < 0 && !(ply & 1)) r -= sp.asym_lmr;   // 負の値: 自分の節点で削りを増やす
+                if (r < 0) r = 0;
                 if (r > nd - 1) r = nd - 1 > 0 ? nd - 1 : 0;
             }
             if (sp.lmr_tact && tactical && !r && !qmode && depth >= 3 && !op_threat && !tzon && searched >= sp.lmr_tact &&
