@@ -237,10 +237,33 @@ static int legal_flex4(Board *b, int color) {
     return -1;
 }
 
-// legal_flex4 の有無だけ (禁じ手のない側は数だけで決まる)
+// 着手 m を通る 4 本の直線の上 (±5) で color のパターンが p4 の空点を 1 つ探す (なければ -1)。legal = 1 なら禁じ手を除く
+static int find_on_lines(Board *b, int m, int color, int p4, int legal_only) {
+    for (int d = 0; d < 4; d++) {
+        int off = DIR_OFFSET[d];
+        for (int k = -5; k <= 5; k++) {
+            int q = m + k * off;
+            if (k && b->cell[q] == EMPTY && b->pat4[color][q] == p4 && (!legal_only || legal(b, color, q))) return q;
+        }
+    }
+    return -1;
+}
+
+// 唯一の p4 の点 (数が 1 のとき) を、直前の 2 手を通る線から先に探す (多くは直前の手が作る。見つからなければ全体を探す)
+static int find_unique_cell(Board *b, int color, int p4) {
+    for (int i = 1; i <= 2 && i <= b->nmoves; i++) {
+        int q = find_on_lines(b, b->moves[b->nmoves - i], color, p4, 0);
+        if (q >= 0) return q;
+    }
+    return find_cell(b, color, p4);
+}
+
+// legal_flex4 の有無だけ (禁じ手のない側は数だけで決まる。禁じ手のある側は直前の 2 手を通る線から先に探す)
 static inline int has_flex4(Board *b, int color) {
     if (!b->p4cnt[color][P4_FLEX4]) return 0;
     if (!restricted(b, color)) return 1;
+    for (int i = 1; i <= 2 && i <= b->nmoves; i++)
+        if (find_on_lines(b, b->moves[b->nmoves - i], color, P4_FLEX4, 1) >= 0) return 1;
     return legal_flex4(b, color) >= 0;
 }
 
@@ -819,9 +842,9 @@ static int gen_ok(Ctx *c, int q, int me, int op, int op_threat, int mode) {
 
 // i 番目以降で最も点の高い手を i 番目に持ってくる (枝刈りで早く打ち切ることが多いので全部は並べない)
 static inline void pick_move(Move *m, int i, int n) {
-    int bi = i;
+    int bi = i, bs = m[i].score;
     for (int j = i + 1; j < n; j++)
-        if (m[j].score > m[bi].score) bi = j;
+        if (m[j].score > bs) bs = m[j].score, bi = j;
     if (bi != i) { Move t = m[i]; m[i] = m[bi]; m[bi] = t; }
 }
 
@@ -1076,8 +1099,9 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     // 相手の五の点: 止めるしかない (深さは減らさない)
     int opfive = b->p4cnt[op][P4_FIVE];
     if (opfive) {
-        int q = find_cell(b, op, P4_FIVE);
-        if (opfive >= 2 || !legal(b, me, q)) return -(SCORE_WIN - ply - 1);
+        if (opfive >= 2) return -(SCORE_WIN - ply - 1);
+        int q = find_unique_cell(b, op, P4_FIVE);
+        if (!legal(b, me, q)) return -(SCORE_WIN - ply - 1);
         board_move(b, q);
         if (ply + 1 < MAX_PLY) c->xhalf[ply + 1] = c->xhalf[ply];
         int v = -pvs(c, -beta, -alpha, depth, ply + 1, is_pv);
