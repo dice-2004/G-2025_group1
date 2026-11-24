@@ -72,12 +72,15 @@ static void store(uint64_t key, uint32_t pn, uint32_t dn, int best) {
     e->gen = D.gen;
 }
 
+// (五の点・近くの空点はどれも 2 マス以内に石があるので、候補の空点の行ビット board_cand_row だけをたどる。順は盤の順のまま)
 static int find_p4(int color, int p4) {
     const Board *b = D.b;
     for (int y = 0; y < b->size; y++) {
-        int q = to_pos(0, y);
-        for (int x = 0; x < b->size; x++, q++)
-            if (b->cell[q] == EMPTY && b->pat4[color][q] == p4) return q;
+        int q0 = to_pos(0, y);
+        for (uint32_t row = board_cand_row(b, y); row; row &= row - 1) {
+            int q = q0 + __builtin_ctz(row);
+            if (b->pat4[color][q] == p4) return q;
+        }
     }
     return -1;
 }
@@ -86,9 +89,8 @@ static int near_cells(int *out) {
     const Board *b = D.b;
     int n = 0;
     for (int y = 0; y < b->size; y++) {
-        int q = to_pos(0, y);
-        for (int x = 0; x < b->size; x++, q++)
-            if (b->cell[q] == EMPTY && b->near[q]) out[n++] = q;
+        int q0 = to_pos(0, y);
+        for (uint32_t row = board_cand_row(b, y); row; row &= row - 1) out[n++] = q0 + __builtin_ctz(row);
     }
     return n;
 }
