@@ -78,6 +78,7 @@ typedef struct {
     uint8_t cell[NCELL];
     uint32_t st[NCELL];             // st[q] == gen なら key/pa/p4a は重ね盤の値
     uint64_t line[4][BOARD_NLINES]; // 重ね盤の直線の並び (盤 b の写しに石を足したもの)。キーはここから切り出す
+    uint32_t lgen[4][BOARD_NLINES]; // lgen == gen の直線だけ line が有効 (石を足した直線だけを写す)
     uint8_t pa[NCELL][4];           // 攻め側の線パターン
     uint8_t p4a[NCELL];
     int useset;                     // 0 = 四の点の集合を保たない (手順の再生)
@@ -119,7 +120,10 @@ static inline __attribute__((always_inline)) void touch(int q, const int vcf) {
     S.p4a[q] = b->pat4[S.att][q];
 }
 
-static inline uint32_t skey(int q, int d) { return line_key(S.line[d][g_line_id[d][q]], g_line_pos[d][q]); }
+static inline uint32_t skey(int q, int d) {
+    int l = g_line_id[d][q];
+    return line_key(S.lgen[d][l] == S.gen ? S.line[d][l] : S.b->line[d][l], g_line_pos[d][q]);
+}
 
 // color が空点 q に打ったときの方向 d の線パターン
 static inline int pat(int color, int q, int d) {
@@ -173,7 +177,9 @@ static inline __attribute__((always_inline)) void put_m(int p, int color, const 
     S.ov[S.nov++] = p;
     for (int d = 0; d < 4; d++) {
         int off = DIR_OFFSET[d], lp = g_line_pos[d][p];
-        uint64_t *lw = &S.line[d][g_line_id[d][p]];
+        int l = g_line_id[d][p];
+        uint64_t *lw = &S.line[d][l];
+        if (S.lgen[d][l] != S.gen) S.lgen[d][l] = S.gen, *lw = S.b->line[d][l];
         uint64_t w = *lw | (uint64_t)color << (2 * lp);
         *lw = w;
         // 線の上の空点は「重ね盤で変わった」印を付ける (pat() が盤 b の古いパターンを返さないように)。石のマスは使わない
@@ -499,6 +505,7 @@ static void setup(Board *b, int attacker, int useset) {
     if (++S.gen == 0) {
         memset(S.st, 0, sizeof S.st);
         memset(S.fs, 0, sizeof S.fs);
+        memset(S.lgen, 0, sizeof S.lgen);
         S.gen = 1;
     }
     S.b = b;
@@ -515,7 +522,6 @@ static void setup(Board *b, int attacker, int useset) {
     S.nf = 0;
     S.useset = useset;
     memcpy(S.cell, b->cell, sizeof S.cell);
-    memcpy(S.line, b->line, sizeof S.line);
 }
 
 // 根の五の点と四の点を盤 b から (盤の集計で、探す点を全部見つけたら走査をやめる)
