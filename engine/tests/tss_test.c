@@ -251,6 +251,7 @@ static int cmd_shadow(Rule rule, long nodes, int mode) {
     double total = 0;
     long tn = 0, tw = 0, tm = 0;
     int verbose = getenv("SHADOW_V") != NULL;
+    g_dfpn_zt = mode;   // 圏の表 (既定では作らない) は使い回すときだけ作る
     while (fgets(line, sizeof line, stdin)) {
         board_init(&b, 15, &rule);
         if (load_moves(&b, line) < 0) { printf("error\n"); continue; }
