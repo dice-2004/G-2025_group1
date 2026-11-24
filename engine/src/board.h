@@ -41,6 +41,7 @@ typedef struct {
     BoardUndo undo[BOARD_UNDO_MAX];
 } Board;
 
+uint64_t board_zobrist(int color, int p);           // 石 1 つ分のハッシュ (dfpn.c の「1 石違いの局面」の証明の使い回し)
 void board_global_init(void);                       // Zobrist 表など (1 回だけ)
 void board_init(Board *b, int size, const Rule *rule);  // パターン表は呼び出し側で pattern_init 済みのこと
 

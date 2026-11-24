@@ -242,6 +242,46 @@ static int cmd_dfpn(Rule rule, long nodes, int opp, int ms) {
     return 0;
 }
 
+// 1 石違いの証明の使い回し (dfpn_vct_shadow) の確かめ: 各局面 (手番側 = 受け側) で、相手がパスしたら VCT を調べた後、
+// 石の近くの空点 m を 1 つずつ打って相手の VCT を調べる。mode 1 = dfpn_vct_shadow (使い回す)、0 = dfpn_vct (使い回さない)。
+// 出力: 局面ごとに「m の数、相手の勝ち、ノードの合計、時間」と、m ごとの結果 (SHADOW_V=1 のとき)
+static int cmd_shadow(Rule rule, long nodes, int mode) {
+    static Board b;
+    char line[8192];
+    double total = 0;
+    long tn = 0, tw = 0, tm = 0;
+    int verbose = getenv("SHADOW_V") != NULL;
+    while (fgets(line, sizeof line, stdin)) {
+        board_init(&b, 15, &rule);
+        if (load_moves(&b, line) < 0) { printf("error\n"); continue; }
+        int me = board_side(&b), op = opp_color(me);
+        DfpnResult r;
+        double t0 = now_sec();
+        int pw = dfpn_vct(&b, op, nodes, 0, &r);
+        long n = r.nodes;
+        int nm = 0, nw = 0;
+        for (int q = 0; q < NCELL; q++) {
+            if (b.cell[q] != EMPTY || !b.near[q]) continue;
+            if (rule_has_forbidden(&b.rule) && me == BLACK && board_is_forbidden(&b, q)) continue;
+            board_move(&b, q);
+            int w = b.p4cnt[me][P4_FIVE] ? 0 : mode ? dfpn_vct_shadow(&b, op, q, nodes, 0, &r) : dfpn_vct(&b, op, nodes, 0, &r);
+            board_undo(&b);
+            nm++;
+            nw += w;
+            n += r.nodes;
+            if (verbose) printf("  %d,%d %s %ld%s\n", pos_x(q), pos_y(q), w ? "win" : "nowin", r.nodes, r.aborted ? " aborted" : "");
+        }
+        double dt = now_sec() - t0;
+        total += dt;
+        tn += n; tw += nw; tm += nm;
+        printf("pass=%d moves=%d oppwin=%d nodes=%ld %.1fms\n", pw, nm, nw, n, dt * 1000);
+        fflush(stdout);
+    }
+    fprintf(stderr, "time %.3f s, moves %ld, opp wins %ld, nodes %ld, zones %ld (all %ld), shadow hits %ld\n", total, tm, tw, tn,
+            dfpn_zt_stat[0], dfpn_zt_stat[1], dfpn_zt_stat[2]);
+    return 0;
+}
+
 // 二重 VCT (独立な勝ち筋の二重化) の調査: 手番側の手 t を打ち、(1) 相手がパスしたら VCT (証明 1、圏 Z1)、
 // (2) Z1 の空点を全部相手の石で埋めても VCT (証明 2) があれば、相手の 1 手の受けはどちらかの証明を崩せない (石が増えて損をしない) ので t は勝ち。
 // 入力: 手順 [TAB 調べる手 x,y]。調べる手がなければ石の近くの空点を全部。DVCHECK=<ノード> で、勝ちと出た t への受けを 1 手ずつ確かめて反例を数える
@@ -879,6 +919,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "potrank")) return cmd_potrank(rule);
     if (!strcmp(argv[1], "dvct")) return cmd_dvct(rule, argc > 3 ? atol(argv[3]) : 3000);
     if (!strcmp(argv[1], "vzcheck")) return cmd_vzcheck(rule, argc > 3 ? atol(argv[3]) : 2000, argc > 4 ? atol(argv[4]) : 200000, argc > 5 ? atoi(argv[5]) : 0);
+    if (!strcmp(argv[1], "shadow")) return cmd_shadow(rule, argc > 3 ? atol(argv[3]) : 100000, argc > 4 ? atoi(argv[4]) : 1);
     if (!strcmp(argv[1], "dfpnopp")) return cmd_dfpn(rule, argc > 3 ? atol(argv[3]) : 100000, 1, argc > 4 ? atoi(argv[4]) : 0);
     if (argc < 4) return 2;
     int mode = !strcmp(argv[3], "vct") ? TSS_VCT : TSS_VCF;

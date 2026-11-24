@@ -21,6 +21,8 @@ void board_global_init(void) {
     zobrist_pass = splitmix64(&s);
 }
 
+uint64_t board_zobrist(int color, int p) { return zobrist[color][p]; }
+
 void board_pass(Board *b) {
     b->passes ^= 1;
     b->hash ^= zobrist_pass;

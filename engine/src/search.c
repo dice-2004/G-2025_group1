@@ -373,6 +373,11 @@ static struct {
     int ts_pct;         // ルートで自分の勝ちを αβ の脅威探索 (ts.c) で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_ts;       // 選んだ手の確かめ (dfver_pct): 1 = df-pn と ts に半分ずつ、2 = ts だけ
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
+    int lts;            // 余った時間の詰み探索 (本探索が soft で止まった後から hard まで。本探索の時間は削らない)。
+                        // 1 = ルートの自分の VCT (df-pn) が打ち切りなら続きから調べる、2 = 選んだ手を打った後の相手の VCT を確かめる (verify_move)
+    int lts_margin;     // その終わりを hard の何 ms 前にするか
+    int lts_own_pct;    // 1 と 2 の両方のとき、残り時間のうち自分の VCT の続きに使う %
+    int vct_vsvcf;      // 1 = 相手に VCF (パスしたら) があってもルートで自分の VCT (df-pn・ts) を調べる。受けを兼ねた三・四で勝てる局面を拾う
 } sp = {
     .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .mcp = 0, .mcp_mul = 100, .mcp_tact = 0, .mcp_pv = 0, .fut = 0, .fut_margin = 250, .fut_depth = 99, .razor = 0, .razor_margin = 100, .razor_depth = 2, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
     .tvct = 0, .tvct_depth = 2, .tvct_min = 2, .tvct_pv = 1, .tvct_mode = 0, .tvct_plies = 6,
@@ -384,7 +389,7 @@ static struct {
     .l3x = 0, .l3x_depth = 3, .l3x_min = 1, .l3x_top = 4, .l3x_ext = 1, .l3x_w = 1 << 20,
     .qfit = 0, .qfit_depth = 3, .qkeep = 0, .qkeep_min = 0, .qpot = 0, .qpot_depth = 3, .qpot_w = 1000, .qpot_tact = 99, .probcut = 0, .pc_depth = 5, .pc_margin = 300, .pc_red = 3, .pc_moves = 3, .def_scale = 52, .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
     .vz = 0, .vz_depth = 4, .vz_nodes = 2000, .vz_keep = P4_BLOCK3, .vz_pv = 1, .vz_root = 0, .vz_root_nodes = 20000, .vz_tact = 0,
-    .smp_pick = 1, .trap = 0, .trap_k = 3, .trap_n = 8, .trap_margin = 60, .trap_min = 15, .trap_ms = 4, .smp_tt = 1, .smp_skip = 1, .dfdef_pct = 0, .dfver_pct = 0,
+    .smp_pick = 1, .trap = 0, .trap_k = 3, .trap_n = 8, .trap_margin = 60, .trap_min = 15, .trap_ms = 4, .smp_tt = 1, .smp_skip = 1, .dfdef_pct = 0, .dfver_pct = 0, .lts = 0, .vct_vsvcf = 0, .lts_margin = 3, .lts_own_pct = 50,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
     .cand_min = 0, .ext_three = 1, .vctdef_pct = 0, .unstable_pct = 100,
@@ -457,6 +462,10 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "dfdef_pct")) sp.dfdef_pct = (int)v;
     else if (!strcmp(name, "dfver_pct")) sp.dfver_pct = (int)v;
     else if (!strcmp(name, "dfver_l3")) sp.dfver_l3 = (int)v;
+    else if (!strcmp(name, "lts")) sp.lts = (int)v;
+    else if (!strcmp(name, "vct_vsvcf")) sp.vct_vsvcf = (int)v;
+    else if (!strcmp(name, "lts_margin")) sp.lts_margin = (int)v;
+    else if (!strcmp(name, "lts_own_pct")) sp.lts_own_pct = (int)v;
     else if (!strcmp(name, "rz")) sp.rz = (int)v;
     else if (!strcmp(name, "ts_pct")) sp.ts_pct = (int)v;
     else if (!strcmp(name, "tp")) sp.tp = (int)v;
@@ -599,6 +608,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "def_vcf_min")) sp.def_vcf_min = (int)v;
     else if (!strcmp(name, "def_own4_depth")) sp.def_own4_depth = (int)v;
     else if (!strcmp(name, "dfpn_vcf")) g_dfpn_vcf_nodes = v;
+    else if (!strcmp(name, "dfpn_zt")) g_dfpn_zt = (int)v;
     else if (!strcmp(name, "fvcf")) g_fvcf = (int)v;
     else if (!strcmp(name, "ts_light")) g_ts_light = (int)v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
@@ -1968,6 +1978,36 @@ static void verify_move(Ctx *c, Board *b, int op, RootMove *root, int nr, int ha
     }
 }
 
+// 余った時間の詰み探索 (lts): 本探索が soft で止まった後、hard までの時間で
+// (1) ルートで打ち切った自分の VCT の df-pn を続きから調べ、勝ちが見つかればそれを打つ
+// (2) 選んだ手を打った後に相手の VCT がないかを確かめ、負けと証明されたら次の候補へ (verify_move)
+long lts_stat[4];   // 呼んだ回数、自分の VCT の続きを調べた回数、その勝ち、確かめで手を替えた回数
+static void late_solve(Ctx *c, Board *b, int me, int op, RootMove *root, int nr, const SearchLimits *lim, SearchResult *res, int own_unknown) {
+    int end_ms = lim->hard_ms - sp.lts_margin;
+    double left = c->t0 + end_ms - now_ms();
+    if (left < 2) return;
+    lts_stat[0]++;
+    if ((sp.lts & 1) && own_unknown) {
+        int ms = (int)((sp.lts & 2) ? left * sp.lts_own_pct / 100 : left);
+        DfpnResult dr;
+        lts_stat[1]++;
+        if (ms >= 1 && dfpn_vct_resume(b, me, 1L << 40, ms, &dr) && dr.move >= 0) {
+            lts_stat[2]++;
+            if (lim->verbose) fprintf(stderr, "late vct %d,%d (%ld nodes)\n", pos_x(dr.move), pos_y(dr.move), dr.nodes);
+            res->move = dr.move;
+            res->score = SCORE_WIN - 20;
+            res->pvlen = 0;
+            res->reason = "vct-late";
+            return;
+        }
+    }
+    if (sp.lts & 2) {
+        int before = res->move;
+        verify_move(c, b, op, root, nr, end_ms, res, lim->verbose);
+        if (res->move != before) lts_stat[3]++;
+    }
+}
+
 void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     Ctx *c = &ctxs[0];
     if (!lmr_table_ok) lmr_init();
@@ -2030,7 +2070,10 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     int ndefs = vcf_defenses(b, hard * 60, defs);   // -1 = 相手に VCF なし
     // df-pn は上限時間の vct_pct % まで
     DfpnResult dr;
-    if (ndefs < 0 && sp.vct_pct > 0 && !lim->ponder &&
+    dr.aborted = 0;
+    int own_unknown = 0;   // ルートの自分の VCT を時間切れで決められなかった (余った時間で続きを調べる)
+    int solve_ok = ndefs < 0 || sp.vct_vsvcf;   // 相手に VCF があっても自分の VCT を調べるか (受けを兼ねた三・四の勝ち)
+    if (solve_ok && sp.vct_pct > 0 && !lim->ponder &&
         (sp.vct_dfpn ? (dfpn_vct(b, me, 1L << 40, (int)(hard * sp.vct_pct / 100), &dr) && (vmove = dr.move) >= 0)
                      : vct_solve(b, sp.vct_depth, hard * sp.vct_pct * 6, &vmove))) {
         res->move = vmove;
@@ -2038,8 +2081,9 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         res->reason = "vct";
         return;
     }
+    own_unknown = solve_ok && sp.vct_pct > 0 && sp.vct_dfpn && !lim->ponder && dr.aborted;
     TsResult tsr;
-    if (ndefs < 0 && sp.ts_pct > 0 && !lim->ponder && ts_win(b, me, 40, 1L << 40, (int)(hard * sp.ts_pct / 100), &tsr) && tsr.move >= 0) {
+    if (solve_ok && sp.ts_pct > 0 && !lim->ponder && ts_win(b, me, 40, 1L << 40, (int)(hard * sp.ts_pct / 100), &tsr) && tsr.move >= 0) {
         res->move = tsr.move;
         res->score = SCORE_WIN - 20;
         res->reason = "ts";
@@ -2172,6 +2216,8 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         trap_pick(c, b, root, nr, lim, res);
     if (sp.dfver_pct > 0 && lim->hard_ms > 0 && res->move >= 0 && res->score < SCORE_WIN_MIN)
         verify_move(c, b, op, root, nr, lim->hard_ms, res, lim->verbose);
+    if (sp.lts && !sp.dfver_pct && lim->hard_ms > 0 && !lim->ponder && res->move >= 0 && res->score < SCORE_WIN_MIN)
+        late_solve(c, b, me, op, root, nr, lim, res, own_unknown);
     res->ms = (int)(now_ms() - c->t0);
 }
 

@@ -38,7 +38,47 @@ static _Thread_local struct {
     int aborted;
     TzZone zone;        // 最後の gen_and の攻め側の脅威の圏 (zone_all = 絞れない)
     int zone_all;
+    uint64_t root_hash; // 最後の dfpn_vct の根の局面 (dfpn_vct_resume で続きから調べるため)
+    int or_kind;        // 直前の gen_or の勝ちの種類: 1 = 五、2 = 達四、3 = VCF (or_z、or_zr = tz_probe_att の戻り値)
+    int or_zr;
+    TzZone or_z;
+    int shadow;         // 影の石 (dfpn_vct_shadow): この点の受け側の石を除いた局面の証明を、圏の外なら使う。-1 = なし
+    uint64_t shadow_z;  // その石のハッシュ
+    long shadow_hits;
 } D;
+
+// ---- 証明の圏の表 (証明ごとの圏。1 石違いの局面に証明を使い回すため) ----
+// 証明した局面ごとに「受け側の石がこの外に 1 つ増えても証明は (ほぼ) 変わらない」点の集合を覚える (dfpn_vct_zone と同じ考え方を、
+// 証明のたびに子の圏の和として下から作る)。w が全部 1 = 絞れない
+#define ZW 7     // 20 路 × 20 = 400 点
+#ifndef ZT_BITS
+#define ZT_BITS 19
+#endif
+typedef struct {
+    uint64_t key;
+    uint64_t w[ZW];
+} ZEnt;
+static _Thread_local ZEnt *ZT;
+int g_dfpn_zt = 0;   // 0 = 圏の表を作らない (dfpn_vct_shadow は使い回しをしない)
+long dfpn_zt_stat[4];   // 圏を作った回数、うち絞れない、影の石で使い回した回数
+
+static inline int zidx(int q) { return pos_x(q) + pos_y(q) * MAX_SIZE; }
+static inline void zm_set(uint64_t *w, int q) { int i = zidx(q); w[i >> 6] |= 1ull << (i & 63); }
+static inline int zm_has(const uint64_t *w, int q) { int i = zidx(q); return (int)(w[i >> 6] >> (i & 63) & 1); }
+static inline void zm_all(uint64_t *w) { memset(w, 0xff, sizeof(uint64_t) * ZW); }
+static inline int zm_is_all(const uint64_t *w) { return w[0] == ~0ull && w[1] == ~0ull && w[ZW - 1] == ~0ull; }
+static inline void zm_or(uint64_t *w, const uint64_t *v) { for (int i = 0; i < ZW; i++) w[i] |= v[i]; }
+static const uint64_t *zt_get(uint64_t key) {
+    ZEnt *z = &ZT[key & ((1u << ZT_BITS) - 1)];
+    return z->key == key ? z->w : NULL;
+}
+static void zt_put(uint64_t key, const uint64_t *w) {
+    ZEnt *z = &ZT[key & ((1u << ZT_BITS) - 1)];
+    z->key = key;
+    memcpy(z->w, w, sizeof z->w);
+    dfpn_zt_stat[0]++;
+    if (zm_is_all(w)) dfpn_zt_stat[1]++;
+}
 
 static double now_ms(void) {
     struct timespec ts;
@@ -55,11 +95,59 @@ static inline int dlegal(int color, int q) {
     return !(D.forb && color == BLACK && board_is_forbidden(D.b, q));
 }
 
+// 影の石を除いた局面の証明 (圏の外なら、影の石があっても同じ手順で勝つ)
+static DEntry *probe_shadow(uint64_t key) {
+    uint64_t k2 = key ^ D.shadow_z;
+    DEntry *e2 = &D.tt[k2 & (DTT_SIZE - 1)];
+    if (e2->key != k2 || e2->pn != 0) return NULL;
+    const uint64_t *w = zt_get(k2);
+    if (!w || zm_has(w, D.shadow)) return NULL;
+    D.shadow_hits++;
+    return e2;
+}
+
 static DEntry *probe(uint64_t key) {
     DEntry *e = &D.tt[key & (DTT_SIZE - 1)];
-    if (e->key != key) return NULL;
-    if (e->gen != D.gen && e->pn != 0) return NULL;   // 前の呼び出しの証明 (経路によらず正しい) だけ使う
+    if (e->key != key || (e->gen != D.gen && e->pn != 0)) {   // 前の呼び出しの証明 (経路によらず正しい) だけ使う
+        return D.shadow >= 0 && ZT ? probe_shadow(key) : NULL;
+    }
+    if (e->pn != 0 && e->dn != 0 && D.shadow >= 0 && ZT) {
+        DEntry *s2 = probe_shadow(key);
+        if (s2) return s2;
+    }
     return e;
+}
+
+// 子の局面 (ckey) の証明の圏を w に足す。分からなければ 0
+static int child_zone(uint64_t ckey, uint64_t *w) {
+    const uint64_t *z = zt_get(ckey);
+    if (!z && D.shadow >= 0) {
+        z = zt_get(ckey ^ D.shadow_z);
+        if (z && zm_has(z, D.shadow)) z = NULL;
+    }
+    if (!z) return 0;
+    zm_or(w, z);
+    return 1;
+}
+
+// どの局面でも: 受け側の石が 1 つ増えて受け側の四ができる点 (証明木の受けが変わり得る)。dfpn_vct_zone と同じ
+static void zm_base(uint64_t *w) {
+    const Board *b = D.b;
+    if (!g_dfpn_zone_def) return;
+    for (int y = 0; y < b->size; y++) {
+        int q = to_pos(0, y);
+        for (int x = 0; x < b->size; x++, q++)
+            if (b->cell[q] == EMPTY && b->pat4[D.def][q] >= g_dfpn_zone_def && b->pat4[D.def][q] != P4_FLEX2_2X) zm_set(w, q);
+    }
+}
+
+static void zm_fives(uint64_t *w, int color) {
+    const Board *b = D.b;
+    for (int y = 0; y < b->size; y++) {
+        int q = to_pos(0, y);
+        for (int x = 0; x < b->size; x++, q++)
+            if (b->cell[q] == EMPTY && b->pat4[color][q] == P4_FIVE) zm_set(w, q);
+    }
 }
 
 static void store(uint64_t key, uint32_t pn, uint32_t dn, int best) {
@@ -117,7 +205,8 @@ static int gen_or(int *ch, int *nch, int *best) {
     Board *b = D.b;
     int att = D.att, def = D.def;
     *nch = 0;
-    if (b->p4cnt[att][P4_FIVE]) { *best = find_p4(att, P4_FIVE); return 1; }
+    D.or_kind = 0;
+    if (b->p4cnt[att][P4_FIVE]) { *best = find_p4(att, P4_FIVE); D.or_kind = 1; return 1; }
     int dfive = b->p4cnt[def][P4_FIVE];
     if (dfive >= 2) return -1;
     if (dfive == 1) {
@@ -128,7 +217,12 @@ static int gen_or(int *ch, int *nch, int *best) {
     }
     if (!(g_dfpn_flags & 1) && tz_gate(b, att)) {
         TzZone z;
-        if (tz_probe_att(b, att, g_dfpn_vcf_nodes, &z) && z.first >= 0) { *best = z.first; return 1; }
+        int r = tz_probe_att(b, att, g_dfpn_vcf_nodes, &z);
+        if (r && z.first >= 0) {
+            *best = z.first;
+            if (ZT) { D.or_kind = 3; D.or_zr = r; D.or_z.n = z.n; memcpy(D.or_z.cells, z.cells, sizeof(int) * z.n); D.or_z.first = z.first; }
+            return 1;
+        }
     }
     int tmp[MAX_MOVES], nt = near_cells(tmp), sc[MAX_CH], n = 0;
     int last = b->nmoves - 2 >= D.root_n ? b->moves[b->nmoves - 2] : -1;
@@ -145,7 +239,7 @@ static int gen_or(int *ch, int *nch, int *best) {
             if (!ok) continue;
         }
         if (p4 == P4_FLEX4) {
-            if (dlegal(att, q)) { *best = q; return 1; }
+            if (dlegal(att, q)) { *best = q; D.or_kind = 2; return 1; }
             continue;
         }
         int four = p4 >= P4_BLOCK4;
@@ -260,9 +354,32 @@ static void mid(int is_or, int ply, uint32_t thpn, uint32_t thdn, uint32_t *opn,
         // st は「攻め側から見て」1 = 勝ち、-1 = 負け
         uint32_t pn = st > 0 ? 0 : INF, dn = st > 0 ? INF : 0;
         store(key, pn, dn, best);
+        if (st > 0 && ZT) {
+            uint64_t w[ZW] = {0};
+            if (is_or && D.or_kind == 1) zm_set(w, best);
+            else if (is_or && D.or_kind == 2) {
+                zm_set(w, best);
+                board_move_color(b, best, D.att);
+                zm_fives(w, D.att);
+                board_undo(b);
+            } else if (is_or && D.or_kind == 3 && D.or_zr == 1) {
+                for (int i = 0; i < D.or_z.n; i++) zm_set(w, D.or_z.cells[i]);
+                zm_set(w, D.or_z.first);
+            } else if (!is_or && b->p4cnt[D.att][P4_FIVE] >= 2) zm_fives(w, D.att);
+            else zm_all(w);   // 圏を絞れない VCF・受けが全部禁じ手など
+            zm_base(w);
+            zt_put(key, w);
+        }
         *opn = pn;
         *odn = dn;
         return;
+    }
+    // 受け側の局面の脅威の圏 (証明できたときの圏に使う。子を読むと D.zone は上書きされる)
+    int acc_n = 0, acc_all = 0, acc_cells[TZ_MAX_CELLS];
+    if (!is_or && ZT) {
+        acc_all = D.zone_all;
+        acc_n = D.zone.n;
+        memcpy(acc_cells, D.zone.cells, sizeof(int) * acc_n);
     }
     int color = is_or ? D.att : D.def;
     uint32_t cpn[MAX_CH], cdn[MAX_CH];
@@ -315,23 +432,88 @@ static void mid(int is_or, int ply, uint32_t thpn, uint32_t thdn, uint32_t *opn,
             if (cpn[i] == 0) { best = ch[i]; break; }
     }
     store(key, pn, dn, best);
+    if (pn == 0 && ZT) {
+        // 証明の圏 = 局面の分 (受け側の四の点、受けの候補と脅威の圏) + 証明に使った子の圏の和
+        uint64_t w[ZW] = {0};
+        int ok = 1;
+        uint64_t hb = b->hash ^ DSALT[D.att];
+        if (is_or) {
+            zm_set(w, best);
+            ok = best >= 0 && child_zone(hb ^ board_zobrist(D.att, best) ^ ANDSALT, w);
+        } else if (acc_all) ok = 0;
+        else {
+            for (int i = 0; i < acc_n; i++) zm_set(w, acc_cells[i]);
+            for (int i = 0; i < nch && ok; i++) {
+                zm_set(w, ch[i]);
+                ok = child_zone(hb ^ board_zobrist(D.def, ch[i]), w);
+            }
+            if (ok && b->p4cnt[D.att][P4_FIVE]) zm_fives(w, D.att);
+            if (ok && g_dfpn_zone_union && b->p4cnt[D.att][P4_FLEX4] >= 2)
+                for (int y = 0; y < b->size; y++)
+                    for (int x = 0; x < b->size; x++) {
+                        int q = to_pos(x, y);
+                        if (b->cell[q] != EMPTY || b->pat4[D.att][q] != P4_FLEX4 || !dlegal(D.att, q)) continue;
+                        TzZone z;
+                        int t = q;
+                        if (tz_line_zone(b, D.att, &t, 1, &z) == 1)
+                            for (int i = 0; i < z.n; i++) zm_set(w, z.cells[i]);
+                        else ok = 0;
+                    }
+        }
+        if (!ok) zm_all(w);
+        zm_base(w);
+        zt_put(key, w);
+    }
     *opn = pn;
     *odn = dn;
 }
 
 // 対局の前に (探索するスレッドで) 表を確保して全ページに触れておく
 void dfpn_warm(void) {
+    if (g_dfpn_zt && !ZT) {
+        ZT = calloc(1u << ZT_BITS, sizeof(ZEnt));
+        if (ZT) memset(ZT, 0, sizeof(ZEnt) * (1u << ZT_BITS));
+    }
     if (D.tt) return;
     D.tt = calloc(DTT_SIZE, sizeof(DEntry));
     if (D.tt) memset(D.tt, 0, sizeof(DEntry) * DTT_SIZE);
+    D.shadow = -1;
 }
 
+static int dfpn_run(Board *b, int attacker, long max_nodes, int max_ms, DfpnResult *res, int resume);
+
 int dfpn_vct(Board *b, int attacker, long max_nodes, int max_ms, DfpnResult *res) {
+    return dfpn_run(b, attacker, max_nodes, max_ms, res, 0);
+}
+
+// 直前の dfpn_vct と同じ盤・同じ攻め側なら、置換表の世代を変えずに続きから調べる (証明数・反証数の途中の値を使い回す)。
+// 違えば dfpn_vct と同じ
+int dfpn_vct_resume(Board *b, int attacker, long max_nodes, int max_ms, DfpnResult *res) {
+    int same = D.tt && D.b == b && D.att == attacker && D.root_hash == b->hash && D.root_n == b->nmoves;
+    return dfpn_run(b, attacker, max_nodes, max_ms, res, same);
+}
+
+// shadow の点に受け側の石がある盤で、その石を除いた局面の証明 (圏の外のもの) を使い回して調べる
+int dfpn_vct_shadow(Board *b, int attacker, int shadow, long max_nodes, int max_ms, DfpnResult *res) {
+    D.shadow = shadow;
+    D.shadow_z = board_zobrist(opp_color(attacker), shadow);
+    D.shadow_hits = 0;
+    int w = dfpn_run(b, attacker, max_nodes, max_ms, res, 0);
+    dfpn_zt_stat[2] += D.shadow_hits;
+    D.shadow = -1;
+    return w;
+}
+
+static int dfpn_run(Board *b, int attacker, long max_nodes, int max_ms, DfpnResult *res, int resume) {
     if (!D.tt) {
         D.tt = calloc(DTT_SIZE, sizeof(DEntry));
         if (!D.tt) return 0;
+        D.shadow = -1;
     }
-    D.gen++;
+    if (g_dfpn_zt && !ZT) ZT = calloc(1u << ZT_BITS, sizeof(ZEnt));
+    if (!g_dfpn_zt) ZT = NULL;   // (表は捨てない: 調べ直し用に 0 にしたときは使わないだけ)
+    if (!resume) D.gen++;
+    D.root_hash = b->hash;
     D.b = b;
     D.att = attacker;
     D.def = opp_color(attacker);
