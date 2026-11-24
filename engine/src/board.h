@@ -21,11 +21,15 @@ typedef struct {
     int8_t bbox[4];
 } BoardSums;
 
+#define BOARD_NLINES 64
+extern uint8_t g_line_id[4][NCELL];    // [dir][pos] pos を通る方向 dir の直線の番号
+extern uint8_t g_line_pos[4][NCELL];   // [dir][pos] その直線の中での位置 (+1 方向に 1 ずつ増える)
+
 typedef struct {
     int size;
     Rule rule;
     uint8_t cell[NCELL];            // EMPTY/BLACK/WHITE/WALL
-    uint32_t key[NCELL][4];         // 各マス・各方向の周囲 10 マスの並び
+    uint64_t line[4][BOARD_NLINES]; // 方向ごとの直線の石の並び (1 マス 2 ビット、盤外は WALL)。キーはここから切り出す (board_key)
     uint8_t pat[3][NCELL][4];       // [color][pos][dir] その色がそこに打ったときの線パターン
     uint8_t pat4[3][NCELL];         // [color][pos] 4 方向合成
     uint16_t pidx[3][NCELL];        // [color][pos] pattern_index(pat[color][pos]) (差分更新で保持。表引きの添字の計算を省く)
@@ -47,6 +51,15 @@ typedef struct {
 
 void board_global_init(void);                       // Zobrist 表など (1 回だけ)
 void board_init(Board *b, int size, const Rule *rule);  // パターン表は呼び出し側で pattern_init 済みのこと
+
+// 空点 pos の方向 d の周囲 10 マスの並び (中心を除く。pattern.h のキー)
+static inline uint32_t line_key(uint64_t w, int lpos) {
+    uint64_t t = w >> (2 * (lpos - 5));
+    return (uint32_t)(t & 0x3FF) | (uint32_t)(t >> 2 & 0xFFC00);
+}
+static inline uint32_t board_key(const Board *b, int pos, int d) {
+    return line_key(b->line[d][g_line_id[d][pos]], g_line_pos[d][pos]);
+}
 
 static inline int board_side(const Board *b) { return ((b->nmoves + b->passes) & 1) ? WHITE : BLACK; }
 static inline int board_on(const Board *b, int x, int y) { return x >= 0 && y >= 0 && x < b->size && y < b->size; }

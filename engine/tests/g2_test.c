@@ -483,7 +483,7 @@ static void print_subcnt(const Board *b, int me, int op) {
         for (int d = 0; d < 4; d++)
             for (int c = 0; c < 2; c++) {
                 int col = c ? op : me, p = b->pat[col][q][d];
-                if (p >= P_B1 && p <= P_F3) cnt[c][p - P_B1][g_pattern_sub[col][b->key[q][d]]]++;
+                if (p >= P_B1 && p <= P_F3) cnt[c][p - P_B1][g_pattern_sub[col][board_key(b, q, d)]]++;
             }
     }
     for (int c = 0; c < 2; c++)

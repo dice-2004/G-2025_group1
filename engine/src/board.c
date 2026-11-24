@@ -40,7 +40,7 @@ static void refresh_cell(Board *b, int q) {
     if (empty) account_cell(b, q, -1);
     for (int c = BLACK; c <= WHITE; c++) {
         uint8_t *pt = b->pat[c][q];
-        for (int d = 0; d < 4; d++) pt[d] = g_pattern_table[c][b->key[q][d]];
+        for (int d = 0; d < 4; d++) pt[d] = g_pattern_table[c][board_key(b, q, d)];
         b->pidx[c][q] = (uint16_t)pattern_index(pt);
         b->pat4[c][q] = g_p4_table[b->pidx[c][q]];
     }
@@ -49,9 +49,8 @@ static void refresh_cell(Board *b, int q) {
 
 // q の方向 d の線パターンだけを作り直す (石の出入りで変わるのはその方向だけ)。変わらなければ何もしない
 // 石のあるマスのパターンは使わないので更新しない (石を取るときに refresh_cell で作り直す)
-static inline void refresh_dir(Board *b, int q, int d) {
-    if (b->cell[q] != EMPTY) return;
-    uint8_t np2 = g_pattern2[b->key[q][d]];
+static inline void refresh_dir(Board *b, int q, int d, uint32_t key) {
+    uint8_t np2 = g_pattern2[key];
     uint8_t *pb = b->pat[BLACK][q], *pw = b->pat[WHITE][q];
     uint8_t nb = np2 & 15, nw = np2 >> 4;
     if (nb == pb[d] && nw == pw[d]) return;
@@ -96,6 +95,21 @@ static inline void add_near(Board *b, int p, int delta) {
     }
 }
 
+uint8_t g_line_id[4][NCELL], g_line_pos[4][NCELL];
+
+static void line_tables_init(void) {
+    static int done;
+    if (done) return;
+    for (int p = 0; p < NCELL; p++) {
+        int gx = p % STRIDE, gy = p / STRIDE;
+        g_line_id[0][p] = (uint8_t)gy, g_line_pos[0][p] = (uint8_t)gx;
+        g_line_id[1][p] = (uint8_t)gx, g_line_pos[1][p] = (uint8_t)gy;
+        g_line_id[2][p] = (uint8_t)(gx - gy + STRIDE - 1), g_line_pos[2][p] = (uint8_t)gy;
+        g_line_id[3][p] = (uint8_t)(gx + gy), g_line_pos[3][p] = (uint8_t)gy;
+    }
+    done = 1;
+}
+
 static uint32_t compute_key(const Board *b, int q, int d) {
     uint32_t key = 0;
     for (int j = -5; j <= 5; j++) {
@@ -116,10 +130,12 @@ void board_init(Board *b, int size, const Rule *rule) {
     for (int p = 0; p < NCELL; p++) b->cell[p] = WALL;
     for (int y = 0; y < size; y++)
         for (int x = 0; x < size; x++) b->cell[to_pos(x, y)] = EMPTY;
+    line_tables_init();
+    for (int p = 0; p < NCELL; p++)
+        for (int d = 0; d < 4; d++) b->line[d][g_line_id[d][p]] |= (uint64_t)b->cell[p] << (2 * g_line_pos[d][p]);
     for (int y = 0; y < size; y++) {
         for (int x = 0; x < size; x++) {
             int q = to_pos(x, y);
-            for (int d = 0; d < 4; d++) b->key[q][d] = compute_key(b, q, d);
             b->cell[q] = WALL;      // 集計に入れずにパターンだけ作る
             refresh_cell(b, q);
             b->cell[q] = EMPTY;
@@ -147,18 +163,16 @@ static void put_stone(Board *b, int p, int color) {
     b->cell[p] = (uint8_t)color;
     b->hash ^= zobrist[color][p];
     for (int d = 0; d < 4; d++) {
-        int off = DIR_OFFSET[d];
+        int off = DIR_OFFSET[d], lp = g_line_pos[d][p];
+        uint64_t *lw = &b->line[d][g_line_id[d][p]];
+        uint64_t w = *lw | (uint64_t)color << (2 * lp);
+        *lw = w;
+        // 石のあるマス・盤外のパターンは使わないので更新しない (石を取るときに戻す)
         for (int k = 1; k <= 5; k++) {
-            int q = p + k * off;   // q から見て p は -k
-            if (b->cell[q] != WALL) {   // (盤外は番兵で埋まっているので、壁の先も壁)
-                b->key[q][d] |= (uint32_t)color << (2 * key_slot(-k));
-                refresh_dir(b, q, d);
-            }
-            q = p - k * off;       // q から見て p は +k
-            if (b->cell[q] != WALL) {
-                b->key[q][d] |= (uint32_t)color << (2 * key_slot(k));
-                refresh_dir(b, q, d);
-            }
+            int q = p + k * off;
+            if (b->cell[q] == EMPTY) refresh_dir(b, q, d, line_key(w, lp + k));
+            q = p - k * off;
+            if (b->cell[q] == EMPTY) refresh_dir(b, q, d, line_key(w, lp - k));
         }
     }
 }
@@ -176,7 +190,7 @@ void board_probe_sums(const Board *b, int p, int color, BoardSums *out) {
             if (!k) continue;
             int q = p + k * off;   // q から見て p は -k
             if (b->cell[q] != EMPTY) continue;
-            uint8_t np2 = g_pattern2[b->key[q][d] | (uint32_t)color << (2 * key_slot(-k))];
+            uint8_t np2 = g_pattern2[board_key(b, q, d) | (uint32_t)color << (2 * key_slot(-k))];
             const uint8_t *pb = b->pat[BLACK][q], *pw = b->pat[WHITE][q];
             int nb = np2 & 15, nw = np2 >> 4;
             if (nb != pb[d]) {
@@ -202,15 +216,7 @@ static void remove_stone(Board *b, int p) {
     b->cell[p] = EMPTY;
     add_near(b, p, -1);
     b->hash ^= zobrist[color][p];
-    for (int d = 0; d < 4; d++) {
-        int off = DIR_OFFSET[d];
-        for (int k = 1; k <= 5; k++) {
-            int q = p + k * off;
-            if (b->cell[q] != WALL) b->key[q][d] &= ~(3u << (2 * key_slot(-k)));
-            q = p - k * off;
-            if (b->cell[q] != WALL) b->key[q][d] &= ~(3u << (2 * key_slot(k)));
-        }
-    }
+    for (int d = 0; d < 4; d++) b->line[d][g_line_id[d][p]] &= ~(3ull << (2 * g_line_pos[d][p]));
     int mark = b->undo_mark[b->nmoves];
     for (int i = b->nundo - 1; i >= mark; i--) {
         const BoardUndo *u = &b->undo[i];
@@ -314,10 +320,10 @@ int board_verify(const Board *b) {
         for (int x = 0; x < b->size; x++) {
             int q = to_pos(x, y);
             for (int d = 0; d < 4; d++) {
-                if (b->key[q][d] != compute_key(b, q, d)) return 0;
+                if (board_key(b, q, d) != compute_key(b, q, d)) return 0;
                 if (b->cell[q] != EMPTY) continue;   // 石のあるマスのパターンは更新しない
                 for (int c = BLACK; c <= WHITE; c++)
-                    if (b->pat[c][q][d] != pattern_of(c, b->key[q][d])) return 0;
+                    if (b->pat[c][q][d] != pattern_of(c, board_key(b, q, d))) return 0;
             }
             if (b->cell[q] != EMPTY) continue;
             for (int c = BLACK; c <= WHITE; c++)

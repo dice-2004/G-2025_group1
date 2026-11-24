@@ -114,7 +114,7 @@ static inline __attribute__((always_inline)) void touch(int q, const int vcf) {
     if (S.st[q] == S.gen) return;
     const Board *b = S.b;
     S.st[q] = S.gen;
-    memcpy(S.key[q], b->key[q], sizeof S.key[q]);
+    for (int d = 0; d < 4; d++) S.key[q][d] = board_key(b, q, d);
     if (!vcf) return;
     memcpy(S.pa[q], b->pat[S.att][q], 4);
     S.p4a[q] = b->pat4[S.att][q];
@@ -658,7 +658,7 @@ int fvcf_extra_gate(Board *b, int att, int extra, uint64_t *hash) {
             if (k == 0 || b->cell[q] != EMPTY) continue;
             uint8_t pt[4];
             memcpy(pt, b->pat[att][q], 4);
-            pt[d] = g_pattern_table[att][b->key[q][d] | (uint32_t)att << (2 * key_slot(-k))];
+            pt[d] = g_pattern_table[att][board_key(b, q, d) | (uint32_t)att << (2 * key_slot(-k))];
             int o = b->pat4[att][q], nw = g_p4_table[pattern_index(pt)];
             if (o == nw) continue;
             c4 += (nw == P4_BLOCK4) - (o == P4_BLOCK4);
