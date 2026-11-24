@@ -22,6 +22,13 @@ typedef struct {
 // max_nodes / max_ms (0 = 時間の制限なし) のどちらかに達したら打ち切る
 int dfpn_vct(Board *b, int attacker, long max_nodes, int max_ms, DfpnResult *res);
 void dfpn_warm(void);
+// 直前の dfpn_vct と同じ盤・同じ攻め側なら続きから調べる (打ち切った探索の再開)。違えば dfpn_vct と同じ
+int dfpn_vct_resume(Board *b, int attacker, long max_nodes, int max_ms, DfpnResult *res);
+// shadow の点に受け側の石がある盤で調べる。その石を除いた局面で前に見つけた証明 (圏が shadow を含まないもの) を使い回す。
+// 「相手がパスしたら VCT」を調べた後に、自分の候補の手 shadow を打って相手の VCT を確かめるのが安くなる
+int dfpn_vct_shadow(Board *b, int attacker, int shadow, long max_nodes, int max_ms, DfpnResult *res);
+extern int g_dfpn_zt;
+extern long dfpn_zt_stat[4];
 
 // 直前の dfpn_vct の証明 (同じ盤・同じ attacker で勝ち) の圏: 受け側の石がこの外に増えても勝ちは (ほぼ) 変わらない。
 // cells に空点も石の点も入れる。戻り値は個数、-1 = 絞れない (証明木が大きすぎる・圏を絞れない VCF がある)

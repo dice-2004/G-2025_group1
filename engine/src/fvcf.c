@@ -77,7 +77,8 @@ typedef struct {
     int root_af, root_nd, root_df[2];
     uint8_t cell[NCELL];
     uint32_t st[NCELL];             // st[q] == gen なら key/pa/p4a は重ね盤の値
-    uint32_t key[NCELL][4];
+    uint64_t line[4][BOARD_NLINES]; // 重ね盤の直線の並び (盤 b の写しに石を足したもの)。キーはここから切り出す
+    uint32_t lgen[4][BOARD_NLINES]; // lgen == gen の直線だけ line が有効 (石を足した直線だけを写す)
     uint8_t pa[NCELL][4];           // 攻め側の線パターン
     uint8_t p4a[NCELL];
     int useset;                     // 0 = 四の点の集合を保たない (手順の再生)
@@ -114,16 +115,20 @@ static inline __attribute__((always_inline)) void touch(int q, const int vcf) {
     if (S.st[q] == S.gen) return;
     const Board *b = S.b;
     S.st[q] = S.gen;
-    memcpy(S.key[q], b->key[q], sizeof S.key[q]);
     if (!vcf) return;
     memcpy(S.pa[q], b->pat[S.att][q], 4);
     S.p4a[q] = b->pat4[S.att][q];
 }
 
+static inline uint32_t skey(int q, int d) {
+    int l = g_line_id[d][q];
+    return line_key(S.lgen[d][l] == S.gen ? S.line[d][l] : S.b->line[d][l], g_line_pos[d][q]);
+}
+
 // color が空点 q に打ったときの方向 d の線パターン
 static inline int pat(int color, int q, int d) {
     if (S.st[q] != S.gen) return S.b->pat[color][q][d];
-    return color == S.att && S.useset ? S.pa[q][d] : g_pattern_table[color][S.key[q][d]];
+    return color == S.att && S.useset ? S.pa[q][d] : g_pattern_table[color][skey(q, d)];
 }
 
 static inline int p4att(int q) { return S.st[q] == S.gen ? S.p4a[q] : S.b->pat4[S.att][q]; }
@@ -150,8 +155,8 @@ static inline void set_update(int q) {
 }
 
 // 空点 q の方向 d の攻め側のパターンを key から作り直す
-static inline void refresh(int q, int d) {
-    uint8_t np = g_pattern_table[S.att][S.key[q][d]];
+static inline void refresh(int q, int d, uint32_t key) {
+    uint8_t np = g_pattern_table[S.att][key];
     if (np == S.pa[q][d]) return;
     int c = S.nchg++;
     S.chg[c].q = (int16_t)q;
@@ -171,19 +176,23 @@ static inline __attribute__((always_inline)) void put_m(int p, int color, const 
     if (vcf) S.chg_mark[S.nov] = S.nchg;
     S.ov[S.nov++] = p;
     for (int d = 0; d < 4; d++) {
-        int off = DIR_OFFSET[d];
+        int off = DIR_OFFSET[d], lp = g_line_pos[d][p];
+        int l = g_line_id[d][p];
+        uint64_t *lw = &S.line[d][l];
+        if (S.lgen[d][l] != S.gen) S.lgen[d][l] = S.gen, *lw = S.b->line[d][l];
+        uint64_t w = *lw | (uint64_t)color << (2 * lp);
+        *lw = w;
+        // 線の上の空点は「重ね盤で変わった」印を付ける (pat() が盤 b の古いパターンを返さないように)。石のマスは使わない
         for (int k = 1; k <= 5; k++) {
             int q = p + k * off;
-            if (S.cell[q] != WALL) {
+            if (S.cell[q] == EMPTY) {
                 touch(q, vcf);
-                S.key[q][d] |= (uint32_t)color << (2 * key_slot(-k));
-                if (vcf && S.cell[q] == EMPTY) refresh(q, d);
+                if (vcf) refresh(q, d, line_key(w, lp + k));
             }
             q = p - k * off;
-            if (S.cell[q] != WALL) {
+            if (S.cell[q] == EMPTY) {
                 touch(q, vcf);
-                S.key[q][d] |= (uint32_t)color << (2 * key_slot(k));
-                if (vcf && S.cell[q] == EMPTY) refresh(q, d);
+                if (vcf) refresh(q, d, line_key(w, lp - k));
             }
         }
     }
@@ -194,15 +203,7 @@ static inline __attribute__((always_inline)) void undo_m(const int vcf) {
     int color = S.cell[p];
     S.cell[p] = EMPTY;
     S.hash ^= Z[color][p];
-    for (int d = 0; d < 4; d++) {
-        int off = DIR_OFFSET[d];
-        for (int k = 1; k <= 5; k++) {
-            int q = p + k * off;
-            if (S.cell[q] != WALL) S.key[q][d] &= ~(3u << (2 * key_slot(-k)));
-            q = p - k * off;
-            if (S.cell[q] != WALL) S.key[q][d] &= ~(3u << (2 * key_slot(k)));
-        }
-    }
+    for (int d = 0; d < 4; d++) S.line[d][g_line_id[d][p]] &= ~(3ull << (2 * g_line_pos[d][p]));
     if (!vcf) return;
     // 置いたときに変えたパターンを逆順に書き戻す。石のあったマスのパターンは置いている間変えていないのでそのまま
     for (int m = S.chg_mark[S.nov]; S.nchg > m;) {
@@ -504,6 +505,7 @@ static void setup(Board *b, int attacker, int useset) {
     if (++S.gen == 0) {
         memset(S.st, 0, sizeof S.st);
         memset(S.fs, 0, sizeof S.fs);
+        memset(S.lgen, 0, sizeof S.lgen);
         S.gen = 1;
     }
     S.b = b;
@@ -658,7 +660,7 @@ int fvcf_extra_gate(Board *b, int att, int extra, uint64_t *hash) {
             if (k == 0 || b->cell[q] != EMPTY) continue;
             uint8_t pt[4];
             memcpy(pt, b->pat[att][q], 4);
-            pt[d] = g_pattern_table[att][b->key[q][d] | (uint32_t)att << (2 * key_slot(-k))];
+            pt[d] = g_pattern_table[att][board_key(b, q, d) | (uint32_t)att << (2 * key_slot(-k))];
             int o = b->pat4[att][q], nw = g_p4_table[pattern_index(pt)];
             if (o == nw) continue;
             c4 += (nw == P4_BLOCK4) - (o == P4_BLOCK4);

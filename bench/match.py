@@ -271,6 +271,8 @@ def main():
     ap.add_argument("--out", help="出力ディレクトリ")
     ap.add_argument("--protocol-log", action="store_true", help="プロトコルの送受信を棋譜に残す")
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--resume", action="store_true",
+                    help="--out の games.jsonl に終わった対局があれば、その id を飛ばして続きから (コンテナの再起動で止まったとき)")
     args = ap.parse_args()
 
     reg = load_registry()
@@ -293,10 +295,25 @@ def main():
 
     results = []
     lock = threading.Lock()
-    gf = open(os.path.join(out, "games.jsonl"), "w")
+    gpath = os.path.join(out, "games.jsonl")
+    done = set()
+    if args.resume and os.path.exists(gpath):
+        for l in open(gpath):
+            try:
+                r = json.loads(l)
+            except ValueError:
+                continue   # 書きかけの最後の行
+            if r["id"] not in done:
+                done.add(r["id"])
+                results.append(r)
+        with open(gpath, "w") as f:
+            for r in results:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        print("resume: %d games done" % len(done), flush=True)
+    gf = open(gpath, "a" if args.resume else "w")
     t0 = time.time()
     with cf.ThreadPoolExecutor(max_workers=args.concurrency) as ex:
-        futs = [ex.submit(play_game, b, w, op, args, i) for i, (b, w, op) in enumerate(jobs)]
+        futs = [ex.submit(play_game, b, w, op, args, i) for i, (b, w, op) in enumerate(jobs) if i not in done]
         for fut in cf.as_completed(futs):
             r = fut.result()
             with lock:

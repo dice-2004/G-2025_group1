@@ -140,6 +140,8 @@ typedef struct {
     long nodes;
     long max_nodes;
     int stop;
+    int dgated;     // 劣勢 (1) / 優勢 (2) の局面で本探索を早めに止め、残りを詰みの確かめ・自分の VCT の続きに回した (dgate)
+    int own_unknown;   // ルートの自分の VCT (df-pn) を打ち切りで決められなかった
     int id;             // 0 = 主スレッド (時間を見る・手を決める)
     double t0;
     int hard_ms;
@@ -212,12 +214,17 @@ static inline int legal(Board *b, int color, int q) {
     return !restricted(b, color) || !board_is_forbidden(b, q);
 }
 
-// 盤上の空点で color のパターンが p4 の点を 1 つ探す (なければ -1)
+// 盤上の空点で color のパターンが p4 の点を 1 つ探す (なければ -1)。形のある点は石から 5 マス以内にしかない
+// (五・四の点は 2 マス以内に石があるので、候補の空点 board_cand_row だけを見ればよい。p4 は P4_BLOCK4 以上のこと)
 static int find_cell(const Board *b, int color, int p4) {
-    for (int y = 0; y < b->size; y++) {
-        int q = to_pos(0, y);
-        for (int x = 0; x < b->size; x++, q++)
-            if (b->cell[q] == EMPTY && b->pat4[color][q] == p4) return q;
+    int x0, x1, y0, y1;
+    board_area(b, 2, &x0, &x1, &y0, &y1);
+    for (int y = y0; y <= y1; y++) {
+        int q0 = to_pos(0, y);
+        for (uint32_t row = board_cand_row(b, y); row; row &= row - 1) {
+            int q = q0 + __builtin_ctz(row);
+            if (b->pat4[color][q] == p4) return q;
+        }
     }
     return -1;
 }
@@ -225,18 +232,53 @@ static int find_cell(const Board *b, int color, int p4) {
 // color が (禁じ手でなく) 打てる達四・四四の点があるか。あればその点、なければ -1
 static int legal_flex4(Board *b, int color) {
     if (!b->p4cnt[color][P4_FLEX4]) return -1;
-    for (int y = 0; y < b->size; y++) {
-        int q = to_pos(0, y);
-        for (int x = 0; x < b->size; x++, q++)
-            if (b->cell[q] == EMPTY && b->pat4[color][q] == P4_FLEX4 && legal(b, color, q)) return q;
+    int x0, x1, y0, y1;
+    board_area(b, 2, &x0, &x1, &y0, &y1);
+    for (int y = y0; y <= y1; y++) {
+        int q0 = to_pos(0, y);
+        for (uint32_t row = board_cand_row(b, y); row; row &= row - 1) {
+            int q = q0 + __builtin_ctz(row);
+            if (b->pat4[color][q] == P4_FLEX4 && legal(b, color, q)) return q;
+        }
     }
     return -1;
 }
 
-int evaluate(const Board *b) {
-    int me = board_side(b), op = opp_color(me);
+// 着手 m を通る 4 本の直線の上 (±5) で color のパターンが p4 の空点を 1 つ探す (なければ -1)。legal = 1 なら禁じ手を除く
+static int find_on_lines(Board *b, int m, int color, int p4, int legal_only) {
+    for (int d = 0; d < 4; d++) {
+        int off = DIR_OFFSET[d];
+        for (int k = -5; k <= 5; k++) {
+            int q = m + k * off;
+            if (k && b->cell[q] == EMPTY && b->pat4[color][q] == p4 && (!legal_only || legal(b, color, q))) return q;
+        }
+    }
+    return -1;
+}
+
+// 唯一の p4 の点 (数が 1 のとき) を、直前の 2 手を通る線から先に探す (多くは直前の手が作る。見つからなければ全体を探す)
+static int find_unique_cell(Board *b, int color, int p4) {
+    for (int i = 1; i <= 2 && i <= b->nmoves; i++) {
+        int q = find_on_lines(b, b->moves[b->nmoves - i], color, p4, 0);
+        if (q >= 0) return q;
+    }
+    return find_cell(b, color, p4);
+}
+
+// legal_flex4 の有無だけ (禁じ手のない側は数だけで決まる。禁じ手のある側は直前の 2 手を通る線から先に探す)
+static inline int has_flex4(Board *b, int color) {
+    if (!b->p4cnt[color][P4_FLEX4]) return 0;
+    if (!restricted(b, color)) return 1;
+    for (int i = 1; i <= 2 && i <= b->nmoves; i++)
+        if (find_on_lines(b, b->moves[b->nmoves - i], color, P4_FLEX4, 1) >= 0) return 1;
+    return legal_flex4(b, color) >= 0;
+}
+
+// 手番 me、空点の集計 vsum / p4cnt の局面の評価 (bmv_me / bmv_op は盤 b を見る)
+static inline int evaluate_sums(const Board *b, int me, const int32_t *vsum, const int16_t (*p4cnt)[P4_COUNT]) {
+    int op = opp_color(me);
     const EvalParams *w = &g_eval_params;
-    long va = b->vsum[me], vo = (long)b->vsum[op] * w->opp_scale / 64, v = va - vo;
+    long va = vsum[me], vo = (long)vsum[op] * w->opp_scale / 64, v = va - vo;
     if (w->tens) {
         long f = (va + vo - w->tens_s0) * w->tens / w->tens_s0;   // /64
         if (f < -32) f = -32;
@@ -269,13 +311,13 @@ int evaluate(const Board *b) {
         v += (long)mm * w->bmv_me / 64 - (long)mo * w->bmv_op / 64;
     }
     const int (*th)[THREAT_COUNT] = w->threat[me == BLACK ? 0 : 1];
-    int bm = eval_threat_bits(b->p4cnt[me]), bo = eval_threat_bits(b->p4cnt[op]);
+    int bm = eval_threat_bits(p4cnt[me]), bo = eval_threat_bits(p4cnt[op]);
     for (int k = 0; k < THREAT_COUNT; k++) {
         if (bm >> k & 1) v += th[0][k];
         if (bo >> k & 1) v += th[1][k];
     }
     if (w->cnt_f3_me | w->cnt_f3_op | w->cnt_b4_me | w->cnt_b4_op) {
-        const int16_t *cm = b->p4cnt[me], *co = b->p4cnt[op];
+        const int16_t *cm = p4cnt[me], *co = p4cnt[op];
         int f3m = cm[P4_FLEX3] + cm[P4_FLEX3_PLUS] + cm[P4_FLEX3_2X], f3o = co[P4_FLEX3] + co[P4_FLEX3_PLUS] + co[P4_FLEX3_2X];
         int b4m = cm[P4_BLOCK4] + cm[P4_BLOCK4_PLUS] + cm[P4_BLOCK4_FLEX3], b4o = co[P4_BLOCK4] + co[P4_BLOCK4_PLUS] + co[P4_BLOCK4_FLEX3];
         if (f3m > 8) f3m = 8;
@@ -285,12 +327,16 @@ int evaluate(const Board *b) {
         v += f3m * w->cnt_f3_me - f3o * w->cnt_f3_op + b4m * w->cnt_b4_me - b4o * w->cnt_b4_op;
     }
     if (w->race) {   // 脅威の速さの比べ (eval.h、既定は無効)
-        int m = eval_threat_level(b->p4cnt[me]), o = eval_threat_level(b->p4cnt[op]);
+        int m = eval_threat_level(p4cnt[me]), o = eval_threat_level(p4cnt[op]);
         v += o >= m ? w->race_own[m] : -w->race_opp[o];
     }
     if (v > 20000) v = 20000;
     if (v < -20000) v = -20000;
     return (int)v;
+}
+
+int evaluate(const Board *b) {
+    return evaluate_sums(b, board_side(b), b->vsum, (const int16_t (*)[P4_COUNT])b->p4cnt);
 }
 
 // 調整できる探索の値 (INFO p_<名前> <値> で変えられる。search_set_param)
@@ -307,6 +353,7 @@ static struct {
     int ext_three;      // 1 = 活三 (相手に受けを強いる手) は深さを減らさない (延長)。延長はルートの深さの 2 倍まで。2 = 半手だけ延長 (2 手で 1 手分)
     int vctdef_pct;     // 相手の VCT への受け (vct_defenses) に使う時間 (上限時間の %)。0 = 使わない
     int unstable_pct;   // 直前の反復で最善手が変わったら、次の反復を始めない目安を何 % に延ばすか
+    int no_leaf_probe;  // 1 = 葉の手前で盤を変えずに評価する近道を使わない (確かめ用)
     int leaf_vcf;       // 末端 (深さ 0) で手番側に四があれば VCF を調べるノード数の上限。0 = 調べない
     int leaf_vcf_depth; // 末端の VCF の深さ (攻めの手数)
     int tz;             // 1 = 脅威圏探索: 深さ tz_depth 以上の節点で、パスしたら相手に VCF があれば手を圏 (tz.c) に絞る
@@ -374,6 +421,14 @@ static struct {
     int ts_pct;         // ルートで自分の勝ちを αβ の脅威探索 (ts.c) で調べる時間 (上限時間の %)。0 = 使わない
     int dfver_ts;       // 選んだ手の確かめ (dfver_pct): 1 = df-pn と ts に半分ずつ、2 = ts だけ
     int dfver_l3;       // 1 = その確かめを λ3 (l3.c: 静かな脅威を含む勝ち) で行う (重い。長い持ち時間向け)
+    int lts;            // 余った時間の詰み探索 (本探索が soft で止まった後から hard まで。本探索の時間は削らない)。
+                        // 1 = ルートの自分の VCT (df-pn) が打ち切りなら続きから調べる、2 = 選んだ手を打った後の相手の VCT を確かめる (verify_move)
+    int lts_margin;     // その終わりを hard の何 ms 前にするか
+    int lts_own_pct;    // 1 と 2 の両方のとき、残り時間のうち自分の VCT の続きに使う %
+    int dgate_own;      // 優勢 (点が dgate_own 以上) でルートの自分の VCT が打ち切りなら、同じく早めに止めて df-pn を続きから調べる (0 = 使わない)
+    int dgate_depth;    // その打ち切りは深さ dgate_depth 以上の反復を終えてから
+    int dgate, dgate_soft;   // 劣勢の局面の詰みの確かめ: 点が -dgate 以下なら上限の dgate_soft % で本探索を止め、残りで verify_move (0 = 使わない)
+    int vct_vsvcf;      // 1 = 相手に VCF (パスしたら) があってもルートで自分の VCT (df-pn・ts) を調べる。受けを兼ねた三・四で勝てる局面を拾う
 } sp = {
     .ts_tree = 0, .ts_tree_tt = 1, .ts_tree_side = 0, .ts_tree_fail = 1, .ts_tree_pv = 0, .ts_tree_root = 0, .mcp = 0, .mcp_mul = 100, .mcp_tact = 0, .mcp_pv = 0, .fut = 0, .fut_margin = 250, .fut_depth = 99, .razor = 0, .razor_margin = 100, .razor_depth = 2, .ts_tree_depth = 3, .ts_tree_plies = 6, .ts_tree_eval = 300, .ts_pct = 20, .tpv = 0, .tpv_lazy = 1, .tp = 0, .tp_min_depth = 1, .tpo = 0, .tpo_depth = 3, .tpo_own = 1 << 20, .tpo_opp = 1 << 19, .dfver_ts = 0, .rz = 0, .rz_depth = 3, .rz_after = 2, .rz_len = 6, .rz_rad = 1, .rz_lines = 1, .rz_red = 2,
     .tvct = 0, .tvct_depth = 2, .tvct_min = 2, .tvct_pv = 1, .tvct_mode = 0, .tvct_plies = 6,
@@ -385,7 +440,7 @@ static struct {
     .l3x = 0, .l3x_depth = 3, .l3x_min = 1, .l3x_top = 4, .l3x_ext = 1, .l3x_w = 1 << 20,
     .qfit = 0, .qfit_depth = 3, .qkeep = 0, .qkeep_min = 0, .qpot = 0, .qpot_depth = 3, .qpot_w = 1000, .qpot_tact = 99, .probcut = 0, .pc_depth = 5, .pc_margin = 300, .pc_red = 3, .pc_moves = 3, .def_scale = 52, .lmr_tact = 0, .ttfirst = 1, .tfut = 0, .tfut_margin = 600,
     .vz = 0, .vz_depth = 4, .vz_nodes = 2000, .vz_keep = P4_BLOCK3, .vz_pv = 1, .vz_root = 0, .vz_root_nodes = 20000, .vz_tact = 0,
-    .smp_pick = 1, .trap = 0, .trap_k = 3, .trap_n = 8, .trap_margin = 60, .trap_min = 15, .trap_ms = 4, .asym_own = 100, .asym_opp = 100, .asym_lmr = 0, .smp_tt = 1, .smp_skip = 1, .dfdef_pct = 0, .dfver_pct = 0,
+    .smp_pick = 1, .trap = 0, .trap_k = 3, .trap_n = 8, .trap_margin = 60, .trap_min = 15, .trap_ms = 4, .asym_own = 100, .asym_opp = 100, .asym_lmr = 0, .smp_tt = 1, .smp_skip = 1, .dfdef_pct = 0, .dfver_pct = 0, .lts = 0, .vct_vsvcf = 0, .dgate = 0, .dgate_soft = 30, .dgate_own = 0, .dgate_depth = 5, .lts_margin = 3, .lts_own_pct = 50,
     .qdepth = 0, .q_min_p4 = P4_BLOCK4_PLUS, .soft_pct = 60, .vct_pct = 20,
     .vct_depth = 10, .def_restrict = 1, .lmp_mul = 100, .lmr_moves = 3,
     .cand_min = 0, .ext_three = 1, .vctdef_pct = 0, .unstable_pct = 100,
@@ -461,6 +516,14 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "dfdef_pct")) sp.dfdef_pct = (int)v;
     else if (!strcmp(name, "dfver_pct")) sp.dfver_pct = (int)v;
     else if (!strcmp(name, "dfver_l3")) sp.dfver_l3 = (int)v;
+    else if (!strcmp(name, "lts")) sp.lts = (int)v;
+    else if (!strcmp(name, "vct_vsvcf")) sp.vct_vsvcf = (int)v;
+    else if (!strcmp(name, "dgate")) sp.dgate = (int)v;
+    else if (!strcmp(name, "dgate_soft")) sp.dgate_soft = (int)v;
+    else if (!strcmp(name, "dgate_own")) sp.dgate_own = (int)v;
+    else if (!strcmp(name, "dgate_depth")) sp.dgate_depth = (int)v;
+    else if (!strcmp(name, "lts_margin")) sp.lts_margin = (int)v;
+    else if (!strcmp(name, "lts_own_pct")) sp.lts_own_pct = (int)v;
     else if (!strcmp(name, "rz")) sp.rz = (int)v;
     else if (!strcmp(name, "ts_pct")) sp.ts_pct = (int)v;
     else if (!strcmp(name, "tp")) sp.tp = (int)v;
@@ -506,6 +569,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "rz_lines")) sp.rz_lines = (int)v;
     else if (!strcmp(name, "rz_red")) sp.rz_red = (int)v;
     else if (!strcmp(name, "leaf_vcf")) sp.leaf_vcf = (int)v;
+    else if (!strcmp(name, "no_leaf_probe")) sp.no_leaf_probe = (int)v;
     else if (!strcmp(name, "leaf_vcf_depth")) sp.leaf_vcf_depth = (int)v;
     else if (!strcmp(name, "tz")) sp.tz = (int)v;
     else if (!strcmp(name, "vz")) sp.vz = (int)v;
@@ -603,6 +667,7 @@ int search_set_param(const char *name, long v) {
     else if (!strcmp(name, "def_vcf_min")) sp.def_vcf_min = (int)v;
     else if (!strcmp(name, "def_own4_depth")) sp.def_own4_depth = (int)v;
     else if (!strcmp(name, "dfpn_vcf")) g_dfpn_vcf_nodes = v;
+    else if (!strcmp(name, "dfpn_zt")) g_dfpn_zt = (int)v;
     else if (!strcmp(name, "fvcf")) g_fvcf = (int)v;
     else if (!strcmp(name, "ts_light")) g_ts_light = (int)v;
     else if (!strcmp(name, "opp_scale")) g_eval_params.opp_scale = (int)v;
@@ -692,6 +757,10 @@ static inline int cheb_dist(int a, int b) {
 
 // 相手の四・活三への防ぎ手か: 相手がそこに打つとその線で四以上になる点
 static inline int blocks_threat(const Board *b, int op, int q) {
+    // 4 方向のどれかが四 (止め四・達四・一直線の四四) なら合成は BLOCK4 以上、どれも四でなければ BLOCK4 未満 (五を除く)
+    int p4 = b->pat4[op][q];
+    if (p4 < P4_BLOCK4) return 0;
+    if (p4 != P4_FIVE) return 1;
     const uint8_t *pt = b->pat[op][q];
     for (int d = 0; d < 4; d++)
         if (pt[d] >= P_B4 && pt[d] <= P_D4) return 1;
@@ -712,16 +781,8 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
     }
     const int *k = ply < MAX_PLY ? c->killer[ply] : NULL;
     // 石のある範囲 ±2 だけを見る
-    int x0 = b->size, x1 = -1, y0 = b->size, y1 = -1;
-    for (int i = 0; i < b->nmoves; i++) {
-        int x = pos_x(b->moves[i]), y = pos_y(b->moves[i]);
-        if (x < x0) x0 = x;
-        if (x > x1) x1 = x;
-        if (y < y0) y0 = y;
-        if (y > y1) y1 = y;
-    }
-    x0 = x0 > 2 ? x0 - 2 : 0, y0 = y0 > 2 ? y0 - 2 : 0;
-    x1 = x1 + 2 < b->size ? x1 + 2 : b->size - 1, y1 = y1 + 2 < b->size ? y1 + 2 : b->size - 1;
+    int x0, x1, y0, y1;
+    board_area(b, 2, &x0, &x1, &y0, &y1);
     const int16_t *vme = g_cell_value[me], *vop = g_cell_value[op];
     const int *hist = c->history[me];
     const int *ok2 = ply + 1 < MAX_PLY ? c->killer[ply + 1] : NULL;
@@ -750,19 +811,25 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
             }
         }
     }
+    // 繰り返しの中で変わらない値 (out への書き込みと別名になり得る大域変数を毎回読み直さないよう、先に読む)
+    const int q_min_p4 = sp.q_min_p4, drop4 = c->drop4, tact_own = sp.tact_own, tact_def = sp.tact_def;
+    const int keep4 = sp.keep4 && !op_threat && !tzon && !c->keep_off && mode != 1 && (sp.keep4 >= 2 || ply == 0), keep4_def = sp.keep4_def;
+    const int policy1 = sp.policy == 1, ohist = sp.ohist, okill = ok2 ? sp.okill : 0, phw = sp.ph;
+    const unsigned tzgen = c->tzgen;
+    const int k0 = k ? k[0] : -2, k1 = k ? k[1] : -2;
     for (int y = y0; y <= y1; y++) {
-        int q = to_pos(x0, y);
-        for (int x = x0; x <= x1; x++, q++) {
-            if (b->cell[q] != EMPTY || !b->near[q]) continue;
+        const int q0 = to_pos(0, y);
+        for (uint32_t row = board_cand_row(b, y); row; row &= row - 1) {   // 空いていて 2 マス以内に石のあるマス (左から順)
+            const int q = q0 + __builtin_ctz(row);
             int a = b->pat4[me][q], d = b->pat4[op][q];
-            if (mode == 1 && (a < sp.q_min_p4 || a > P4_BLOCK4_FLEX3)) continue;
+            if (mode == 1 && (a < q_min_p4 || a > P4_BLOCK4_FLEX3)) continue;
             if (op_threat && a < P4_BLOCK4 && !blocks_threat(b, op, q)) continue;
-            if (defl && a < P4_BLOCK4 && c->tzmark[q] != c->tzgen) continue;
-            if (c->drop4 && (a == P4_BLOCK4 || a == P4_BLOCK4_PLUS) && !blocks_threat(b, op, q)) continue;
-            if (sp.keep4 && a == P4_BLOCK4 && d < sp.keep4_def && !op_threat && !tzon && !c->keep_off && mode != 1 && (sp.keep4 >= 2 || ply == 0)) continue;
-            if (tzon && a < P4_BLOCK4 && c->tzmark[q] != c->tzgen) continue;
+            if (defl && a < P4_BLOCK4 && c->tzmark[q] != tzgen) continue;
+            if (drop4 && (a == P4_BLOCK4 || a == P4_BLOCK4_PLUS) && !blocks_threat(b, op, q)) continue;
+            if (keep4 && a == P4_BLOCK4 && d < keep4_def) continue;
+            if (tzon && a < P4_BLOCK4 && c->tzmark[q] != tzgen) continue;
             int s = vme[board_pidx(b, me, q)] + vop[board_pidx(b, op, q)] * DEF_SCALE / 64;
-            if (polon && (sp.policy == 1 || a < P4_BLOCK4)) {
+            if (polon && (policy1 || a < P4_BLOCK4)) {
                 // 表の点 (1 logit = 256) を今の点の尺度 (100 ≒ 1 logit) に直す
                 int pv = s * g_policy_base_scale / 100 + pol_tab[me][0][board_pidx(b, me, q)] +
                          pol_tab[me][1][board_pidx(b, op, q)] + g_policy_dist_last[cheb_dist(q, lastm)] +
@@ -771,14 +838,14 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
             }
             out[n].value = s;
             s = s * 16 + hist[q] / 64;
-            if (sp.ohist) s += c->history[op][q] / 64 * sp.ohist / 64;
-            if (sp.okill && ok2 && (q == ok2[0] || q == ok2[1])) s += sp.okill;
-            if (phon) s += (ph[0][ph_class[board_pidx(b, me, q)]] + ph[1][ph_class[board_pidx(b, op, q)]]) * sp.ph / 64;
+            if (ohist) s += c->history[op][q] / 64 * ohist / 64;
+            if (okill && (q == ok2[0] || q == ok2[1])) s += okill;
+            if (phon) s += (ph[0][ph_class[board_pidx(b, me, q)]] + ph[1][ph_class[board_pidx(b, op, q)]]) * phw / 64;
             if (q == ttmove) s += 1 << 28;
-            else if (k && (q == k[0] || q == k[1])) s += 1 << 12;
+            else if (q == k0 || q == k1) s += 1 << 12;
             out[n].pos = q;
             out[n].score = s;
-            out[n].tactical = a >= sp.tact_own || d >= sp.tact_def;
+            out[n].tactical = a >= tact_own || d >= tact_def;
             n++;
         }
     }
@@ -809,9 +876,9 @@ static int gen_ok(Ctx *c, int q, int me, int op, int op_threat, int mode) {
 
 // i 番目以降で最も点の高い手を i 番目に持ってくる (枝刈りで早く打ち切ることが多いので全部は並べない)
 static inline void pick_move(Move *m, int i, int n) {
-    int bi = i;
+    int bi = i, bs = m[i].score;
     for (int j = i + 1; j < n; j++)
-        if (m[j].score > m[bi].score) bi = j;
+        if (m[j].score > bs) bs = m[j].score, bi = j;
     if (bi != i) { Move t = m[i]; m[i] = m[bi]; m[bi] = t; }
 }
 
@@ -1009,6 +1076,19 @@ static inline int leaf_eval(const Board *b) {
     return v + ch_tab[me == BLACK ? 0 : 1][ch_key(b, me, opp_color(me))] * sp.ch / (64 * 16);
 }
 
+// 子が葉のときの pvs(c, alpha, beta, 0, ply, ..) の代わり (ev = 子の局面の評価)。ノード数・時間の確認・窓の詰みの距離の扱いは pvs と同じ
+static inline int leaf_call(Ctx *c, int alpha, int beta, int ply, int ev) {
+    c->pvlen[ply] = 0;
+    c->nodes++;
+    check_time(c);
+    if (c->stop) return 0;
+    if (ply > c->seldepth) c->seldepth = ply;
+    if (alpha < -(SCORE_WIN - ply)) alpha = -(SCORE_WIN - ply);
+    if (beta > SCORE_WIN - ply) beta = SCORE_WIN - ply;
+    if (alpha >= beta) return alpha;
+    return ev;
+}
+
 static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     Board *b = c->b;
     // tpv == 2: 葉ではなく残り深さ 1 の局面で 1 回だけ VCF の旗 (tp.c) を調べ、補正の分だけ窓をずらして読み、値に足す
@@ -1053,8 +1133,9 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
     // 相手の五の点: 止めるしかない (深さは減らさない)
     int opfive = b->p4cnt[op][P4_FIVE];
     if (opfive) {
-        int q = find_cell(b, op, P4_FIVE);
-        if (opfive >= 2 || !legal(b, me, q)) return -(SCORE_WIN - ply - 1);
+        if (opfive >= 2) return -(SCORE_WIN - ply - 1);
+        int q = find_unique_cell(b, op, P4_FIVE);
+        if (!legal(b, me, q)) return -(SCORE_WIN - ply - 1);
         board_move(b, q);
         if (ply + 1 < MAX_PLY) c->xhalf[ply + 1] = c->xhalf[ply];
         int v = -pvs(c, -beta, -alpha, depth, ply + 1, is_pv);
@@ -1067,9 +1148,9 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
         return v;
     }
     // 自分の達四: 勝ち
-    if (legal_flex4(b, me) >= 0) return SCORE_WIN - ply - 2;
+    if (has_flex4(b, me)) return SCORE_WIN - ply - 2;
 
-    int op_threat = legal_flex4(b, op) >= 0;
+    int op_threat = has_flex4(b, op);
     // 静止探索: 深さが尽きたら、相手の活三への防ぎ (脅威がある時) か自分の四だけを読む
     int qmode = depth <= 0, stand = -SCORE_INF;
     if (qmode) {
@@ -1303,7 +1384,10 @@ static int pvs(Ctx *c, int alpha, int beta, int depth, int ply, int is_pv) {
                evaluate(b) + sp.tfut_margin <= alpha;
 
     int bd_fail = 0;
-    int pmax = 0, pmax_n = -1;   // lmr_pol: 候補手の点の最大 (段階的な生成で n が増えたら取り直す)
+    int pmax = 0, pmax_n = -1;
+    // 子が葉になる手を盤を変えずに評価してよいか (子の pvs が葉で評価以外のことをする設定では使わない)
+    int leaf_ok = !sp.no_leaf_probe && !rzon && !sp.tp && !sp.leaf_vcf && mv_stat_depth < 0 && sp.qdepth == 0 && sp.tpv != 1 && !sp.ch &&
+                  !(g_eval_params.bmv_me | g_eval_params.bmv_op);   // lmr_pol: 候補手の点の最大 (段階的な生成で n が増えたら取り直す)
 
 moves_loop:
     for (int i = i0; i < n; i++) {
@@ -1384,10 +1468,9 @@ moves_loop:
             } else if (m == 1) board_undo(b);
         }
         int a4 = b->pat4[me][q], prep = list[i].tactical == 2;
-        board_move(b, q);
         int v, nd = depth - 1;
         // 活三を作る手 (相手は受けるしかない) の延長
-        long mv_nb = c->nodes; int mv_d = b->pat4[op][q];
+        long mv_nb = c->nodes; int mv_d = b->pat4[op][q];   // (石を置いた後も q の形は置く前のまま)
         int ext_ok = 2 * (ply + depth) < sp.ext_limit * c->root_depth;
         int carry = ply < MAX_PLY - 1 ? c->xhalf[ply] : 0;   // ext_three == 2: 半手分の延長の繰り越し
         if (sp.ext_three == 1 && !qmode && a4 >= P4_FLEX3 && a4 <= P4_FLEX3_2X && ext_ok) nd = depth;
@@ -1407,6 +1490,23 @@ moves_loop:
         if (prep && sp.l3x_ext && ext_ok) nd = depth, l3x_stat[3]++;
         if (sing_ext && q == ttmove && ext_ok && nd < depth) nd = depth;
         if (tzon && sp.tz_ext && ext_ok) nd = depth;
+        if (nd <= 0 && leaf_ok && a4 < P4_BLOCK4) {   // (四を作る手は子が受けるしかないので葉にならない)
+            // 子が葉 (評価を返すだけ) になる手は、盤を変えずに打った後の集計だけを求めて評価する (子の pvs と同じ値・ノード数)。
+            // 子に五・五の点・達四がある (葉にならない) ときは普通に読む
+            BoardSums ls;
+            board_probe_sums(b, q, me, &ls);
+            if (!ls.p4cnt[op][P4_FIVE] && !ls.p4cnt[me][P4_FIVE] && !ls.p4cnt[op][P4_FLEX4] &&
+                b->nmoves + 1 < b->size * b->size && ply + 1 < MAX_PLY - 2) {
+                int ev = evaluate_sums(b, op, ls.vsum, (const int16_t (*)[P4_COUNT])ls.p4cnt);
+                if (searched == 0) v = -leaf_call(c, -beta, -alpha, ply + 1, ev);
+                else {
+                    v = -leaf_call(c, -alpha - 1, -alpha, ply + 1, ev);
+                    if (v > alpha && v < beta) v = -leaf_call(c, -beta, -alpha, ply + 1, ev);
+                }
+                goto child_done;
+            }
+        }
+        board_move(b, q);
         if (searched == 0) {
             v = -pvs(c, -beta, -alpha, nd, ply + 1, is_pv);
         } else {
@@ -1459,6 +1559,7 @@ moves_loop:
             while (k-- > 0) board_undo(b);
         }
         board_undo(b);
+    child_done:
         if (c->stop) return 0;
         if (!qmode && depth == mv_stat_depth) mv_stat[op_threat != 0][a4][mv_d] += c->nodes - mv_nb, mv_cnt[op_threat != 0][a4][mv_d]++;
         searched++;
@@ -1577,6 +1678,8 @@ static void ctx_reset(Ctx *c, Board *b, int id, double t0) {
     c->nodes = 0;
     c->max_nodes = 0;
     c->stop = 0;
+    c->dgated = 0;
+    c->own_unknown = 0;
     c->t0 = t0;
     c->hard_ms = 1 << 30;
     c->seldepth = 0;
@@ -1678,6 +1781,11 @@ static void iterate(Ctx *c, RootMove *root, int nr, const SearchLimits *lim, Sea
             // 詰みが見えた: 少し深く確かめたら終わる
             if (depth >= 2 + (SCORE_WIN - (best > 0 ? best : -best))) break;
         }
+        // 劣勢 (点が -dgate 以下) なら、上限の dgate_soft % を過ぎたら次の反復を始めず、残りを選んだ手の確かめに使う
+        c->dgated = sp.dgate && c->id == 0 && lim->hard_ms > 0 && best <= -sp.dgate && best > -SCORE_WIN_MIN;
+        if (sp.dgate_own && c->id == 0 && lim->hard_ms > 0 && c->own_unknown && best >= sp.dgate_own && best < SCORE_WIN_MIN) c->dgated = 2;
+        if (depth < sp.dgate_depth) c->dgated = 0;
+        if (c->dgated && now_ms() - c->t0 >= (double)lim->hard_ms * sp.dgate_soft / 100) break;
         if (lim->soft_ms > 0 && now_ms() - c->t0 >= (double)lim->soft_ms * (unstable ? sp.unstable_pct : 100) / 100) break;
     }
 }
@@ -1708,7 +1816,7 @@ static int bf_expand(Ctx *c, int ni, int t, const RootMove *cand, int ncand) {
         if (b->p4cnt[me][P4_FIVE] || b->nmoves >= b->size * b->size) { bf_nodes[ni].first = -2; return 1; }
         Move list[MAX_MOVES];
         TTData e;
-        int op_threat = legal_flex4(b, op) >= 0;
+        int op_threat = has_flex4(b, op);
         int opfive = b->p4cnt[op][P4_FIVE];
         if (opfive) {
             int q = find_cell(b, op, P4_FIVE);
@@ -1862,7 +1970,7 @@ static void dfpn_defenses(Ctx *c, Board *b, int op, RootMove *root, int *nr, lon
 // 残りの時間 (soft で止まった後から hard まで) だけを使う
 static int trap_density(Ctx *c, Board *b, int me, int op, double t_end) {
     Move list[MAX_MOVES];
-    int op_threat = legal_flex4(b, me) >= 0;
+    int op_threat = has_flex4(b, me);
     int n = gen_moves(c, list, op, me, op_threat, -1, 1, 0, 0);
     sort_moves(list, n);
     int wsum = 0, wwin = 0, k = 0;
@@ -1877,7 +1985,7 @@ static int trap_density(Ctx *c, Board *b, int me, int op, double t_end) {
         TssResult tr;
         DfpnResult dr;
         int win = 0;
-        if (!b->p4cnt[op][P4_FIVE] && !(legal_flex4(b, op) >= 0)) {
+        if (!b->p4cnt[op][P4_FIVE] && !has_flex4(b, op)) {
             win = fvcf_solve(b, me, 40, 20000, &tr);
             int ms = (int)(left < sp.trap_ms ? left : sp.trap_ms);
             if (!win && ms >= 1 && !b->p4cnt[op][P4_BLOCK4] && !b->p4cnt[op][P4_BLOCK4_PLUS] && !b->p4cnt[op][P4_BLOCK4_FLEX3])
@@ -1975,6 +2083,37 @@ static void verify_move(Ctx *c, Board *b, int op, RootMove *root, int nr, int ha
     }
 }
 
+// 余った時間の詰み探索 (lts): 本探索が soft で止まった後、hard までの時間で
+// (1) ルートで打ち切った自分の VCT の df-pn を続きから調べ、勝ちが見つかればそれを打つ
+// (2) 選んだ手を打った後に相手の VCT がないかを確かめ、負けと証明されたら次の候補へ (verify_move)
+long lts_stat[4];
+long dgate_stat[4];   // 劣勢の確かめをした回数、手を替えた回数、優勢で自分の VCT の続きを調べた回数、その勝ち   // 呼んだ回数、自分の VCT の続きを調べた回数、その勝ち、確かめで手を替えた回数
+static void late_solve(Ctx *c, Board *b, int me, int op, RootMove *root, int nr, const SearchLimits *lim, SearchResult *res, int own_unknown) {
+    int end_ms = lim->hard_ms - sp.lts_margin;
+    double left = c->t0 + end_ms - now_ms();
+    if (left < 2) return;
+    lts_stat[0]++;
+    if ((sp.lts & 1) && own_unknown) {
+        int ms = (int)((sp.lts & 2) ? left * sp.lts_own_pct / 100 : left);
+        DfpnResult dr;
+        lts_stat[1]++;
+        if (ms >= 1 && dfpn_vct_resume(b, me, 1L << 40, ms, &dr) && dr.move >= 0) {
+            lts_stat[2]++;
+            if (lim->verbose) fprintf(stderr, "late vct %d,%d (%ld nodes)\n", pos_x(dr.move), pos_y(dr.move), dr.nodes);
+            res->move = dr.move;
+            res->score = SCORE_WIN - 20;
+            res->pvlen = 0;
+            res->reason = "vct-late";
+            return;
+        }
+    }
+    if (sp.lts & 2) {
+        int before = res->move;
+        verify_move(c, b, op, root, nr, end_ms, res, lim->verbose);
+        if (res->move != before) lts_stat[3]++;
+    }
+}
+
 void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     Ctx *c = &ctxs[0];
     if (!lmr_table_ok) lmr_init();
@@ -2037,7 +2176,10 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     int ndefs = vcf_defenses(b, hard * 60, defs);   // -1 = 相手に VCF なし
     // df-pn は上限時間の vct_pct % まで
     DfpnResult dr;
-    if (ndefs < 0 && sp.vct_pct > 0 && !lim->ponder &&
+    dr.aborted = 0;
+    int own_unknown = 0;   // ルートの自分の VCT を時間切れで決められなかった (余った時間で続きを調べる)
+    int solve_ok = ndefs < 0 || sp.vct_vsvcf;   // 相手に VCF があっても自分の VCT を調べるか (受けを兼ねた三・四の勝ち)
+    if (solve_ok && sp.vct_pct > 0 && !lim->ponder &&
         (sp.vct_dfpn ? (dfpn_vct(b, me, 1L << 40, (int)(hard * sp.vct_pct / 100), &dr) && (vmove = dr.move) >= 0)
                      : vct_solve(b, sp.vct_depth, hard * sp.vct_pct * 6, &vmove))) {
         res->move = vmove;
@@ -2045,8 +2187,10 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         res->reason = "vct";
         return;
     }
+    own_unknown = solve_ok && sp.vct_pct > 0 && sp.vct_dfpn && !lim->ponder && dr.aborted;
+    c->own_unknown = own_unknown;
     TsResult tsr;
-    if (ndefs < 0 && sp.ts_pct > 0 && !lim->ponder && ts_win(b, me, 40, 1L << 40, (int)(hard * sp.ts_pct / 100), &tsr) && tsr.move >= 0) {
+    if (solve_ok && sp.ts_pct > 0 && !lim->ponder && ts_win(b, me, 40, 1L << 40, (int)(hard * sp.ts_pct / 100), &tsr) && tsr.move >= 0) {
         res->move = tsr.move;
         res->score = SCORE_WIN - 20;
         res->reason = "ts";
@@ -2060,7 +2204,7 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
     if (lim->verbose && ndefs >= 0) fprintf(stderr, "opponent has VCF: %d defenses\n", ndefs);
 
     // ルートの候補
-    int op_threat = legal_flex4(b, op) >= 0;
+    int op_threat = has_flex4(b, op);
     Move list[MAX_MOVES];
     TTData e;
     c->keep_off = ndefs > 0;
@@ -2179,6 +2323,27 @@ void search_root(Board *b, const SearchLimits *lim, SearchResult *res) {
         trap_pick(c, b, root, nr, lim, res);
     if (sp.dfver_pct > 0 && lim->hard_ms > 0 && res->move >= 0 && res->score < SCORE_WIN_MIN)
         verify_move(c, b, op, root, nr, lim->hard_ms, res, lim->verbose);
+    if (sp.lts && !sp.dfver_pct && lim->hard_ms > 0 && !lim->ponder && res->move >= 0 && res->score < SCORE_WIN_MIN)
+        late_solve(c, b, me, op, root, nr, lim, res, own_unknown);
+    else if (c->dgated == 2 && !lim->ponder && res->move >= 0) {
+        // 優勢: 自分の VCT の df-pn を残りの時間で続きから調べる
+        DfpnResult dr2;
+        int ms = (int)(c->t0 + lim->hard_ms - sp.lts_margin - now_ms());
+        dgate_stat[2]++;
+        if (ms >= 2 && dfpn_vct_resume(b, me, 1L << 40, ms, &dr2) && dr2.move >= 0) {
+            dgate_stat[3]++;
+            if (lim->verbose) fprintf(stderr, "late vct %d,%d (%ld nodes)\n", pos_x(dr2.move), pos_y(dr2.move), dr2.nodes);
+            res->move = dr2.move;
+            res->score = SCORE_WIN - 20;
+            res->pvlen = 0;
+            res->reason = "vct-late";
+        }
+    } else if (c->dgated == 1 && !sp.dfver_pct && !lim->ponder && res->move >= 0) {
+        dgate_stat[0]++;
+        int before = res->move;
+        verify_move(c, b, op, root, nr, lim->hard_ms - sp.lts_margin, res, lim->verbose);
+        if (res->move != before) dgate_stat[1]++;
+    }
     res->ms = (int)(now_ms() - c->t0);
 }
 
