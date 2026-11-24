@@ -153,6 +153,14 @@ static void put_stone(Board *b, int p, int color) {
     memcpy(sv->bbox, b->bbox, sizeof sv->bbox);
     {
         int x = pos_x(p), y = pos_y(p);
+        uint32_t cols = ((0x1Fu << x) >> 2) & ((1u << b->size) - 1);
+        for (int r = 0; r < 5; r++) {
+            int yy = y - 2 + r;
+            if (yy < 0 || yy >= b->size) continue;
+            sv->nearmask[r] = b->nearmask[yy];
+            b->nearmask[yy] |= cols;
+        }
+        b->stonemask[y] |= 1u << x;
         if (x < b->bbox[0]) b->bbox[0] = (int8_t)x;
         if (x > b->bbox[1]) b->bbox[1] = (int8_t)x;
         if (y < b->bbox[2]) b->bbox[2] = (int8_t)y;
@@ -233,6 +241,12 @@ static void remove_stone(Board *b, int p) {
     memcpy(b->vsum, sv->vsum, sizeof sv->vsum);
     memcpy(b->p4cnt, sv->p4cnt, sizeof sv->p4cnt);
     memcpy(b->bbox, sv->bbox, sizeof b->bbox);
+    int x = pos_x(p), y = pos_y(p);
+    for (int r = 0; r < 5; r++) {
+        int yy = y - 2 + r;
+        if (yy >= 0 && yy < b->size) b->nearmask[yy] = sv->nearmask[r];
+    }
+    b->stonemask[y] &= ~(1u << x);
 }
 
 void board_move(Board *b, int pos) {
@@ -344,6 +358,15 @@ int board_verify(const Board *b) {
             if (y > bb[3]) bb[3] = (int8_t)y;
         }
     if (memcmp(bb, b->bbox, sizeof bb)) return 0;
+    for (int y = 0; y < b->size; y++) {
+        uint32_t nm = 0, st = 0;
+        for (int x = 0; x < b->size; x++) {
+            int q = to_pos(x, y);
+            if (b->near[q]) nm |= 1u << x;
+            if (b->cell[q] == BLACK || b->cell[q] == WHITE) st |= 1u << x;
+        }
+        if (nm != b->nearmask[y] || st != b->stonemask[y]) return 0;
+    }
     uint64_t h = 0;
     for (int p = 0; p < NCELL; p++)
         if (b->cell[p] == BLACK || b->cell[p] == WHITE) h ^= zobrist[b->cell[p]][p];

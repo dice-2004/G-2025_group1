@@ -19,6 +19,7 @@ typedef struct {
     int32_t vsum[3];
     int16_t p4cnt[3][P4_COUNT];
     int8_t bbox[4];
+    uint32_t nearmask[5];   // 置く前の nearmask の y-2..y+2 行
 } BoardSums;
 
 #define BOARD_NLINES 64
@@ -38,6 +39,8 @@ typedef struct {
     int32_t vsum[3];                // [color] 空点の g_cell_value の和
     int16_t p4cnt[3][P4_COUNT];     // [color][Pattern4] その形になる空点の数
     uint8_t near[NCELL];            // 周囲 5x5 にある石の数 (候補手の範囲)
+    uint32_t nearmask[MAX_SIZE];    // [y] near[] > 0 のマスのビット (x)
+    uint32_t stonemask[MAX_SIZE];   // [y] 石のあるマスのビット (x)
     int8_t bbox[4];                 // 石のある範囲 x0, x1, y0, y1 (石がなければ x0 = size, x1 = -1)
     int moves[MAX_MOVES];           // 着手履歴
     int nmoves;
@@ -88,6 +91,9 @@ int board_last_move_wins(const Board *b);
 int board_verify(const Board *b);
 
 void board_print(const Board *b, FILE *fp);
+
+// y 行の候補の空点 (周囲 5x5 に石があり、空いているマス) のビット
+static inline uint32_t board_cand_row(const Board *b, int y) { return b->nearmask[y] & ~b->stonemask[y]; }
 
 // 石のある範囲を m マス広げて盤内に切った範囲 (石がなければ空の範囲)
 static inline void board_area(const Board *b, int m, int *x0, int *x1, int *y0, int *y1) {

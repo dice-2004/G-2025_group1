@@ -213,13 +213,16 @@ static inline int legal(Board *b, int color, int q) {
 }
 
 // 盤上の空点で color のパターンが p4 の点を 1 つ探す (なければ -1)。形のある点は石から 5 マス以内にしかない
+// (五・四の点は 2 マス以内に石があるので、候補の空点 board_cand_row だけを見ればよい。p4 は P4_BLOCK4 以上のこと)
 static int find_cell(const Board *b, int color, int p4) {
     int x0, x1, y0, y1;
-    board_area(b, 5, &x0, &x1, &y0, &y1);
+    board_area(b, 2, &x0, &x1, &y0, &y1);
     for (int y = y0; y <= y1; y++) {
-        int q = to_pos(x0, y);
-        for (int x = x0; x <= x1; x++, q++)
-            if (b->cell[q] == EMPTY && b->pat4[color][q] == p4) return q;
+        int q0 = to_pos(0, y);
+        for (uint32_t row = board_cand_row(b, y); row; row &= row - 1) {
+            int q = q0 + __builtin_ctz(row);
+            if (b->pat4[color][q] == p4) return q;
+        }
     }
     return -1;
 }
@@ -228,11 +231,13 @@ static int find_cell(const Board *b, int color, int p4) {
 static int legal_flex4(Board *b, int color) {
     if (!b->p4cnt[color][P4_FLEX4]) return -1;
     int x0, x1, y0, y1;
-    board_area(b, 5, &x0, &x1, &y0, &y1);
+    board_area(b, 2, &x0, &x1, &y0, &y1);
     for (int y = y0; y <= y1; y++) {
-        int q = to_pos(x0, y);
-        for (int x = x0; x <= x1; x++, q++)
-            if (b->cell[q] == EMPTY && b->pat4[color][q] == P4_FLEX4 && legal(b, color, q)) return q;
+        int q0 = to_pos(0, y);
+        for (uint32_t row = board_cand_row(b, y); row; row &= row - 1) {
+            int q = q0 + __builtin_ctz(row);
+            if (b->pat4[color][q] == P4_FLEX4 && legal(b, color, q)) return q;
+        }
     }
     return -1;
 }
@@ -790,9 +795,9 @@ static int gen_moves(Ctx *c, Move *out, int me, int op, int op_threat, int ttmov
     const unsigned tzgen = c->tzgen;
     const int k0 = k ? k[0] : -2, k1 = k ? k[1] : -2;
     for (int y = y0; y <= y1; y++) {
-        int q = to_pos(x0, y);
-        for (int x = x0; x <= x1; x++, q++) {
-            if (b->cell[q] != EMPTY || !b->near[q]) continue;
+        const int q0 = to_pos(0, y);
+        for (uint32_t row = board_cand_row(b, y); row; row &= row - 1) {   // 空いていて 2 マス以内に石のあるマス (左から順)
+            const int q = q0 + __builtin_ctz(row);
             int a = b->pat4[me][q], d = b->pat4[op][q];
             if (mode == 1 && (a < q_min_p4 || a > P4_BLOCK4_FLEX3)) continue;
             if (op_threat && a < P4_BLOCK4 && !blocks_threat(b, op, q)) continue;
