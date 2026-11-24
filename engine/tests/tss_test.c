@@ -726,7 +726,7 @@ static int cmd_potential(Rule rule, long nodes, int lo) {
                             if (k == 0 || b.cell[r] != EMPTY) continue;
                             uint8_t pt[4];
                             memcpy(pt, b.pat[c][r], 4);
-                            pt[d] = g_pattern_table[c][b.key[r][d] | (uint32_t)c << (2 * key_slot(-k))];
+                            pt[d] = g_pattern_table[c][board_key(&b, r, d) | (uint32_t)c << (2 * key_slot(-k))];
                             int nw = g_p4_table[pattern_index(pt)];
                             if ((nw == P4_FLEX4 || nw == P4_BLOCK4_FLEX3) && nw != b.pat4[c][r]) hit = 1;
                         }
